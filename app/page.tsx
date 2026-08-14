@@ -1,69 +1,101 @@
 import Image from "next/image";
+import Link from "next/link";
+import { FiLogIn, FiShoppingBag } from "react-icons/fi";
 
-export default function Home() {
+export default function HomePage() {
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert h-5 w-[100px]"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the{" "}
-            <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
-              page.tsx
-            </code>{" "}
-            file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
+    <main className="min-h-screen bg-gradient-to-b from-rose-50 via-white to-white">
+      <section className="mx-auto flex min-h-screen max-w-7xl items-center px-6 py-10">
+        <div className="grid w-full items-center gap-12 lg:grid-cols-2">
+          {/* ================= Banner ================= */}
+          <div className="relative order-1 flex justify-center lg:order-2">
             <Image
-              className="dark:invert h-[14px] w-4"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
+              src="/images/banner-marketplace1.png"
+              alt="Marketplace Banner"
+              width={650}
+              height={650}
+              priority
+              className="h-auto w-full max-w-sm md:max-w-md lg:max-w-xl"
             />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+
+            {/* Promo Card */}
+            {/* <div className="absolute left-3 top-3 rounded-xl bg-white px-4 py-3 shadow-xl">
+              <p className="text-xs text-gray-500 md:text-sm">
+                Promo Hari Ini
+              </p>
+
+              <p className="text-lg font-bold text-rose-600 md:text-2xl">
+                Diskon Hingga 70%
+              </p>
+            </div> */}
+
+            {/* Product Card */}
+            <div className="absolute bottom-3 right-3 rounded-xl bg-white px-4 py-3 shadow-xl">
+              <p className="text-xs text-gray-500 md:text-sm">
+                Produk
+              </p>
+
+              <p className="text-lg font-bold text-slate-900 md:text-2xl">
+                1Jt+
+              </p>
+            </div>
+          </div>
+
+          {/* ================= Content ================= */}
+          <div className="order-2 text-center lg:order-1 lg:text-left">
+            {/* Badge */}
+            <span className="inline-flex items-center rounded-full bg-rose-100 px-4 py-2 text-sm font-semibold text-rose-600">
+              🛍️ Marketplace Indonesia
+            </span>
+
+            {/* Desktop Title */}
+            <h1 className="mt-6 hidden text-5xl font-extrabold leading-tight text-slate-900 lg:block lg:text-6xl">
+              Belanja Lebih
+              <br />
+              Mudah &
+              <span className="text-rose-600"> Terpercaya.</span>
+            </h1>
+
+            {/* Description */}
+            <p className="mt-6 max-w-lg text-base leading-8 text-gray-600 md:mx-auto md:text-lg md:leading-9 lg:mx-0">
+              Temukan ribuan produk pilihan dari berbagai kategori.
+              Nikmati promo terbaik, voucher eksklusif, cashback,
+              dan pengalaman belanja yang cepat, aman,
+              serta nyaman untuk memenuhi kebutuhan Anda.
+            </p>
+
+            {/* Button */}
+            <div className="mt-8 flex w-full gap-4">
+              <Link
+                href="/login"
+                className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-rose-600 px-6 py-4 font-semibold text-white shadow-lg transition-all duration-300 hover:-translate-y-1 hover:bg-rose-700"
+              >
+                <FiLogIn size={20} />
+                Login
+              </Link>
+
+              <Link
+                href="/products"
+                className="flex flex-1 items-center justify-center gap-2 rounded-xl border-2 border-rose-600 px-6 py-4 font-semibold text-rose-600 transition-all duration-300 hover:bg-rose-50"
+              >
+                <FiShoppingBag size={20} />
+                Lihat Produk
+              </Link>
+            </div>
+
+            {/* Register */}
+            <p className="mt-8 text-gray-600">
+              Belum punya akun?{" "}
+              <Link
+                href="/register"
+                className="font-semibold text-rose-600 hover:underline"
+              >
+                Buat Akun
+              </Link>
+            </p>
+          </div>
         </div>
-      </main>
-    </div>
+      </section>
+    </main>
   );
 }

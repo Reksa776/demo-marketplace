@@ -1,0 +1,2719 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import toast from "react-hot-toast";
+
+type Address = {
+    id: string;
+    label: string | null;
+    recipientName: string;
+    phone: string;
+    address: string;
+
+    province: string | null;
+    city: string | null;
+    district: string | null;
+    subdistrict: string | null;
+
+    postalCode: string | null;
+
+    provinceId: number | null;
+    regencyId: number | null;
+    districtId: number | null;
+    villageId: number | null;
+
+    rajaOngkirDestinationId: number | null;
+
+    latitude: string | null;
+    longitude: string | null;
+
+    isDefault: boolean;
+};
+
+type CheckoutItem = {
+    id: number;
+    productId: number;
+    variantId: number;
+
+    productName: string;
+    variantName: string;
+
+    image: string | null;
+
+    price: number;
+    quantity: number;
+
+    /*
+     * Berat satu variant.
+     */
+    weight: number;
+
+    /*
+     * Berat variant x quantity.
+     */
+    totalWeight: number;
+
+    subtotal: number;
+};
+
+type CheckoutData = {
+    items: CheckoutItem[];
+    subtotal: number;
+    totalWeight: number;
+    addresses: Address[];
+
+    store: {
+        id: number;
+        storeName: string;
+        rajaOngkirDestinationId: number | null;
+    };
+};
+
+type AddressForm = {
+    label: string;
+
+    recipientName: string;
+    phone: string;
+    address: string;
+
+    province: string;
+    provinceId: string;
+
+    city: string;
+    cityId: string;
+
+    district: string;
+    districtId: string;
+
+    subdistrict: string;
+    subdistrictId: string;
+
+    postalCode: string;
+
+    rajaOngkirDestinationId: number | null;
+
+    latitude: string;
+    longitude: string;
+
+    isDefault: boolean;
+};
+
+type Region = {
+    id: number;
+    name: string;
+    zip_code?: string;
+};
+
+type ShippingOption = {
+    courier?: string;
+    code?: string;
+
+    service?: string;
+    service_name?: string;
+
+    etd?: string;
+    estimation?: string;
+
+    cost?: number;
+    price?: number;
+    shipping_cost?: number;
+};
+
+const emptyAddressForm: AddressForm = {
+    label: "",
+
+    recipientName: "",
+    phone: "",
+    address: "",
+
+    province: "",
+    provinceId: "",
+
+    city: "",
+    cityId: "",
+
+    district: "",
+    districtId: "",
+
+    subdistrict: "",
+    subdistrictId: "",
+
+    postalCode: "",
+
+    rajaOngkirDestinationId: null,
+
+    latitude: "",
+    longitude: "",
+
+    isDefault: false,
+};
+
+export default function CheckoutPage() {
+    const router = useRouter();
+    const [paymentMethod, setPaymentMethod] = useState<
+        "COD" | "BANK_TRANSFER" | "E_WALLET" | "QRIS"
+    >("COD");
+    const [loading, setLoading] =
+        useState(true);
+
+    const [data, setData] =
+        useState<CheckoutData | null>(null);
+
+    const [selectedAddress, setSelectedAddress] =
+        useState("");
+
+    const [showAddressForm, setShowAddressForm] =
+        useState(false);
+
+    const [savingAddress, setSavingAddress] =
+        useState(false);
+
+    const [shippingOptions, setShippingOptions] =
+        useState<ShippingOption[]>([]);
+
+    const [selectedShipping, setSelectedShipping] =
+        useState<ShippingOption | null>(null);
+
+    const [loadingShipping, setLoadingShipping] =
+        useState(false);
+
+    /*
+     * REGION
+     */
+
+    const [provinces, setProvinces] =
+        useState<Region[]>([]);
+
+    const [cities, setCities] =
+        useState<Region[]>([]);
+
+    const [districts, setDistricts] =
+        useState<Region[]>([]);
+
+    const [subdistricts, setSubdistricts] =
+        useState<Region[]>([]);
+
+    const [loadingProvinces, setLoadingProvinces] =
+        useState(false);
+
+    const [loadingCities, setLoadingCities] =
+        useState(false);
+
+    const [loadingDistricts, setLoadingDistricts] =
+        useState(false);
+
+    const [loadingSubdistricts, setLoadingSubdistricts] =
+        useState(false);
+
+    const [loadingDestination, setLoadingDestination] =
+        useState(false);
+
+    const [addressForm, setAddressForm] =
+        useState<AddressForm>(
+            emptyAddressForm
+        );
+
+
+    /*
+     * ==========================================
+     * LOAD REGIONS
+     * ==========================================
+     */
+
+    async function loadRegions(
+        type:
+            | "province"
+            | "city"
+            | "district"
+            | "subdistrict",
+        id?: string
+    ): Promise<Region[]> {
+        const params = new URLSearchParams();
+
+        params.set("type", type);
+
+        if (id) {
+            params.set("id", id);
+        }
+
+        const response = await fetch(
+            `/api/rajaongkir/regions?${params.toString()}`,
+            {
+                cache: "no-store",
+            }
+        );
+
+        const result = await response.json();
+
+        if (!response.ok || !result.success) {
+            throw new Error(
+                result.message ||
+                "Gagal mengambil data wilayah."
+            );
+        }
+
+        return Array.isArray(result.data)
+            ? result.data
+            : [];
+    }
+
+    /*
+     * ==========================================
+     * LOAD DESTINATION RAJAONGKIR
+     * ==========================================
+     */
+
+    async function loadRajaOngkirDestination() {
+        if (
+            !addressForm.provinceId ||
+            !addressForm.cityId ||
+            !addressForm.districtId ||
+            !addressForm.subdistrictId
+        ) {
+            return;
+        }
+
+        if (
+            !addressForm.province ||
+            !addressForm.city ||
+            !addressForm.district ||
+            !addressForm.subdistrict
+        ) {
+            return;
+        }
+
+        try {
+            setLoadingDestination(true);
+
+            /*
+             * ==========================================
+             * BUILD PARAMS
+             * ==========================================
+             */
+
+            const params =
+                new URLSearchParams();
+
+            params.set(
+                "provinceId",
+                addressForm.provinceId
+            );
+
+            params.set(
+                "cityId",
+                addressForm.cityId
+            );
+
+            params.set(
+                "districtId",
+                addressForm.districtId
+            );
+
+            params.set(
+                "subdistrictId",
+                addressForm.subdistrictId
+            );
+
+            /*
+             * Nama wilayah diperlukan oleh
+             * RajaOngkir untuk parameter search.
+             */
+
+            params.set(
+                "province",
+                addressForm.province
+            );
+
+            params.set(
+                "city",
+                addressForm.city
+            );
+
+            params.set(
+                "district",
+                addressForm.district
+            );
+
+            params.set(
+                "subdistrict",
+                addressForm.subdistrict
+            );
+
+            if (
+                addressForm.postalCode
+            ) {
+                params.set(
+                    "postalCode",
+                    addressForm.postalCode
+                );
+            }
+
+            /*
+             * ==========================================
+             * REQUEST
+             * ==========================================
+             */
+
+            console.log(
+                "LOAD RAJAONGKIR DESTINATION:",
+                {
+                    province:
+                        addressForm.province,
+
+                    city:
+                        addressForm.city,
+
+                    district:
+                        addressForm.district,
+
+                    subdistrict:
+                        addressForm.subdistrict,
+
+                    postalCode:
+                        addressForm.postalCode,
+                }
+            );
+
+            const response =
+                await fetch(
+                    `/api/rajaongkir/destination?${params.toString()}`,
+                    {
+                        method: "GET",
+                        cache: "no-store",
+                    }
+                );
+
+            const result =
+                await response.json();
+
+            console.log(
+                "DESTINATION RESULT:",
+                result
+            );
+
+            if (
+                !response.ok ||
+                !result.success
+            ) {
+                throw new Error(
+                    result.message ||
+                    "Destination RajaOngkir tidak ditemukan."
+                );
+            }
+
+            const destinationId =
+                Number(
+                    result.data
+                        ?.rajaOngkirDestinationId
+                );
+
+            if (
+                !Number.isInteger(
+                    destinationId
+                ) ||
+                destinationId <= 0
+            ) {
+                throw new Error(
+                    "Destination RajaOngkir yang diterima tidak valid."
+                );
+            }
+
+            /*
+             * ==========================================
+             * SAVE DESTINATION ID
+             * ==========================================
+             */
+
+            setAddressForm(
+                (prev) => ({
+                    ...prev,
+
+                    rajaOngkirDestinationId:
+                        destinationId,
+                })
+            );
+
+            console.log(
+                "RAJAONGKIR DESTINATION ID:",
+                destinationId
+            );
+        } catch (error) {
+            console.error(
+                "LOAD DESTINATION ERROR:",
+                error
+            );
+
+            setAddressForm(
+                (prev) => ({
+                    ...prev,
+
+                    rajaOngkirDestinationId:
+                        null,
+                })
+            );
+
+            toast.error(
+                error instanceof Error
+                    ? error.message
+                    : "Gagal mencari destination RajaOngkir."
+            );
+        } finally {
+            setLoadingDestination(false);
+        }
+    }
+
+    /*
+     * ==========================================
+     * LOAD PROVINCES
+     * ==========================================
+     */
+
+    async function loadProvinces() {
+        try {
+            setLoadingProvinces(true);
+
+            const result =
+                await loadRegions(
+                    "province"
+                );
+
+            setProvinces(result);
+        } catch (error) {
+            console.error(error);
+
+            toast.error(
+                error instanceof Error
+                    ? error.message
+                    : "Gagal mengambil provinsi."
+            );
+        } finally {
+            setLoadingProvinces(false);
+        }
+    }
+
+    /*
+     * ==========================================
+     * PROVINCE
+     * ==========================================
+     */
+
+    async function handleProvinceChange(
+        provinceId: string
+    ) {
+        const province =
+            provinces.find(
+                (item) =>
+                    String(item.id) ===
+                    provinceId
+            );
+
+        setAddressForm(
+            (prev) => ({
+                ...prev,
+
+                provinceId,
+
+                province:
+                    province?.name ?? "",
+
+                cityId: "",
+                city: "",
+
+                districtId: "",
+                district: "",
+
+                subdistrictId: "",
+                subdistrict: "",
+
+                postalCode: "",
+
+                rajaOngkirDestinationId:
+                    null,
+            })
+        );
+
+        setCities([]);
+        setDistricts([]);
+        setSubdistricts([]);
+
+        if (!provinceId) {
+            return;
+        }
+
+        try {
+            setLoadingCities(true);
+
+            const result =
+                await loadRegions(
+                    "city",
+                    provinceId
+                );
+
+            setCities(result);
+        } catch (error) {
+            console.error(error);
+
+            toast.error(
+                error instanceof Error
+                    ? error.message
+                    : "Gagal mengambil kota."
+            );
+        } finally {
+            setLoadingCities(false);
+        }
+    }
+
+    /*
+     * ==========================================
+     * CITY
+     * ==========================================
+     */
+
+    async function handleCityChange(
+        cityId: string
+    ) {
+        const city =
+            cities.find(
+                (item) =>
+                    String(item.id) ===
+                    cityId
+            );
+
+        setAddressForm(
+            (prev) => ({
+                ...prev,
+
+                cityId,
+
+                city:
+                    city?.name ?? "",
+
+                districtId: "",
+                district: "",
+
+                subdistrictId: "",
+                subdistrict: "",
+
+                postalCode: "",
+
+                rajaOngkirDestinationId:
+                    null,
+            })
+        );
+
+        setDistricts([]);
+        setSubdistricts([]);
+
+        if (!cityId) {
+            return;
+        }
+
+        try {
+            setLoadingDistricts(true);
+
+            const result =
+                await loadRegions(
+                    "district",
+                    cityId
+                );
+
+            setDistricts(result);
+        } catch (error) {
+            console.error(error);
+
+            toast.error(
+                error instanceof Error
+                    ? error.message
+                    : "Gagal mengambil kecamatan."
+            );
+        } finally {
+            setLoadingDistricts(false);
+        }
+    }
+
+    /*
+     * ==========================================
+     * DISTRICT
+     * ==========================================
+     */
+
+    async function handleDistrictChange(
+        districtId: string
+    ) {
+        const district =
+            districts.find(
+                (item) =>
+                    String(item.id) ===
+                    districtId
+            );
+
+        setAddressForm(
+            (prev) => ({
+                ...prev,
+
+                districtId,
+
+                district:
+                    district?.name ?? "",
+
+                subdistrictId: "",
+                subdistrict: "",
+
+                postalCode: "",
+
+                rajaOngkirDestinationId:
+                    null,
+            })
+        );
+
+        setSubdistricts([]);
+
+        if (!districtId) {
+            return;
+        }
+
+        try {
+            setLoadingSubdistricts(
+                true
+            );
+
+            const result =
+                await loadRegions(
+                    "subdistrict",
+                    districtId
+                );
+
+            setSubdistricts(result);
+        } catch (error) {
+            console.error(error);
+
+            toast.error(
+                error instanceof Error
+                    ? error.message
+                    : "Gagal mengambil kelurahan."
+            );
+        } finally {
+            setLoadingSubdistricts(
+                false
+            );
+        }
+    }
+
+    /*
+     * ==========================================
+     * SUBDISTRICT
+     * ==========================================
+     */
+
+    async function handleSubdistrictChange(
+        subdistrictId: string
+    ) {
+        const subdistrict =
+            subdistricts.find(
+                (item) =>
+                    String(item.id) ===
+                    subdistrictId
+            );
+
+        if (!subdistrict) {
+            return;
+        }
+
+        /*
+         * Simpan data wilayah dahulu.
+         */
+
+        setAddressForm(
+            (prev) => ({
+                ...prev,
+
+                subdistrictId,
+
+                subdistrict:
+                    subdistrict.name,
+
+                postalCode:
+                    subdistrict.zip_code ??
+                    "",
+
+                /*
+                 * Jangan langsung menggunakan
+                 * subdistrict.id sebagai
+                 * RajaOngkirDestinationId.
+                 */
+
+                rajaOngkirDestinationId:
+                    null,
+            })
+        );
+    }
+
+    /*
+     * ==========================================
+     * CARI DESTINATION SETELAH KELURAHAN
+     * ==========================================
+     */
+
+    useEffect(() => {
+        if (
+            !addressForm.provinceId ||
+            !addressForm.cityId ||
+            !addressForm.districtId ||
+            !addressForm.subdistrictId ||
+            !addressForm.province ||
+            !addressForm.city ||
+            !addressForm.district ||
+            !addressForm.subdistrict
+        ) {
+            return;
+        }
+
+        loadRajaOngkirDestination();
+    }, [
+        addressForm.provinceId,
+        addressForm.cityId,
+        addressForm.districtId,
+        addressForm.subdistrictId,
+    ]);
+
+    /*
+     * ==========================================
+     * INITIAL LOAD
+     * ==========================================
+     */
+
+    useEffect(() => {
+        loadCheckout();
+        loadProvinces();
+    }, []);
+
+    /*
+     * ==========================================
+     * LOAD CHECKOUT
+     * ==========================================
+     */
+
+    async function loadCheckout() {
+        try {
+            setLoading(true);
+
+            const response =
+                await fetch(
+                    "/api/checkout",
+                    {
+                        cache: "no-store",
+                    }
+                );
+
+            const result =
+                await response.json();
+
+            if (!response.ok) {
+                throw new Error(
+                    result.message ||
+                    "Gagal mengambil checkout."
+                );
+            }
+
+            setData(result.data);
+
+            const defaultAddress =
+                result.data.addresses.find(
+                    (item: Address) =>
+                        item.isDefault
+                );
+
+            if (defaultAddress) {
+                setSelectedAddress(
+                    defaultAddress.id
+                );
+            } else if (
+                result.data.addresses.length >
+                0
+            ) {
+                setSelectedAddress(
+                    result.data
+                        .addresses[0].id
+                );
+            }
+        } catch (error) {
+            console.error(error);
+
+            toast.error(
+                error instanceof Error
+                    ? error.message
+                    : "Gagal mengambil checkout."
+            );
+        } finally {
+            setLoading(false);
+        }
+    }
+
+    /*
+     * ==========================================
+     * UPDATE FORM
+     * ==========================================
+     */
+
+    function updateAddressForm(
+        field: keyof AddressForm,
+        value:
+            | string
+            | boolean
+            | number
+            | null
+    ) {
+        setAddressForm(
+            (prev) => ({
+                ...prev,
+                [field]: value,
+            })
+        );
+    }
+
+    /*
+     * ==========================================
+     * SAVE ADDRESS
+     * ==========================================
+     */
+
+    async function saveAddress() {
+        if (!addressForm.recipientName.trim()) {
+            toast.error("Nama penerima wajib diisi.");
+            return;
+        }
+
+        if (!addressForm.phone.trim()) {
+            toast.error("Nomor HP wajib diisi.");
+            return;
+        }
+
+        if (!addressForm.address.trim()) {
+            toast.error("Alamat lengkap wajib diisi.");
+            return;
+        }
+
+        if (!addressForm.provinceId) {
+            toast.error("Pilih provinsi.");
+            return;
+        }
+
+        if (!addressForm.cityId) {
+            toast.error("Pilih kota/kabupaten.");
+            return;
+        }
+
+        if (!addressForm.districtId) {
+            toast.error("Pilih kecamatan.");
+            return;
+        }
+
+        if (!addressForm.subdistrictId) {
+            toast.error("Pilih kelurahan/desa.");
+            return;
+        }
+
+        if (loadingDestination) {
+            toast.error(
+                "Sedang mencari Destination RajaOngkir. Tunggu sebentar."
+            );
+            return;
+        }
+
+        if (
+            !addressForm.rajaOngkirDestinationId ||
+            addressForm.rajaOngkirDestinationId <= 0
+        ) {
+            toast.error(
+                "Destination RajaOngkir belum ditemukan."
+            );
+            return;
+        }
+
+        if (!addressForm.postalCode.trim()) {
+            toast.error("Kode pos belum tersedia.");
+            return;
+        }
+
+        try {
+            setSavingAddress(true);
+
+            const response = await fetch(
+                "/api/addresses",
+                {
+                    method: "POST",
+
+                    headers: {
+                        "Content-Type": "application/json",
+                    },
+
+                    body: JSON.stringify({
+                        label:
+                            addressForm.label.trim() ||
+                            null,
+
+                        recipientName:
+                            addressForm.recipientName.trim(),
+
+                        phone:
+                            addressForm.phone.trim(),
+
+                        address:
+                            addressForm.address.trim(),
+
+                        province:
+                            addressForm.province,
+
+                        city:
+                            addressForm.city,
+
+                        district:
+                            addressForm.district,
+
+                        subdistrict:
+                            addressForm.subdistrict,
+
+                        postalCode:
+                            addressForm.postalCode,
+
+                        /*
+                         * Database IDs
+                         */
+
+                        provinceId:
+                            Number(
+                                addressForm.provinceId
+                            ),
+
+                        regencyId:
+                            Number(
+                                addressForm.cityId
+                            ),
+
+                        districtId:
+                            Number(
+                                addressForm.districtId
+                            ),
+
+                        villageId:
+                            Number(
+                                addressForm.subdistrictId
+                            ),
+
+                        /*
+                         * RajaOngkir destination
+                         */
+
+                        rajaOngkirDestinationId:
+                            Number(
+                                addressForm.rajaOngkirDestinationId
+                            ),
+
+                        latitude:
+                            addressForm.latitude
+                                ? Number(
+                                    addressForm.latitude
+                                )
+                                : null,
+
+                        longitude:
+                            addressForm.longitude
+                                ? Number(
+                                    addressForm.longitude
+                                )
+                                : null,
+
+                        isDefault:
+                            addressForm.isDefault,
+                    }),
+                }
+            );
+
+            const result =
+                await response.json();
+
+            if (
+                !response.ok ||
+                !result.success
+            ) {
+                throw new Error(
+                    result.message ||
+                    "Gagal menyimpan alamat."
+                );
+            }
+
+            toast.success(
+                "Alamat berhasil disimpan."
+            );
+
+            setShowAddressForm(false);
+
+            setAddressForm({
+                ...emptyAddressForm,
+            });
+
+            await loadCheckout();
+
+            const savedAddress =
+                result.data ??
+                result.address;
+
+            if (savedAddress?.id) {
+                setSelectedAddress(
+                    savedAddress.id
+                );
+            }
+        } catch (error) {
+            console.error(
+                "SAVE ADDRESS ERROR:",
+                error
+            );
+
+            toast.error(
+                error instanceof Error
+                    ? error.message
+                    : "Gagal menyimpan alamat."
+            );
+        } finally {
+            setSavingAddress(false);
+        }
+    }
+
+    /*
+     * ==========================================
+     * SHIPPING COST
+     * ==========================================
+     */
+
+    async function loadShippingCost() {
+        if (!selectedAddress) {
+            setShippingOptions([]);
+            setSelectedShipping(null);
+            return;
+        }
+
+        if (!data) {
+            return;
+        }
+
+        const address = data.addresses.find(
+            (item) =>
+                item.id === selectedAddress
+        );
+
+        if (!address) {
+            toast.error(
+                "Alamat tidak ditemukan."
+            );
+            return;
+        }
+
+        const origin =
+            Number(
+                data.store
+                    ?.rajaOngkirDestinationId
+            );
+
+        if (
+            !Number.isInteger(origin) ||
+            origin <= 0
+        ) {
+            toast.error(
+                "Destination toko belum dikonfigurasi."
+            );
+            return;
+        }
+
+        const destination =
+            Number(
+                address.rajaOngkirDestinationId
+            );
+
+        if (
+            !Number.isInteger(destination) ||
+            destination <= 0
+        ) {
+            toast.error(
+                "Destination alamat belum tersedia."
+            );
+            return;
+        }
+
+        /*
+         * Berat dalam gram.
+         *
+         * Minimal 1 gram supaya request valid.
+         */
+
+        const weight = Math.max(
+            Math.ceil(
+                Number(
+                    data.totalWeight || 0
+                )
+            ),
+            1
+        );
+
+        try {
+            setLoadingShipping(true);
+
+            setShippingOptions([]);
+
+            setSelectedShipping(null);
+
+            const response = await fetch(
+                "/api/shipping/cost",
+                {
+                    method: "POST",
+
+                    headers: {
+                        "Content-Type":
+                            "application/json",
+                    },
+
+                    body: JSON.stringify({
+                        origin,
+
+                        destination,
+
+                        weight,
+
+                        courier:
+                            "jne:jnt:sicepat",
+
+                        price:
+                            "lowest",
+                    }),
+
+                    cache: "no-store",
+                }
+            );
+
+            const result =
+                await response.json();
+
+            if (
+                !response.ok ||
+                !result.success
+            ) {
+                throw new Error(
+                    result.message ||
+                    "Gagal mengambil ongkir."
+                );
+            }
+
+            const options =
+                Array.isArray(
+                    result.data
+                )
+                    ? result.data
+                    : [];
+
+            setShippingOptions(
+                options
+            );
+
+            if (
+                options.length === 0
+            ) {
+                toast.error(
+                    "Tidak ada layanan pengiriman."
+                );
+            }
+        } catch (error) {
+            console.error(
+                "SHIPPING COST ERROR:",
+                error
+            );
+
+            setShippingOptions([]);
+
+            setSelectedShipping(null);
+
+            toast.error(
+                error instanceof Error
+                    ? error.message
+                    : "Gagal mengambil ongkir."
+            );
+        } finally {
+            setLoadingShipping(false);
+        }
+    }
+
+    /*
+     * ==========================================
+     * AUTO SHIPPING
+     * ==========================================
+     */
+
+    useEffect(() => {
+        if (!selectedAddress) {
+            setShippingOptions([]);
+            setSelectedShipping(null);
+            return;
+        }
+
+        if (!data) {
+            return;
+        }
+
+        if (
+            !data.totalWeight ||
+            data.totalWeight <= 0
+        ) {
+            return;
+        }
+
+        loadShippingCost();
+    }, [
+        selectedAddress,
+        data,
+    ]);
+
+    /*
+ /*
+ * ==========================================
+ * CREATE ORDER / CREATE PAYMENT
+ * ==========================================
+ */
+
+    const [creatingOrder, setCreatingOrder] =
+        useState(false);
+
+    async function createOrder() {
+        if (!selectedAddress) {
+            toast.error(
+                "Pilih alamat pengiriman."
+            );
+            return;
+        }
+
+        if (!selectedShipping) {
+            toast.error(
+                "Pilih pengiriman."
+            );
+            return;
+        }
+
+        if (!paymentMethod) {
+            toast.error(
+                "Pilih metode pembayaran."
+            );
+            return;
+        }
+
+        try {
+            setCreatingOrder(true);
+
+            /*
+             * ==========================================
+             * COD
+             * ==========================================
+             *
+             * COD memang langsung membuat Order.
+             */
+
+            if (paymentMethod === "COD") {
+                const response =
+                    await fetch(
+                        "/api/orders",
+                        {
+                            method: "POST",
+
+                            headers: {
+                                "Content-Type":
+                                    "application/json",
+                            },
+
+                            body: JSON.stringify({
+                                addressId:
+                                    selectedAddress,
+
+                                shipping:
+                                    selectedShipping,
+
+                                paymentMethod:
+                                    "COD",
+                            }),
+                        }
+                    );
+
+                const result =
+                    await response.json();
+
+                console.log(
+                    "CREATE COD ORDER RESPONSE:",
+                    result
+                );
+
+                if (
+                    !response.ok ||
+                    !result.success
+                ) {
+                    throw new Error(
+                        result.message ||
+                        "Gagal membuat pesanan COD."
+                    );
+                }
+
+                const order =
+                    result.data;
+
+                if (!order?.id) {
+                    throw new Error(
+                        "Order COD berhasil dibuat tetapi ID order tidak ditemukan."
+                    );
+                }
+
+                /*
+                 * COD sudah benar-benar
+                 * menjadi pesanan.
+                 */
+
+                window.location.href =
+                    `/checkout/success?order=${order.id}`;
+
+                return;
+            }
+
+            /*
+             * ==========================================
+             * MIDTRANS
+             * ==========================================
+             *
+             * BANK_TRANSFER
+             * E_WALLET
+             * QRIS
+             *
+             * PENTING:
+             *
+             * Di sini TIDAK memanggil /api/orders.
+             *
+             * Jadi:
+             * - Order belum dibuat
+             * - Stock belum dikurangi
+             * - Cart belum dikosongkan
+             */
+
+            const paymentResponse =
+                await fetch(
+                    "/api/payment/midtrans",
+                    {
+                        method: "POST",
+
+                        headers: {
+                            "Content-Type":
+                                "application/json",
+                        },
+
+                        body: JSON.stringify({
+                            addressId:
+                                selectedAddress,
+
+                            shipping:
+                                selectedShipping,
+
+                            paymentMethod:
+                                paymentMethod,
+                        }),
+                    }
+                );
+
+            const paymentResult =
+                await paymentResponse.json();
+
+            console.log(
+                "MIDTRANS RESPONSE:",
+                paymentResult
+            );
+
+            if (
+                !paymentResponse.ok ||
+                !paymentResult.success
+            ) {
+                throw new Error(
+                    paymentResult.message ||
+                    "Gagal membuat pembayaran Midtrans."
+                );
+            }
+
+            const paymentData =
+                paymentResult.data;
+
+            if (!paymentData) {
+                throw new Error(
+                    "Data pembayaran Midtrans tidak ditemukan."
+                );
+            }
+
+            console.log(
+                "MIDTRANS PAYMENT DATA:",
+                paymentData
+            );
+
+            /*
+             * ==========================================
+             * REDIRECT KE MIDTRANS
+             * ==========================================
+             *
+             * API kita memberikan:
+             *
+             * data.redirectUrl
+             *
+             * atau:
+             *
+             * data.token
+             */
+
+            // if (
+            //     paymentData.redirectUrl
+            // ) {
+            //     window.location.href =
+            //         paymentData.redirectUrl;
+
+            //     return;
+            // }
+
+            /*
+             * ==========================================
+             * SNAP TOKEN
+             * ==========================================
+             *
+             * Dipakai kalau redirectUrl
+             * tidak tersedia tetapi token ada.
+             */
+
+            if (paymentData.token) {
+                if (
+                    typeof window !== "undefined" &&
+                    (window as any).snap
+                ) {
+                    (window as any).snap.pay(
+                        paymentData.token,
+                        {
+                            onSuccess: (result: any) => {
+                                console.log(
+                                    "MIDTRANS SUCCESS:",
+                                    result
+                                );
+
+                                /*
+                                 * Jangan redirect di sini ke payment-finish
+                                 * kalau payment-finish bukan tujuan setelah
+                                 * pembayaran berhasil.
+                                 *
+                                 * Untuk sementara tetap di checkout.
+                                 *
+                                 * Nanti status pembayaran sebaiknya
+                                 * dikonfirmasi lewat webhook Midtrans.
+                                 */
+
+                                toast.success(
+                                    "Pembayaran berhasil diproses."
+                                );
+                            },
+
+                            onPending: (result: any) => {
+                                console.log(
+                                    "MIDTRANS PENDING:",
+                                    result
+                                );
+
+                                /*
+                                 * Jangan redirect ke payment-finish.
+                                 */
+
+                                toast(
+                                    "Pembayaran sedang menunggu."
+                                );
+                            },
+
+                            onError: (result: any) => {
+                                console.error(
+                                    "MIDTRANS ERROR:",
+                                    result
+                                );
+
+                                toast.error(
+                                    "Pembayaran gagal. Silakan coba lagi."
+                                );
+                            },
+
+                            onClose: () => {
+                                console.log(
+                                    "MIDTRANS CLOSED"
+                                );
+
+                                /*
+                                 * TIDAK ADA REDIRECT.
+                                 *
+                                 * Snap akan menutup popup.
+                                 * User tetap berada di:
+                                 *
+                                 * /checkout
+                                 */
+
+                                toast(
+                                    "Pembayaran ditutup. Kamu kembali ke checkout."
+                                );
+                            },
+                        }
+                    );
+
+                    return;
+                }
+
+                throw new Error(
+                    "Snap.js Midtrans belum tersedia."
+                );
+            }
+
+            throw new Error(
+                "Respons pembayaran Midtrans tidak valid."
+            );
+        } catch (error) {
+            console.error(
+                "CREATE PAYMENT ERROR:",
+                error
+            );
+
+            toast.error(
+                error instanceof Error
+                    ? error.message
+                    : "Gagal membuat pesanan."
+            );
+        } finally {
+            setCreatingOrder(false);
+        }
+    }
+
+    /*
+     * ==========================================
+     * LOADING
+     * ==========================================
+     */
+
+    if (loading) {
+        return (
+            <main className="min-h-screen bg-gray-50 px-4 py-8">
+                <div className="mx-auto max-w-6xl">
+                    <div className="rounded-3xl border bg-white p-8">
+                        Memuat checkout...
+                    </div>
+                </div>
+            </main>
+        );
+    }
+
+    if (!data) {
+        return null;
+    }
+
+    const address =
+        data.addresses.find(
+            (item) =>
+                item.id ===
+                selectedAddress
+        );
+
+    const shippingCost =
+        selectedShipping
+            ? Number(
+                selectedShipping.cost ??
+                selectedShipping.price ??
+                selectedShipping.shipping_cost ??
+                0
+            )
+            : 0;
+
+    const grandTotal =
+        data.subtotal +
+        shippingCost;
+
+    /*
+     * ==========================================
+     * UI
+     * ==========================================
+     */
+
+    return (
+        <main className="min-h-screen bg-gray-50 px-4 py-8 sm:px-6">
+            <div className="mx-auto max-w-6xl">
+
+                {/* HEADER */}
+
+                <div className="mb-8">
+                    <Link
+                        href="/cart"
+                        className="text-sm text-gray-500 hover:text-gray-900"
+                    >
+                        ← Kembali ke Keranjang
+                    </Link>
+
+                    <h1 className="mt-3 text-3xl font-bold text-gray-900">
+                        Checkout
+                    </h1>
+                </div>
+
+                <div className="grid gap-6 lg:grid-cols-[1fr_380px]">
+
+                    <div className="space-y-6">
+
+                        {/* ================================= */}
+                        {/* ADDRESS */}
+                        {/* ================================= */}
+
+                        <section className="rounded-3xl border border-gray-200 bg-white p-6">
+
+                            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+
+                                <div>
+                                    <h2 className="text-lg font-bold">
+                                        Alamat Pengiriman
+                                    </h2>
+
+                                    <p className="mt-1 text-sm text-gray-500">
+                                        Pilih atau tambahkan alamat pengiriman.
+                                    </p>
+                                </div>
+
+                                <button
+                                    type="button"
+                                    onClick={() =>
+                                        setShowAddressForm(
+                                            (prev) =>
+                                                !prev
+                                        )
+                                    }
+                                    className="rounded-xl bg-rose-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-rose-700"
+                                >
+                                    {showAddressForm
+                                        ? "Tutup Form"
+                                        : "+ Tambah Alamat"}
+                                </button>
+
+                            </div>
+
+                            {/* FORM */}
+
+                            {showAddressForm && (
+                                <div className="mt-6 rounded-2xl border border-gray-200 bg-gray-50 p-5">
+
+                                    <h3 className="font-semibold text-gray-900">
+                                        Alamat Baru
+                                    </h3>
+
+                                    <div className="mt-5 grid gap-4 sm:grid-cols-2">
+
+                                        {/* LABEL */}
+
+                                        <div>
+                                            <label className="text-sm font-medium text-gray-700">
+                                                Label Alamat
+                                            </label>
+
+                                            <input
+                                                type="text"
+                                                value={
+                                                    addressForm.label
+                                                }
+                                                onChange={(e) =>
+                                                    updateAddressForm(
+                                                        "label",
+                                                        e.target.value
+                                                    )
+                                                }
+                                                placeholder="Rumah"
+                                                className="mt-1.5 h-11 w-full rounded-xl border border-gray-300 bg-white px-3 text-sm outline-none focus:border-rose-500"
+                                            />
+                                        </div>
+
+                                        {/* NAMA */}
+
+                                        <div>
+                                            <label className="text-sm font-medium text-gray-700">
+                                                Nama Penerima *
+                                            </label>
+
+                                            <input
+                                                type="text"
+                                                value={
+                                                    addressForm.recipientName
+                                                }
+                                                onChange={(e) =>
+                                                    updateAddressForm(
+                                                        "recipientName",
+                                                        e.target.value
+                                                    )
+                                                }
+                                                placeholder="Nama penerima"
+                                                className="mt-1.5 h-11 w-full rounded-xl border border-gray-300 bg-white px-3 text-sm outline-none focus:border-rose-500"
+                                            />
+                                        </div>
+
+                                        {/* PHONE */}
+
+                                        <div>
+                                            <label className="text-sm font-medium text-gray-700">
+                                                No. WhatsApp *
+                                            </label>
+
+                                            <input
+                                                type="tel"
+                                                value={
+                                                    addressForm.phone
+                                                }
+                                                onChange={(e) =>
+                                                    updateAddressForm(
+                                                        "phone",
+                                                        e.target.value
+                                                    )
+                                                }
+                                                placeholder="08xxxxxxxxxx"
+                                                className="mt-1.5 h-11 w-full rounded-xl border border-gray-300 bg-white px-3 text-sm outline-none focus:border-rose-500"
+                                            />
+                                        </div>
+
+                                        {/* ADDRESS */}
+
+                                        <div className="sm:col-span-2">
+                                            <label className="text-sm font-medium text-gray-700">
+                                                Alamat Lengkap *
+                                            </label>
+
+                                            <textarea
+                                                value={
+                                                    addressForm.address
+                                                }
+                                                onChange={(e) =>
+                                                    updateAddressForm(
+                                                        "address",
+                                                        e.target.value
+                                                    )
+                                                }
+                                                rows={3}
+                                                placeholder="Nama jalan, nomor rumah, RT/RW, patokan, dll."
+                                                className="mt-1.5 w-full rounded-xl border border-gray-300 bg-white px-3 py-3 text-sm outline-none focus:border-rose-500"
+                                            />
+                                        </div>
+
+                                        {/* PROVINCE */}
+
+                                        <div>
+                                            <label className="text-sm font-medium text-gray-700">
+                                                Provinsi *
+                                            </label>
+
+                                            <select
+                                                value={
+                                                    addressForm.provinceId
+                                                }
+                                                onChange={(e) =>
+                                                    handleProvinceChange(
+                                                        e.target.value
+                                                    )
+                                                }
+                                                disabled={
+                                                    loadingProvinces
+                                                }
+                                                className="mt-1.5 h-11 w-full rounded-xl border border-gray-300 bg-white px-3 text-sm outline-none focus:border-rose-500 disabled:bg-gray-100"
+                                            >
+                                                <option value="">
+                                                    {loadingProvinces
+                                                        ? "Memuat provinsi..."
+                                                        : "Pilih Provinsi"}
+                                                </option>
+
+                                                {provinces.map(
+                                                    (province) => (
+                                                        <option
+                                                            key={
+                                                                province.id
+                                                            }
+                                                            value={
+                                                                province.id
+                                                            }
+                                                        >
+                                                            {
+                                                                province.name
+                                                            }
+                                                        </option>
+                                                    )
+                                                )}
+                                            </select>
+                                        </div>
+
+                                        {/* CITY */}
+
+                                        <div>
+                                            <label className="text-sm font-medium text-gray-700">
+                                                Kota / Kabupaten *
+                                            </label>
+
+                                            <select
+                                                value={
+                                                    addressForm.cityId
+                                                }
+                                                onChange={(e) =>
+                                                    handleCityChange(
+                                                        e.target.value
+                                                    )
+                                                }
+                                                disabled={
+                                                    !addressForm.provinceId ||
+                                                    loadingCities
+                                                }
+                                                className="mt-1.5 h-11 w-full rounded-xl border border-gray-300 bg-white px-3 text-sm outline-none focus:border-rose-500 disabled:bg-gray-100"
+                                            >
+                                                <option value="">
+                                                    {loadingCities
+                                                        ? "Memuat kota..."
+                                                        : "Pilih Kota / Kabupaten"}
+                                                </option>
+
+                                                {cities.map(
+                                                    (city) => (
+                                                        <option
+                                                            key={
+                                                                city.id
+                                                            }
+                                                            value={
+                                                                city.id
+                                                            }
+                                                        >
+                                                            {
+                                                                city.name
+                                                            }
+                                                        </option>
+                                                    )
+                                                )}
+                                            </select>
+                                        </div>
+
+                                        {/* DISTRICT */}
+
+                                        <div>
+                                            <label className="text-sm font-medium text-gray-700">
+                                                Kecamatan *
+                                            </label>
+
+                                            <select
+                                                value={
+                                                    addressForm.districtId
+                                                }
+                                                onChange={(e) =>
+                                                    handleDistrictChange(
+                                                        e.target.value
+                                                    )
+                                                }
+                                                disabled={
+                                                    !addressForm.cityId ||
+                                                    loadingDistricts
+                                                }
+                                                className="mt-1.5 h-11 w-full rounded-xl border border-gray-300 bg-white px-3 text-sm outline-none focus:border-rose-500 disabled:bg-gray-100"
+                                            >
+                                                <option value="">
+                                                    {loadingDistricts
+                                                        ? "Memuat kecamatan..."
+                                                        : "Pilih Kecamatan"}
+                                                </option>
+
+                                                {districts.map(
+                                                    (district) => (
+                                                        <option
+                                                            key={
+                                                                district.id
+                                                            }
+                                                            value={
+                                                                district.id
+                                                            }
+                                                        >
+                                                            {
+                                                                district.name
+                                                            }
+                                                        </option>
+                                                    )
+                                                )}
+                                            </select>
+                                        </div>
+
+                                        {/* SUBDISTRICT */}
+
+                                        <div>
+                                            <label className="text-sm font-medium text-gray-700">
+                                                Kelurahan / Desa *
+                                            </label>
+
+                                            <select
+                                                value={
+                                                    addressForm.subdistrictId
+                                                }
+                                                onChange={(e) =>
+                                                    handleSubdistrictChange(
+                                                        e.target.value
+                                                    )
+                                                }
+                                                disabled={
+                                                    !addressForm.districtId ||
+                                                    loadingSubdistricts
+                                                }
+                                                className="mt-1.5 h-11 w-full rounded-xl border border-gray-300 bg-white px-3 text-sm outline-none focus:border-rose-500 disabled:bg-gray-100"
+                                            >
+                                                <option value="">
+                                                    {loadingSubdistricts
+                                                        ? "Memuat kelurahan..."
+                                                        : "Pilih Kelurahan / Desa"}
+                                                </option>
+
+                                                {subdistricts.map(
+                                                    (item) => (
+                                                        <option
+                                                            key={
+                                                                item.id
+                                                            }
+                                                            value={
+                                                                item.id
+                                                            }
+                                                        >
+                                                            {
+                                                                item.name
+                                                            }
+                                                        </option>
+                                                    )
+                                                )}
+                                            </select>
+                                        </div>
+
+                                        {/* POSTAL */}
+
+                                        <div>
+                                            <label className="text-sm font-medium text-gray-700">
+                                                Kode Pos
+                                            </label>
+
+                                            <input
+                                                type="text"
+                                                value={
+                                                    addressForm.postalCode
+                                                }
+                                                readOnly
+                                                className="mt-1.5 h-11 w-full rounded-xl border border-gray-300 bg-gray-100 px-3 text-sm outline-none"
+                                            />
+                                        </div>
+
+                                        {/* DESTINATION */}
+
+                                        <div>
+                                            <label className="text-sm font-medium text-gray-700">
+                                                RajaOngkir Destination ID
+                                            </label>
+
+                                            <input
+                                                type="text"
+                                                value={
+                                                    addressForm.rajaOngkirDestinationId ??
+                                                    ""
+                                                }
+                                                readOnly
+                                                placeholder={
+                                                    loadingDestination
+                                                        ? "Mencari destination..."
+                                                        : "Otomatis"
+                                                }
+                                                className="mt-1.5 h-11 w-full rounded-xl border border-gray-300 bg-gray-100 px-3 text-sm outline-none"
+                                            />
+
+                                            {loadingDestination && (
+                                                <p className="mt-1 text-xs text-gray-500">
+                                                    Mencari destination RajaOngkir...
+                                                </p>
+                                            )}
+
+                                            {!loadingDestination &&
+                                                addressForm.subdistrictId &&
+                                                !addressForm.rajaOngkirDestinationId && (
+                                                    <p className="mt-1 text-xs text-red-500">
+                                                        Destination tidak ditemukan.
+                                                    </p>
+                                                )}
+
+                                            {!loadingDestination &&
+                                                addressForm.rajaOngkirDestinationId && (
+                                                    <p className="mt-1 text-xs text-green-600">
+                                                        Destination berhasil ditemukan.
+                                                    </p>
+                                                )}
+                                        </div>
+
+                                        {/* DEFAULT */}
+
+                                        <label className="flex items-center gap-2 text-sm text-gray-700 sm:col-span-2">
+                                            <input
+                                                type="checkbox"
+                                                checked={
+                                                    addressForm.isDefault
+                                                }
+                                                onChange={(e) =>
+                                                    updateAddressForm(
+                                                        "isDefault",
+                                                        e.target.checked
+                                                    )
+                                                }
+                                                className="h-4 w-4 rounded"
+                                            />
+
+                                            Jadikan alamat utama
+                                        </label>
+
+                                    </div>
+
+                                    {/* ACTION */}
+
+                                    <div className="mt-5 flex justify-end gap-3">
+
+                                        <button
+                                            type="button"
+                                            onClick={() =>
+                                                setShowAddressForm(
+                                                    false
+                                                )
+                                            }
+                                            className="rounded-xl border border-gray-300 bg-white px-5 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-100"
+                                        >
+                                            Batal
+                                        </button>
+
+                                        <button
+                                            type="button"
+                                            onClick={
+                                                saveAddress
+                                            }
+                                            disabled={
+                                                savingAddress ||
+                                                loadingDestination ||
+                                                !addressForm.rajaOngkirDestinationId
+                                            }
+                                            className="rounded-xl bg-rose-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-rose-700 disabled:cursor-not-allowed disabled:bg-gray-300"
+                                        >
+                                            {savingAddress
+                                                ? "Menyimpan..."
+                                                : loadingDestination
+                                                    ? "Mencari Destination..."
+                                                    : "Simpan Alamat"}
+                                        </button>
+
+                                    </div>
+
+                                </div>
+                            )}
+
+                            {/* ADDRESS LIST */}
+
+                            {data.addresses.length ===
+                                0 ? (
+                                <div className="mt-5 rounded-2xl border border-dashed border-gray-300 p-6 text-center">
+
+                                    <p className="font-medium">
+                                        Belum ada alamat
+                                    </p>
+
+                                    <p className="mt-1 text-sm text-gray-500">
+                                        Tambahkan alamat pengiriman terlebih dahulu.
+                                    </p>
+
+                                </div>
+                            ) : (
+                                <div className="mt-5 space-y-3">
+
+                                    {data.addresses.map(
+                                        (item) => (
+                                            <button
+                                                key={
+                                                    item.id
+                                                }
+                                                type="button"
+                                                onClick={() =>
+                                                    setSelectedAddress(
+                                                        item.id
+                                                    )
+                                                }
+                                                className={`w-full rounded-2xl border p-4 text-left transition ${selectedAddress ===
+                                                    item.id
+                                                    ? "border-rose-500 bg-rose-50"
+                                                    : "border-gray-200 hover:border-gray-300"
+                                                    }`}
+                                            >
+
+                                                <div className="flex items-start justify-between gap-4">
+
+                                                    <div>
+
+                                                        <div className="flex flex-wrap items-center gap-2 font-semibold">
+
+                                                            {
+                                                                item.recipientName
+                                                            }
+
+                                                            {item.label && (
+                                                                <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-normal text-gray-600">
+                                                                    {
+                                                                        item.label
+                                                                    }
+                                                                </span>
+                                                            )}
+
+                                                        </div>
+
+                                                        <div className="mt-1 text-sm text-gray-500">
+                                                            {
+                                                                item.phone
+                                                            }
+                                                        </div>
+
+                                                        <div className="mt-3 text-sm leading-6 text-gray-700">
+
+                                                            {
+                                                                item.address
+                                                            }
+
+                                                            <br />
+
+                                                            {
+                                                                item.subdistrict
+                                                            }
+                                                            ,{" "}
+                                                            {
+                                                                item.district
+                                                            }
+                                                            ,{" "}
+                                                            {
+                                                                item.city
+                                                            }
+                                                            ,{" "}
+                                                            {
+                                                                item.province
+                                                            }
+
+                                                            {item.postalCode &&
+                                                                ` ${item.postalCode}`}
+
+                                                        </div>
+
+                                                        <div className="mt-2 text-xs text-gray-400">
+                                                            Destination:{" "}
+                                                            {item.rajaOngkirDestinationId ??
+                                                                "Belum tersedia"}
+                                                        </div>
+
+                                                    </div>
+
+                                                    <div className="flex shrink-0 flex-col items-end gap-2">
+
+                                                        {item.isDefault && (
+                                                            <span className="rounded-full bg-gray-900 px-3 py-1 text-xs font-medium text-white">
+                                                                Utama
+                                                            </span>
+                                                        )}
+
+                                                        {selectedAddress ===
+                                                            item.id && (
+                                                                <span className="text-xs font-semibold text-rose-600">
+                                                                    ✓ Dipilih
+                                                                </span>
+                                                            )}
+
+                                                    </div>
+
+                                                </div>
+
+                                            </button>
+                                        )
+                                    )}
+
+                                </div>
+                            )}
+
+                        </section>
+                        <div className="space-y-3">
+                            <h3 className="text-lg font-semibold">
+                                Metode Pembayaran
+                            </h3>
+
+                            {/* COD */}
+                            <label className="flex cursor-pointer items-center gap-3 rounded-lg border p-4">
+                                <input
+                                    type="radio"
+                                    name="paymentMethod"
+                                    value="COD"
+                                    checked={paymentMethod === "COD"}
+                                    onChange={() => setPaymentMethod("COD")}
+                                />
+
+                                <div>
+                                    <div className="font-medium">
+                                        COD
+                                    </div>
+
+                                    <div className="text-sm text-gray-500">
+                                        Bayar ketika pesanan diterima
+                                    </div>
+                                </div>
+                            </label>
+
+                            {/* BANK TRANSFER */}
+                            <label className="flex cursor-pointer items-center gap-3 rounded-lg border p-4">
+                                <input
+                                    type="radio"
+                                    name="paymentMethod"
+                                    value="BANK_TRANSFER"
+                                    checked={
+                                        paymentMethod === "BANK_TRANSFER"
+                                    }
+                                    onChange={() =>
+                                        setPaymentMethod("BANK_TRANSFER")
+                                    }
+                                />
+
+                                <div>
+                                    <div className="font-medium">
+                                        Bank Transfer
+                                    </div>
+
+                                    <div className="text-sm text-gray-500">
+                                        Pembayaran melalui Midtrans
+                                    </div>
+                                </div>
+                            </label>
+
+                            {/* E-WALLET */}
+                            <label className="flex cursor-pointer items-center gap-3 rounded-lg border p-4">
+                                <input
+                                    type="radio"
+                                    name="paymentMethod"
+                                    value="E_WALLET"
+                                    checked={
+                                        paymentMethod === "E_WALLET"
+                                    }
+                                    onChange={() =>
+                                        setPaymentMethod("E_WALLET")
+                                    }
+                                />
+
+                                <div>
+                                    <div className="font-medium">
+                                        E-Wallet
+                                    </div>
+
+                                    <div className="text-sm text-gray-500">
+                                        GoPay / ShopeePay melalui Midtrans
+                                    </div>
+                                </div>
+                            </label>
+
+                            {/* QRIS */}
+                            <label className="flex cursor-pointer items-center gap-3 rounded-lg border p-4">
+                                <input
+                                    type="radio"
+                                    name="paymentMethod"
+                                    value="QRIS"
+                                    checked={
+                                        paymentMethod === "QRIS"
+                                    }
+                                    onChange={() =>
+                                        setPaymentMethod("QRIS")
+                                    }
+                                />
+
+                                <div>
+                                    <div className="font-medium">
+                                        QRIS
+                                    </div>
+
+                                    <div className="text-sm text-gray-500">
+                                        Bayar menggunakan QRIS melalui Midtrans
+                                    </div>
+                                </div>
+                            </label>
+                        </div>
+
+                        {/* ================================= */}
+                        {/* SHIPPING */}
+                        {/* ================================= */}
+
+                        <section className="rounded-3xl border border-gray-200 bg-white p-6">
+
+                            <div className="flex items-center justify-between">
+
+
+                                <div>
+                                    <h2 className="text-lg font-bold">
+                                        Pilih Pengiriman
+                                    </h2>
+
+                                    <p className="mt-1 text-sm text-gray-500">
+                                        Pilih kurir dan layanan pengiriman.
+                                    </p>
+                                </div>
+
+                                {loadingShipping && (
+                                    <span className="text-sm text-gray-500">
+                                        Menghitung...
+                                    </span>
+                                )}
+
+                            </div>
+
+                            {!selectedAddress && (
+                                <div className="mt-5 rounded-2xl bg-gray-50 p-5 text-sm text-gray-500">
+                                    Pilih alamat terlebih dahulu untuk melihat pilihan pengiriman.
+                                </div>
+                            )}
+
+                            {selectedAddress &&
+                                !loadingShipping &&
+                                shippingOptions.length ===
+                                0 && (
+                                    <div className="mt-5 rounded-2xl bg-gray-50 p-5 text-sm text-gray-500">
+                                        Tidak ada layanan pengiriman yang tersedia.
+                                    </div>
+                                )}
+
+                            {shippingOptions.length >
+                                0 && (
+                                    <div className="mt-5 space-y-3">
+
+                                        {shippingOptions.map(
+                                            (
+                                                option,
+                                                index
+                                            ) => {
+
+                                                const cost =
+                                                    Number(
+                                                        option.cost ??
+                                                        option.price ??
+                                                        option.shipping_cost ??
+                                                        0
+                                                    );
+
+                                                const courier =
+                                                    option.courier ??
+                                                    option.code ??
+                                                    "";
+
+                                                const service =
+                                                    option.service ??
+                                                    option.service_name ??
+                                                    "";
+
+                                                const etd =
+                                                    option.etd ??
+                                                    option.estimation ??
+                                                    "";
+
+                                                const key =
+                                                    `${courier}-${service}-${index}`;
+
+                                                const selected =
+                                                    selectedShipping ===
+                                                    option;
+
+                                                return (
+                                                    <button
+                                                        key={
+                                                            key
+                                                        }
+                                                        type="button"
+                                                        onClick={() =>
+                                                            setSelectedShipping(
+                                                                option
+                                                            )
+                                                        }
+                                                        className={`w-full rounded-2xl border p-4 text-left transition ${selected
+                                                            ? "border-rose-500 bg-rose-50"
+                                                            : "border-gray-200 hover:border-gray-300"
+                                                            }`}
+                                                    >
+
+                                                        <div className="flex items-center justify-between gap-4">
+
+                                                            <div>
+
+                                                                <div className="font-bold uppercase">
+                                                                    {
+                                                                        courier
+                                                                    }
+                                                                </div>
+
+                                                                <div className="mt-1 text-sm font-medium">
+                                                                    {
+                                                                        service
+                                                                    }
+                                                                </div>
+
+                                                                {etd && (
+                                                                    <div className="mt-1 text-xs text-gray-500">
+                                                                        Estimasi{" "}
+                                                                        {
+                                                                            etd
+                                                                        }{" "}
+                                                                        hari
+                                                                    </div>
+                                                                )}
+
+                                                            </div>
+
+                                                            <div className="font-bold">
+                                                                Rp{" "}
+                                                                {cost.toLocaleString(
+                                                                    "id-ID"
+                                                                )}
+                                                            </div>
+
+                                                        </div>
+
+                                                    </button>
+                                                );
+                                            }
+                                        )}
+
+                                    </div>
+                                )}
+
+                        </section>
+
+                        {/* ================================= */}
+                        {/* PRODUCTS */}
+                        {/* ================================= */}
+
+                        <section className="rounded-3xl border border-gray-200 bg-white p-6">
+
+                            <h2 className="text-lg font-bold">
+                                Produk
+                            </h2>
+
+                            <div className="mt-5 divide-y">
+
+                                {data.items.map(
+                                    (item) => (
+                                        <div
+                                            key={
+                                                item.id
+                                            }
+                                            className="flex gap-4 py-4 first:pt-0 last:pb-0"
+                                        >
+
+                                            <div className="h-20 w-20 shrink-0 overflow-hidden rounded-xl bg-gray-100">
+
+                                                {item.image && (
+                                                    <img
+                                                        src={
+                                                            item.image
+                                                        }
+                                                        alt={
+                                                            item.productName
+                                                        }
+                                                        className="h-full w-full object-cover"
+                                                    />
+                                                )}
+
+                                            </div>
+
+                                            <div className="min-w-0 flex-1">
+
+                                                <h3 className="font-semibold">
+                                                    {
+                                                        item.productName
+                                                    }
+                                                </h3>
+
+                                                <p className="mt-1 text-sm text-gray-500">
+                                                    {
+                                                        item.variantName
+                                                    }
+                                                </p>
+
+                                                <p className="mt-2 text-sm">
+                                                    {
+                                                        item.quantity
+                                                    }{" "}
+                                                    × Rp{" "}
+                                                    {item.price.toLocaleString(
+                                                        "id-ID"
+                                                    )}
+                                                </p>
+
+                                                <p className="mt-1 text-xs text-gray-400">
+                                                    Berat:{" "}
+                                                    {item.weight.toLocaleString(
+                                                        "id-ID"
+                                                    )}{" "}
+                                                    gram
+                                                </p>
+
+                                            </div>
+
+                                            <div className="font-semibold">
+                                                Rp{" "}
+                                                {item.subtotal.toLocaleString(
+                                                    "id-ID"
+                                                )}
+                                            </div>
+
+                                        </div>
+                                    )
+                                )}
+
+                            </div>
+
+                        </section>
+
+                    </div>
+
+                    {/* ================================= */}
+                    {/* SUMMARY */}
+                    {/* ================================= */}
+
+                    <aside className="h-fit rounded-3xl border border-gray-200 bg-white p-6 lg:sticky lg:top-6">
+
+                        <h2 className="text-lg font-bold text-gray-900">
+                            Ringkasan Pesanan
+                        </h2>
+
+                        <div className="mt-5 space-y-4 text-sm">
+
+                            <div className="flex items-center justify-between">
+
+                                <span className="text-gray-500">
+                                    Subtotal
+                                </span>
+
+                                <span className="font-medium text-gray-900">
+                                    Rp{" "}
+                                    {data.subtotal.toLocaleString(
+                                        "id-ID"
+                                    )}
+                                </span>
+
+                            </div>
+
+                            <div className="flex items-center justify-between">
+
+                                <span className="text-gray-500">
+                                    Berat
+                                </span>
+
+                                <span className="font-medium text-gray-900">
+                                    {Number(
+                                        data.totalWeight ||
+                                        0
+                                    ).toLocaleString(
+                                        "id-ID"
+                                    )}{" "}
+                                    gram
+                                </span>
+
+                            </div>
+
+                            <div className="flex items-start justify-between gap-4">
+
+                                <span className="text-gray-500">
+                                    Pengiriman
+                                </span>
+
+                                {selectedShipping ? (
+                                    <div className="text-right">
+
+                                        <div className="font-medium uppercase text-gray-900">
+                                            {
+                                                selectedShipping.courier ??
+                                                selectedShipping.code ??
+                                                ""
+                                            }
+                                        </div>
+
+                                        <div className="text-xs text-gray-500">
+                                            {
+                                                selectedShipping.service ??
+                                                selectedShipping.service_name ??
+                                                ""
+                                            }
+                                        </div>
+
+                                    </div>
+                                ) : (
+                                    <span className="text-gray-400">
+                                        Belum dipilih
+                                    </span>
+                                )}
+
+                            </div>
+
+                            <div className="flex items-center justify-between">
+
+                                <span className="text-gray-500">
+                                    Ongkir
+                                </span>
+
+                                <span
+                                    className={
+                                        selectedShipping
+                                            ? "font-medium text-gray-900"
+                                            : "text-gray-400"
+                                    }
+                                >
+                                    {selectedShipping
+                                        ? `Rp ${shippingCost.toLocaleString(
+                                            "id-ID"
+                                        )}`
+                                        : "Pilih pengiriman"}
+                                </span>
+
+                            </div>
+
+                            <div className="border-t border-gray-200 pt-4">
+
+                                <div className="flex items-center justify-between">
+
+                                    <span className="text-base font-bold text-gray-900">
+                                        Total
+                                    </span>
+
+                                    <span className="text-xl font-bold text-rose-600">
+                                        Rp{" "}
+                                        {grandTotal.toLocaleString(
+                                            "id-ID"
+                                        )}
+                                    </span>
+
+                                </div>
+
+                            </div>
+
+                        </div>
+
+                        <button
+                            type="button"
+                            onClick={createOrder}
+                            disabled={
+                                !address ||
+                                !selectedShipping
+                            }
+                            className="mt-6 w-full rounded-xl bg-rose-600 px-5 py-3 font-semibold text-white transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:bg-gray-300"
+                        >
+                            {!address
+                                ? "Pilih Alamat"
+                                : !selectedShipping
+                                    ? "Pilih Pengiriman"
+                                    : "Buat Pesanan"}
+                        </button>
+
+                    </aside>
+
+                </div>
+            </div>
+        </main>
+    );
+}
