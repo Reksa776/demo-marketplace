@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import toast from "react-hot-toast";
@@ -151,6 +151,8 @@ const emptyAddressForm: AddressForm = {
 };
 
 export default function CheckoutPage() {
+    const creatingPaymentRef = useRef(false);
+    const snapProcessingRef = useRef(false);
     const router = useRouter();
     const [paymentMethod, setPaymentMethod] = useState<
         "COD" | "BANK_TRANSFER" | "E_WALLET" | "QRIS"
@@ -1283,6 +1285,9 @@ export default function CheckoutPage() {
         useState(false);
 
     async function createOrder() {
+        if (snapProcessingRef.current) {
+            return;
+        }
         if (!selectedAddress) {
             toast.error(
                 "Pilih alamat pengiriman."
@@ -1490,77 +1495,40 @@ export default function CheckoutPage() {
                     typeof window !== "undefined" &&
                     (window as any).snap
                 ) {
-                    (window as any).snap.pay(
-                        paymentData.token,
-                        {
-                            onSuccess: (result: any) => {
-                                console.log(
-                                    "MIDTRANS SUCCESS:",
-                                    result
-                                );
+                    if (snapProcessingRef.current) {
+                        console.log(
+                            "MIDTRANS SNAP: popup masih aktif."
+                        );
 
-                                /*
-                                 * Jangan redirect di sini ke payment-finish
-                                 * kalau payment-finish bukan tujuan setelah
-                                 * pembayaran berhasil.
-                                 *
-                                 * Untuk sementara tetap di checkout.
-                                 *
-                                 * Nanti status pembayaran sebaiknya
-                                 * dikonfirmasi lewat webhook Midtrans.
-                                 */
+                        return;
+                    }
+                    snapProcessingRef.current = true;
 
-                                toast.success(
-                                    "Pembayaran berhasil diproses."
-                                );
-                            },
+                    window.snap.pay(paymentData.token, {
+                        onSuccess: (result: any) => {
+                            snapProcessingRef.current = false;
+                            router.push(
+                                `/checkout/payment-finish?payment=${encodeURIComponent(paymentData.paymentReference)}`
+                            );
+                        },
 
-                            onPending: (result: any) => {
-                                console.log(
-                                    "MIDTRANS PENDING:",
-                                    result
-                                );
+                        onPending: (result: any) => {
+                            snapProcessingRef.current = false;
+                            router.push(
+                                `/checkout/payment-finish?payment=${encodeURIComponent(paymentData.paymentReference)}`
+                            );
+                        },
 
-                                /*
-                                 * Jangan redirect ke payment-finish.
-                                 */
+                        onError: (result: any) => {
+                            snapProcessingRef.current = false;
+                            toast.error("Pembayaran gagal.");
+                        },
 
-                                toast(
-                                    "Pembayaran sedang menunggu."
-                                );
-                            },
-
-                            onError: (result: any) => {
-                                console.error(
-                                    "MIDTRANS ERROR:",
-                                    result
-                                );
-
-                                toast.error(
-                                    "Pembayaran gagal. Silakan coba lagi."
-                                );
-                            },
-
-                            onClose: () => {
-                                console.log(
-                                    "MIDTRANS CLOSED"
-                                );
-
-                                /*
-                                 * TIDAK ADA REDIRECT.
-                                 *
-                                 * Snap akan menutup popup.
-                                 * User tetap berada di:
-                                 *
-                                 * /checkout
-                                 */
-
-                                toast(
-                                    "Pembayaran ditutup. Kamu kembali ke checkout."
-                                );
-                            },
-                        }
-                    );
+                        onClose: () => {
+                            snapProcessingRef.current = false;
+                            toast("Pembayaran ditutup.");
+                        },
+                    });
 
                     return;
                 }

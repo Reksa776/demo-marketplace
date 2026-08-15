@@ -24,6 +24,27 @@ const snap = new Midtrans.Snap({
  * ==========================================
  * POST
  * ==========================================
+ *
+ * PENTING - PERUBAHAN UTAMA:
+ *
+ * Order SEKARANG dibuat di sini, SEBELUM
+ * Snap token dikembalikan ke client, dengan
+ * status PENDING / paymentStatus PENDING.
+ *
+ * Ini supaya:
+ *
+ * 1. Order tidak hilang kalau user menutup
+ *    browser saat proses bayar.
+ *
+ * 2. Halaman /checkout/payment-finish bisa
+ *    menemukan Order-nya (sebelumnya order
+ *    memang tidak pernah dibuat sama sekali).
+ *
+ * 3. Webhook
+ *    /api/payment/midtrans/notification
+ *    bisa mencari Order lewat orderNumber
+ *    (= Midtrans order_id) untuk update
+ *    status final (PAID / FAILED / EXPIRED).
  */
 
 export async function POST(req: Request) {
@@ -48,8 +69,7 @@ export async function POST(req: Request) {
             );
         }
 
-        const userId =
-            session.user.id;
+        const userId = session.user.id;
 
         /*
          * ==========================================
@@ -57,8 +77,7 @@ export async function POST(req: Request) {
          * ==========================================
          */
 
-        const body =
-            await req.json();
+        const body = await req.json();
 
         const {
             productId,
@@ -75,14 +94,17 @@ export async function POST(req: Request) {
          * ==========================================
          */
 
-        const productIdNumber =
-            Number(productId);
+        const productIdNumber = Number(
+            productId
+        );
 
-        const variantIdNumber =
-            Number(variantId);
+        const variantIdNumber = Number(
+            variantId
+        );
 
-        const quantityNumber =
-            Number(quantity);
+        const quantityNumber = Number(
+            quantity
+        );
 
         if (
             !Number.isInteger(
@@ -96,9 +118,7 @@ export async function POST(req: Request) {
                     message:
                         "Product tidak valid.",
                 },
-                {
-                    status: 400,
-                }
+                { status: 400 }
             );
         }
 
@@ -114,9 +134,7 @@ export async function POST(req: Request) {
                     message:
                         "Variant produk tidak valid.",
                 },
-                {
-                    status: 400,
-                }
+                { status: 400 }
             );
         }
 
@@ -132,9 +150,7 @@ export async function POST(req: Request) {
                     message:
                         "Quantity tidak valid.",
                 },
-                {
-                    status: 400,
-                }
+                { status: 400 }
             );
         }
 
@@ -151,9 +167,7 @@ export async function POST(req: Request) {
                     message:
                         "Alamat pengiriman wajib dipilih.",
                 },
-                {
-                    status: 400,
-                }
+                { status: 400 }
             );
         }
 
@@ -170,9 +184,7 @@ export async function POST(req: Request) {
                     message:
                         "Layanan pengiriman wajib dipilih.",
                 },
-                {
-                    status: 400,
-                }
+                { status: 400 }
             );
         }
 
@@ -199,9 +211,7 @@ export async function POST(req: Request) {
                     message:
                         "Metode pembayaran Midtrans tidak valid.",
                 },
-                {
-                    status: 400,
-                }
+                { status: 400 }
             );
         }
 
@@ -209,16 +219,6 @@ export async function POST(req: Request) {
          * ==========================================
          * PRODUCT + VARIANT
          * ==========================================
-         *
-         * PENTING:
-         *
-         * API INI TIDAK MEMBACA CART.
-         *
-         * Buy Now langsung membaca:
-         *
-         * productId
-         * variantId
-         * quantity
          */
 
         const variant =
@@ -226,7 +226,6 @@ export async function POST(req: Request) {
                 {
                     where: {
                         id: variantIdNumber,
-
                         productId:
                             productIdNumber,
                     },
@@ -244,9 +243,7 @@ export async function POST(req: Request) {
                     message:
                         "Produk atau variant tidak ditemukan.",
                 },
-                {
-                    status: 404,
-                }
+                { status: 404 }
             );
         }
 
@@ -263,12 +260,9 @@ export async function POST(req: Request) {
             return NextResponse.json(
                 {
                     success: false,
-                    message:
-                        `Stok ${variant.product.name} - ${variant.name} tidak mencukupi.`,
+                    message: `Stok ${variant.product.name} - ${variant.name} tidak mencukupi.`,
                 },
-                {
-                    status: 400,
-                }
+                { status: 400 }
             );
         }
 
@@ -278,17 +272,12 @@ export async function POST(req: Request) {
          * ==========================================
          */
 
-        const price =
-            Math.round(
-                Number(
-                    variant.price
-                )
-            );
+        const price = Math.round(
+            Number(variant.price)
+        );
 
         if (
-            !Number.isFinite(
-                price
-            ) ||
+            !Number.isFinite(price) ||
             price < 0
         ) {
             return NextResponse.json(
@@ -297,15 +286,12 @@ export async function POST(req: Request) {
                     message:
                         "Harga produk tidak valid.",
                 },
-                {
-                    status: 400,
-                }
+                { status: 400 }
             );
         }
 
         const subtotal =
-            price *
-            quantityNumber;
+            price * quantityNumber;
 
         /*
          * ==========================================
@@ -330,9 +316,7 @@ export async function POST(req: Request) {
                     message:
                         "Alamat tidak ditemukan.",
                 },
-                {
-                    status: 404,
-                }
+                { status: 404 }
             );
         }
 
@@ -342,13 +326,12 @@ export async function POST(req: Request) {
          * ==========================================
          */
 
-        const shippingCost =
-            Number(
-                shipping.cost ??
-                shipping.price ??
-                shipping.shipping_cost ??
-                0
-            );
+        const shippingCost = Number(
+            shipping.cost ??
+            shipping.price ??
+            shipping.shipping_cost ??
+            0
+        );
 
         if (
             !Number.isFinite(
@@ -362,16 +345,13 @@ export async function POST(req: Request) {
                     message:
                         "Biaya pengiriman tidak valid.",
                 },
-                {
-                    status: 400,
-                }
+                { status: 400 }
             );
         }
 
-        const safeShippingCost =
-            Math.round(
-                shippingCost
-            );
+        const safeShippingCost = Math.round(
+            shippingCost
+        );
 
         /*
          * ==========================================
@@ -380,8 +360,7 @@ export async function POST(req: Request) {
          */
 
         const grossAmount =
-            subtotal +
-            safeShippingCost;
+            subtotal + safeShippingCost;
 
         if (
             !Number.isInteger(
@@ -395,9 +374,7 @@ export async function POST(req: Request) {
                     message:
                         "Total pembayaran tidak valid.",
                 },
-                {
-                    status: 400,
-                }
+                { status: 400 }
             );
         }
 
@@ -407,61 +384,32 @@ export async function POST(req: Request) {
          * ==========================================
          */
 
-        const fullProductName =
-            `${variant.product.name} - ${variant.name}`;
+        const fullProductName = `${variant.product.name} - ${variant.name}`;
 
         const itemDetails = [
             {
-                id:
-                    `PRODUCT-${productIdNumber}-VARIANT-${variantIdNumber}`,
-
+                id: `PRODUCT-${productIdNumber}-VARIANT-${variantIdNumber}`,
                 price,
-
-                quantity:
-                    quantityNumber,
-
-                name:
-                    fullProductName.substring(
-                        0,
-                        50
-                    ),
+                quantity: quantityNumber,
+                name: fullProductName.substring(
+                    0,
+                    50
+                ),
             },
         ];
 
-        /*
-         * ==========================================
-         * SHIPPING ITEM
-         * ==========================================
-         */
-
-        if (
-            safeShippingCost > 0
-        ) {
+        if (safeShippingCost > 0) {
             itemDetails.push({
                 id: "SHIPPING",
-
-                price:
-                    safeShippingCost,
-
+                price: safeShippingCost,
                 quantity: 1,
-
-                name:
-                    "Biaya Pengiriman",
+                name: "Biaya Pengiriman",
             });
         }
 
-        /*
-         * ==========================================
-         * VALIDATE MIDTRANS TOTAL
-         * ==========================================
-         */
-
         const itemDetailsTotal =
             itemDetails.reduce(
-                (
-                    total,
-                    item
-                ) =>
+                (total, item) =>
                     total +
                     item.price *
                     item.quantity,
@@ -476,11 +424,9 @@ export async function POST(req: Request) {
                 "BUY NOW MIDTRANS TOTAL MISMATCH:",
                 {
                     subtotal,
-                    shippingCost:
-                        safeShippingCost,
+                    safeShippingCost,
                     grossAmount,
                     itemDetailsTotal,
-                    itemDetails,
                 }
             );
 
@@ -490,24 +436,167 @@ export async function POST(req: Request) {
                     message:
                         "Total pembayaran tidak sesuai.",
                 },
-                {
-                    status: 400,
-                }
+                { status: 400 }
             );
         }
 
         /*
          * ==========================================
-         * PAYMENT REFERENCE
+         * ORDER NUMBER
          * ==========================================
+         *
+         * Dipakai juga sebagai Midtrans order_id,
+         * supaya webhook bisa menemukan Order ini
+         * kembali lewat orderNumber.
          */
 
-        const paymentReference =
-            `PAY-BN-${Date.now()}-${Math.floor(
-                Math.random() * 10000
-            )
-                .toString()
-                .padStart(4, "0")}`;
+        const orderNumber = `PAY-BN-${Date.now()}-${Math.floor(
+            Math.random() * 10000
+        )
+            .toString()
+            .padStart(4, "0")}`;
+
+        /*
+         * ==========================================
+         * CREATE ORDER (STATUS: PENDING)
+         * ==========================================
+         *
+         * Stock dikurangi SEKARANG untuk mencegah
+         * overselling saat menunggu pembayaran.
+         *
+         * Kalau pembayaran gagal/expired, webhook
+         * akan mengembalikan stock ini.
+         */
+
+        const order = await prisma.$transaction(
+            async (tx) => {
+                const createdOrder =
+                    await tx.order.create({
+                        data: {
+                            userId,
+
+                            orderNumber,
+
+                            recipientName:
+                                address.recipientName,
+
+                            phone: address.phone,
+
+                            address:
+                                address.address,
+
+                            province:
+                                address.province,
+
+                            city: address.city,
+
+                            district:
+                                address.district,
+
+                            postalCode:
+                                address.postalCode,
+
+                            latitude:
+                                address.latitude,
+
+                            longitude:
+                                address.longitude,
+
+                            subtotal,
+
+                            shippingCost:
+                                safeShippingCost,
+
+                            total: grossAmount,
+
+                            status: "PENDING",
+
+                            paymentMethod,
+
+                            paymentStatus:
+                                "PENDING",
+
+                            paymentReference:
+                                orderNumber,
+
+                            shippingCourier:
+                                shipping.courier ??
+                                shipping.code ??
+                                null,
+
+                            shippingService:
+                                shipping.service ??
+                                shipping.service_name ??
+                                null,
+
+                            items: {
+                                create: [
+                                    {
+                                        productId:
+                                            variant.productId,
+
+                                        variantId:
+                                            variant.id,
+
+                                        productName:
+                                            variant
+                                                .product
+                                                .name,
+
+                                        variantName:
+                                            variant.name,
+
+                                        price,
+
+                                        quantity:
+                                            quantityNumber,
+
+                                        subtotal:
+                                            price *
+                                            quantityNumber,
+                                    },
+                                ],
+                            },
+                        },
+
+                        include: {
+                            items: true,
+                        },
+                    });
+
+                await tx.productVariant.update({
+                    where: {
+                        id: variant.id,
+                    },
+
+                    data: {
+                        stock: {
+                            decrement:
+                                quantityNumber,
+                        },
+                    },
+                });
+
+                await tx.product.update({
+                    where: {
+                        id: variant.productId,
+                    },
+
+                    data: {
+                        sold: {
+                            increment:
+                                quantityNumber,
+                        },
+                    },
+                });
+
+                return createdOrder;
+            },
+            {
+                timeout: 15000,   // 15 detik, dari default 5 detik
+                maxWait: 10000,   // waktu tunggu maksimal buat dapat slot transaksi
+            }
+        );
 
         /*
          * ==========================================
@@ -517,15 +606,23 @@ export async function POST(req: Request) {
 
         const parameter = {
             transaction_details: {
-                order_id: paymentReference,
+                order_id: orderNumber,
                 gross_amount: grossAmount,
             },
 
             item_details: itemDetails,
 
             customer_details: {
-                first_name: address.recipientName.substring(0, 50),
-                phone: address.phone.substring(0, 20),
+                first_name:
+                    address.recipientName.substring(
+                        0,
+                        50
+                    ),
+
+                phone: address.phone.substring(
+                    0,
+                    20
+                ),
             },
 
             callbacks: {
@@ -538,68 +635,18 @@ export async function POST(req: Request) {
             },
         };
 
-        /*
-         * ==========================================
-         * LOG
-         * ==========================================
-         */
-
         console.log(
             "========== BUY NOW MIDTRANS =========="
         );
 
         console.log(
-            "USER:",
-            userId
-        );
-
-        console.log(
-            "PRODUCT:",
-            productIdNumber
-        );
-
-        console.log(
-            "VARIANT:",
-            variantIdNumber
-        );
-
-        console.log(
-            "QUANTITY:",
-            quantityNumber
-        );
-
-        console.log(
-            "PAYMENT REFERENCE:",
-            paymentReference
-        );
-
-        console.log(
-            "PAYMENT METHOD:",
-            paymentMethod
-        );
-
-        console.log(
-            "SUBTOTAL:",
-            subtotal
-        );
-
-        console.log(
-            "SHIPPING:",
-            safeShippingCost
+            "ORDER NUMBER:",
+            orderNumber
         );
 
         console.log(
             "GROSS AMOUNT:",
             grossAmount
-        );
-
-        console.log(
-            "MIDTRANS PARAMETER:",
-            JSON.stringify(
-                parameter,
-                null,
-                2
-            )
         );
 
         /*
@@ -608,27 +655,80 @@ export async function POST(req: Request) {
          * ==========================================
          */
 
-        const transaction =
-            await snap.createTransaction(
-                parameter
+        let transaction;
+
+        try {
+            transaction =
+                await snap.createTransaction(
+                    parameter
+                );
+        } catch (midtransError) {
+            /*
+             * ==========================================
+             * ROLLBACK KALAU MIDTRANS GAGAL
+             * ==========================================
+             *
+             * Order sudah terlanjur dibuat + stock
+             * sudah dikurangi. Karena Snap gagal
+             * dibuat, batalkan order dan kembalikan
+             * stock supaya tidak "nyangkut".
+             */
+
+            console.error(
+                "MIDTRANS CREATE TRANSACTION GAGAL, ROLLBACK ORDER:",
+                midtransError
             );
 
-        /*
-         * ==========================================
-         * LOG MIDTRANS
-         * ==========================================
-         */
+            await prisma.$transaction(
+                async (tx) => {
+                    await tx.order.update({
+                        where: {
+                            id: order.id,
+                        },
 
-        console.log(
-            "MIDTRANS RESPONSE:",
-            transaction
-        );
+                        data: {
+                            status: "CANCELLED",
+                            paymentStatus:
+                                "FAILED",
+                        },
+                    });
 
-        /*
-         * ==========================================
-         * VALIDATE TOKEN
-         * ==========================================
-         */
+                    await tx.productVariant.update(
+                        {
+                            where: {
+                                id: variant.id,
+                            },
+
+                            data: {
+                                stock: {
+                                    increment:
+                                        quantityNumber,
+                                },
+                            },
+                        }
+                    );
+
+                    await tx.product.update({
+                        where: {
+                            id: variant.productId,
+                        },
+
+                        data: {
+                            sold: {
+                                decrement:
+                                    quantityNumber,
+                            },
+                        },
+                    });
+                },
+                {
+                    timeout: 15000,   // 15 detik, dari default 5 detik
+                    maxWait: 10000,   // waktu tunggu maksimal buat dapat slot transaksi
+                }
+            );
+
+            throw midtransError;
+        }
 
         if (!transaction?.token) {
             return NextResponse.json(
@@ -637,9 +737,7 @@ export async function POST(req: Request) {
                     message:
                         "Token pembayaran Midtrans tidak ditemukan.",
                 },
-                {
-                    status: 500,
-                }
+                { status: 500 }
             );
         }
 
@@ -647,13 +745,6 @@ export async function POST(req: Request) {
          * ==========================================
          * RESPONSE
          * ==========================================
-         *
-         * redirectUrl sengaja tetap dikirim
-         * untuk kebutuhan debugging / fallback,
-         * TAPI FRONTEND JANGAN MENGGUNAKANNYA.
-         *
-         * Frontend wajib menggunakan token
-         * + snap.pay().
          */
 
         return NextResponse.json({
@@ -663,35 +754,26 @@ export async function POST(req: Request) {
                 "Pembayaran Buy Now berhasil dibuat.",
 
             data: {
-                token:
-                    transaction.token,
+                orderId: order.id,
+                orderNumber,
+
+                token: transaction.token,
 
                 redirectUrl:
                     transaction.redirect_url,
 
-                paymentReference,
+                paymentReference: orderNumber,
 
                 paymentMethod,
 
                 grossAmount,
 
-                productId:
-                    productIdNumber,
-
-                variantId:
-                    variantIdNumber,
-
-                quantity:
-                    quantityNumber,
+                productId: productIdNumber,
+                variantId: variantIdNumber,
+                quantity: quantityNumber,
             },
         });
     } catch (error: any) {
-        /*
-         * ==========================================
-         * ERROR
-         * ==========================================
-         */
-
         console.error(
             "========== BUY NOW MIDTRANS ERROR =========="
         );
@@ -706,39 +788,25 @@ export async function POST(req: Request) {
             error?.ApiResponse
         );
 
-        console.error(
-            "RAW:",
-            error
-        );
-
-        console.error(
-            "============================================"
-        );
-
         const midtransMessages =
             error?.ApiResponse
                 ?.error_messages;
 
-        const message =
-            Array.isArray(
-                midtransMessages
-            )
-                ? midtransMessages.join(
-                    ", "
-                )
-                : error?.ApiResponse
-                    ?.status_message ||
-                error?.message ||
-                "Gagal membuat pembayaran Midtrans.";
+        const message = Array.isArray(
+            midtransMessages
+        )
+            ? midtransMessages.join(", ")
+            : error?.ApiResponse
+                ?.status_message ||
+            error?.message ||
+            "Gagal membuat pembayaran Midtrans.";
 
         return NextResponse.json(
             {
                 success: false,
                 message,
             },
-            {
-                status: 500,
-            }
+            { status: 500 }
         );
     }
 }

@@ -149,6 +149,22 @@ export async function POST(
                 }
             );
         }
+        // tambahin ini sebelum cart upsert
+        const userExists = await prisma.user.findUnique({
+            where: { id: session.user.id },
+            select: { id: true },
+        });
+
+        if (!userExists) {
+            return NextResponse.json(
+                {
+                    message:
+                        "Sesi tidak valid, silakan login ulang.",
+                },
+                { status: 401 }
+            );
+        }
+
 
         const cart =
             await prisma.cart.upsert({
