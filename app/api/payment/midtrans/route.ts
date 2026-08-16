@@ -630,7 +630,7 @@ export async function POST(
             },
 
             callbacks: {
-                finish: `${process.env.NEXT_PUBLIC_APP_URL}/checkout/payment-finish`,
+                finish: `${process.env.NEXT_PUBLIC_APP_URL}/checkout/payment-finish?payment=${orderNumber}`,
             },
 
             custom_expiry: {

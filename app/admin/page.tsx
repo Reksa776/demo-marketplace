@@ -1,71 +1,132 @@
+"use client";
+
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import {
-    FiArrowRight,
     FiBox,
+    FiFileText,
     FiShoppingBag,
-    FiSettings,
-    FiTrendingUp,
     FiUsers,
+    FiTrendingUp,
 } from "react-icons/fi";
+import DashboardStats from "@/components/admin/DashboardStats";
+import SalesChart from "@/components/admin/SalesChart";
+import OrderStatusCard from "@/components/admin/OrderStatusCard";
+import PaymentMethodCard from "@/components/admin/PaymentMethodCard";
+import TopProductsCard from "@/components/admin/TopProductsCard";
+import RecentOrdersCard from "@/components/admin/RecentOrdersCard";
+import AdminMenuCard from "@/components/admin/AdminMenuCard";
+
 
 export default function AdminPage() {
+    const [data, setData] = useState<any>(null);
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+        async function loadDashboard() {
+            try {
+                const response = await fetch(
+                    "/api/admin/dashboard?period=7d",
+                    {
+                        cache: "no-store",
+                    }
+                );
+
+                const result =
+                    await response.json();
+
+                if (!response.ok || !result.success) {
+                    throw new Error(
+                        result.message ||
+                        "Gagal mengambil dashboard."
+                    );
+                }
+
+                setData(result.data);
+            } catch (error) {
+                console.error(
+                    "LOAD ADMIN DASHBOARD ERROR:",
+                    error
+                );
+            } finally {
+                setLoading(false);
+            }
+        }
+
+        loadDashboard();
+    }, []);
+
+    if (loading) {
+        return (
+            <div className="min-h-screen bg-gray-50">
+                <div className="mx-auto max-w-7xl px-5 py-10">
+                    <div className="animate-pulse">
+                        <div className="h-8 w-64 rounded bg-gray-200" />
+
+                        <div className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                            {[1, 2, 3, 4].map(
+                                (item) => (
+                                    <div
+                                        key={item}
+                                        className="h-32 rounded-2xl bg-gray-200"
+                                    />
+                                )
+                            )}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
+    if (!data) {
+        return (
+            <div className="min-h-screen bg-gray-50">
+                <div className="mx-auto max-w-7xl px-5 py-10">
+                    <div className="rounded-2xl border border-red-200 bg-red-50 p-5 text-sm text-red-600">
+                        Gagal mengambil data dashboard.
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
     return (
-        <div className="min-h-screen">
+        <div className="min-h-screen bg-gray-50">
             {/* HEADER */}
             <div className="border-b border-gray-200 bg-white">
                 <div className="mx-auto max-w-7xl px-5 py-7 sm:px-6">
-                    <div>
-                        <p className="text-sm font-medium text-rose-600">
-                            Admin Dashboard
-                        </p>
+                    <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+                        <div>
+                            <p className="text-sm font-semibold text-rose-600">
+                                Admin Dashboard
+                            </p>
 
-                        <h1 className="mt-1 text-2xl font-bold tracking-tight text-gray-900 sm:text-3xl">
-                            Dashboard
-                        </h1>
+                            <h1 className="mt-1 text-2xl font-bold tracking-tight text-gray-900 sm:text-3xl">
+                                Ringkasan Toko
+                            </h1>
 
-                        <p className="mt-2 text-sm text-gray-500">
-                            Kelola toko, produk, pesanan,
-                            dan pengaturan aplikasi.
-                        </p>
+                            <p className="mt-2 text-sm text-gray-500">
+                                Pantau penjualan, pesanan,
+                                produk, dan performa toko.
+                            </p>
+                        </div>
+
+                        <Link
+                            href="/admin/reports"
+                            className="inline-flex items-center justify-center gap-2 rounded-xl bg-gray-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-gray-800"
+                        >
+                            <FiFileText size={17} />
+                            Laporan Penjualan
+                        </Link>
                     </div>
                 </div>
             </div>
 
+
             {/* CONTENT */}
-            <div className="mx-auto max-w-7xl px-5 py-6 sm:px-6">
-                {/* STAT CARDS */}
-                <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-                    <StatCard
-                        title="Total Produk"
-                        value="—"
-                        description="Produk di katalog"
-                        icon={FiBox}
-                    />
-
-                    <StatCard
-                        title="Pesanan"
-                        value="—"
-                        description="Total pesanan"
-                        icon={FiShoppingBag}
-                    />
-
-                    <StatCard
-                        title="Pengguna"
-                        value="—"
-                        description="Pengguna terdaftar"
-                        icon={FiUsers}
-                    />
-
-                    <StatCard
-                        title="Penjualan"
-                        value="—"
-                        description="Total penjualan"
-                        icon={FiTrendingUp}
-                    />
-                </div>
-
-                {/* QUICK ACTION */}
-                <section className="mt-6">
+            <div className="mx-auto max-w-7xl px-5 py-3 sm:px-6">
+                <section className="my-8">
                     <div className="mb-4">
                         <h2 className="text-lg font-bold text-gray-900">
                             Menu Cepat
@@ -76,115 +137,68 @@ export default function AdminPage() {
                         </p>
                     </div>
 
-                    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                         <AdminMenuCard
                             href="/admin/products"
                             icon={FiBox}
-                            title="Kelola Produk"
-                            description="Tambah, edit, hapus produk dan atur variant."
+                            title="Produk"
+                            description="Kelola produk dan variant."
                         />
 
                         <AdminMenuCard
                             href="/admin/orders"
                             icon={FiShoppingBag}
-                            title="Kelola Pesanan"
-                            description="Lihat dan proses pesanan pelanggan."
+                            title="Pesanan"
+                            description="Lihat dan proses pesanan."
                         />
 
                         <AdminMenuCard
                             href="/admin/users"
                             icon={FiUsers}
-                            title="Kelola Pengguna"
-                            description="Lihat pengguna dan akun yang terdaftar."
+                            title="Pengguna"
+                            description="Kelola pengguna toko."
                         />
 
                         <AdminMenuCard
-                            href="/admin/settings"
-                            icon={FiSettings}
-                            title="Pengaturan Toko"
-                            description="Atur identitas toko, alamat dan konfigurasi."
+                            href="/admin/reports"
+                            icon={FiTrendingUp}
+                            title="Reporting"
+                            description="Lihat dan download laporan."
                         />
                     </div>
                 </section>
+                <DashboardStats
+                    summary={data.summary}
+                />
+
+                <div className="mt-6">
+                    <SalesChart
+                        data={data.dailySales}
+                    />
+                </div>
+
+                <div className="mt-6 grid gap-6 lg:grid-cols-2">
+                    <OrderStatusCard
+                        data={data.orderStatus}
+                    />
+
+                    <PaymentMethodCard
+                        data={data.paymentMethod}
+                    />
+                </div>
+
+                <div className="mt-6 grid gap-6 xl:grid-cols-2">
+                    <TopProductsCard
+                        data={data.topProducts}
+                    />
+
+                    <RecentOrdersCard
+                        data={data.recentOrders}
+                    />
+                </div>
+
+
             </div>
         </div>
-    );
-}
-
-function StatCard({
-    title,
-    value,
-    description,
-    icon: Icon,
-}: {
-    title: string;
-    value: string;
-    description: string;
-    icon: any;
-}) {
-    return (
-        <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
-            <div className="flex items-start justify-between">
-                <div>
-                    <p className="text-sm font-medium text-gray-500">
-                        {title}
-                    </p>
-
-                    <p className="mt-2 text-2xl font-bold text-gray-900">
-                        {value}
-                    </p>
-
-                    <p className="mt-1 text-xs text-gray-400">
-                        {description}
-                    </p>
-                </div>
-
-                <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-rose-50 text-rose-600">
-                    <Icon size={20} />
-                </div>
-            </div>
-        </div>
-    );
-}
-
-function AdminMenuCard({
-    href,
-    icon: Icon,
-    title,
-    description,
-}: {
-    href: string;
-    icon: any;
-    title: string;
-    description: string;
-}) {
-    return (
-        <Link
-            href={href}
-            className="group rounded-2xl border border-gray-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-rose-200 hover:shadow-md"
-        >
-            <div className="flex items-start gap-4">
-                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gray-100 text-gray-700 transition group-hover:bg-rose-50 group-hover:text-rose-600">
-                    <Icon size={20} />
-                </div>
-
-                <div className="min-w-0 flex-1">
-                    <div className="flex items-center justify-between gap-3">
-                        <h3 className="font-semibold text-gray-900">
-                            {title}
-                        </h3>
-
-                        <FiArrowRight
-                            size={18}
-                            className="shrink-0 text-gray-400 transition group-hover:translate-x-1 group-hover:text-rose-600"
-                        />
-                    </div>
-
-                    <p className="mt-1 text-sm leading-6 text-gray-500">
-                        {description}
-                    </p>
-                </div>
-            </div>
-        </Link>
     );
 }

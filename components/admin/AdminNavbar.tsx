@@ -12,6 +12,7 @@ import {
     FiUsers,
     FiMenu,
     FiX,
+    FiFileText,
 } from "react-icons/fi";
 import { useState } from "react";
 
@@ -30,6 +31,11 @@ const menuItems = [
         label: "Orderan",
         href: "/admin/orders",
         icon: FiShoppingBag,
+    },
+    {
+        label: "Reports",
+        href: "/admin/reports",
+        icon: FiFileText,
     },
     {
         label: "Pengguna",

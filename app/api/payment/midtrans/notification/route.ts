@@ -25,6 +25,8 @@ import { prisma } from "@/lib/prisma";
 
 const SERVER_KEY =
     process.env.MIDTRANS_SERVER_KEY!;
+    console.log("DEBUG SERVER_KEY:", JSON.stringify(SERVER_KEY));
+console.log("DEBUG SERVER_KEY length:", SERVER_KEY?.length);
 
 export async function POST(
     request: Request
