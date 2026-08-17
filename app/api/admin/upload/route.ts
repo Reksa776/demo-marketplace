@@ -37,12 +37,6 @@ export async function POST(request: Request) {
             );
         }
 
-        /*
-         * =====================================
-         * FORM DATA
-         * =====================================
-         */
-
         const formData =
             await request.formData();
 
@@ -62,16 +56,7 @@ export async function POST(request: Request) {
             );
         }
 
-        /*
-         * =====================================
-         * VALIDATE TYPE
-         * =====================================
-         */
-
-        const allowedTypes: Record<
-            string,
-            string
-        > = {
+        const allowedTypes: Record<string, string> = {
             "image/jpeg": "jpg",
             "image/png": "png",
             "image/webp": "webp",
@@ -93,12 +78,6 @@ export async function POST(request: Request) {
             );
         }
 
-        /*
-         * =====================================
-         * VALIDATE SIZE
-         * =====================================
-         */
-
         const maxSize =
             5 * 1024 * 1024;
 
@@ -115,32 +94,12 @@ export async function POST(request: Request) {
             );
         }
 
-        /*
-         * =====================================
-         * UPLOAD DIRECTORY
-         * =====================================
-         */
-
         const uploadDir =
-            path.join(
-                process.cwd(),
-                "public",
-                "uploads",
-                "products"
-            );
+            process.env.UPLOAD_DIR
+                ? path.join(process.env.UPLOAD_DIR, "products")
+                : path.join(process.cwd(), "storage", "uploads", "products");
 
-        await fs.mkdir(
-            uploadDir,
-            {
-                recursive: true,
-            }
-        );
-
-        /*
-         * =====================================
-         * UNIQUE FILE NAME
-         * =====================================
-         */
+        await fs.mkdir(uploadDir, { recursive: true });
 
         const randomName =
             crypto
@@ -156,12 +115,6 @@ export async function POST(request: Request) {
                 fileName
             );
 
-        /*
-         * =====================================
-         * SAVE FILE
-         * =====================================
-         */
-
         const bytes =
             await file.arrayBuffer();
 
@@ -173,53 +126,19 @@ export async function POST(request: Request) {
             buffer
         );
 
-        /*
-         * =====================================
-         * PUBLIC URL
-         * =====================================
-         */
-
-        const url =
-            `/uploads/products/${fileName}`;
+        const url = `/api/uploads/products/${fileName}`;
 
         console.log(
             "========== LOCAL IMAGE UPLOAD =========="
         );
-
-        console.log(
-            "FILE:",
-            fileName
-        );
-
-        console.log(
-            "TYPE:",
-            file.type
-        );
-
-        console.log(
-            "SIZE:",
-            file.size
-        );
-
-        console.log(
-            "PATH:",
-            filePath
-        );
-
-        console.log(
-            "URL:",
-            url
-        );
-
+        console.log("FILE:", fileName);
+        console.log("TYPE:", file.type);
+        console.log("SIZE:", file.size);
+        console.log("PATH:", filePath);
+        console.log("URL:", url);
         console.log(
             "========================================"
         );
-
-        /*
-         * =====================================
-         * RESPONSE
-         * =====================================
-         */
 
         return NextResponse.json(
             {
@@ -237,9 +156,7 @@ export async function POST(request: Request) {
         console.error(
             "========== LOCAL IMAGE UPLOAD ERROR =========="
         );
-
         console.error(error);
-
         console.error(
             "==============================================="
         );
