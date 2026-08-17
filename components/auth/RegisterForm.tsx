@@ -139,7 +139,7 @@ export default function RegisterForm() {
                 redirect: false,
             });
 
-            router.push("/products");
+            router.push("/home");
         } catch (error: any) {
             toast.error(
                 error?.response?.data?.message ??
@@ -541,7 +541,7 @@ export default function RegisterForm() {
                         type="button"
                         onClick={() =>
                             signIn("google", {
-                                callbackUrl: "/products",
+                                callbackUrl: "/home",
                             })
                         }
                         className="flex h-12 w-full items-center justify-center gap-3 rounded-xl border border-gray-300 bg-white font-medium text-gray-700 transition hover:bg-gray-50"

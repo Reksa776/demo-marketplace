@@ -87,7 +87,7 @@ export default function LoginForm() {
                     );
                 } else {
                     router.replace(
-                        "/products"
+                        "/home"
                     );
                 }
             } catch (error) {
@@ -151,7 +151,7 @@ export default function LoginForm() {
             if (role === "ADMIN") {
                 router.replace("/admin");
             } else {
-                router.replace("/products");
+                router.replace("/home");
             }
 
             router.refresh();
@@ -171,7 +171,7 @@ export default function LoginForm() {
             setLoading(true);
 
             await signIn("google", {
-                callbackUrl: "/products",
+                callbackUrl: "/home",
             });
         } catch (error) {
             console.error(
