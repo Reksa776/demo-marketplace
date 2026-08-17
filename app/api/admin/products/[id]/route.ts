@@ -317,6 +317,18 @@ export async function PUT(
                     }
                 );
             }
+            if (price > 9999999999.99) {
+                return NextResponse.json(
+                    {
+                        success: false,
+                        message:
+                            `Harga variant "${variant.name}" terlalu besar. Maksimal Rp 9.999.999.999.`,
+                    },
+                    {
+                        status: 400,
+                    }
+                );
+            }
 
             if (
                 !Number.isInteger(stock) ||
@@ -408,99 +420,148 @@ export async function PUT(
         /*
          * TRANSACTION
          *
-         * Variant lama dihapus lalu dibuat
-         * ulang berdasarkan data terbaru.
-         *
-         * Ini sengaja dibuat sederhana dan
-         * aman untuk CRUD admin.
+         * Pola diff-based:
+         * - Variant yang punya id valid & masih ada di form -> UPDATE
+         * - Variant tanpa id (baru dari form) -> CREATE
+         * - Variant lama yang gak ada lagi di form -> DELETE,
+         *   KECUALI variant itu masih punya OrderItem (history order),
+         *   karena FK constraint bakal nolak & data order harus tetap utuh.
          */
 
-        const product =
-            await prisma.$transaction(
-                async (tx) => {
-                    await tx.productVariant.deleteMany(
-                        {
+        let skippedDeleteCount = 0;
+
+        const product = await prisma.$transaction(
+            async (tx) => {
+                const existingVariants =
+                    await tx.productVariant.findMany({
+                        where: { productId },
+                        select: { id: true },
+                    });
+
+                const existingIds = existingVariants.map(
+                    (v) => v.id
+                );
+
+                const incomingIds = variants
+                    .filter(
+                        (v: any) =>
+                            v.id &&
+                            existingIds.includes(
+                                Number(v.id)
+                            )
+                    )
+                    .map((v: any) => Number(v.id));
+
+                const idsToDelete = existingIds.filter(
+                    (id) => !incomingIds.includes(id)
+                );
+
+                let actualIdsToDelete: number[] = [];
+
+                if (idsToDelete.length > 0) {
+                    const blocked =
+                        await tx.orderItem.findMany({
                             where: {
-                                productId,
+                                variantId: {
+                                    in: idsToDelete,
+                                },
                             },
-                        }
+                            select: { variantId: true },
+                            distinct: ["variantId"],
+                        });
+
+                    const blockedIds = new Set(
+                        blocked.map((b) => b.variantId)
                     );
 
-                    return tx.product.update({
+                    actualIdsToDelete = idsToDelete.filter(
+                        (id) => !blockedIds.has(id)
+                    );
+
+                    skippedDeleteCount =
+                        idsToDelete.length -
+                        actualIdsToDelete.length;
+                }
+
+                if (actualIdsToDelete.length > 0) {
+                    await tx.productVariant.deleteMany({
                         where: {
-                            id: productId,
-                        },
-
-                        data: {
-                            name: name.trim(),
-
-                            slug: slug.trim(),
-
-                            description:
-                                typeof description ===
-                                "string"
-                                    ? description.trim() ||
-                                      null
-                                    : null,
-
-                            category:
-                                typeof category ===
-                                "string"
-                                    ? category.trim() ||
-                                      null
-                                    : null,
-
-                            image:
-                                typeof image ===
-                                "string"
-                                    ? image.trim() ||
-                                      null
-                                    : null,
-
-                            bestseller:
-                                Boolean(bestseller),
-
-                            variants: {
-                                create: variants.map(
-                                    (
-                                        variant: any
-                                    ) => ({
-                                        name: variant.name.trim(),
-
-                                        price: Number(
-                                            variant.price
-                                        ),
-
-                                        stock: Number(
-                                            variant.stock
-                                        ),
-
-                                        weight: Number(
-                                            variant.weight
-                                        ),
-
-                                        image:
-                                            typeof variant.image ===
-                                            "string"
-                                                ? variant.image.trim() ||
-                                                  null
-                                                : null,
-                                    })
-                                ),
-                            },
-                        },
-
-                        include: {
-                            variants: true,
+                            id: { in: actualIdsToDelete },
                         },
                     });
                 }
-            );
+
+                for (const variant of variants) {
+                    const variantData = {
+                        name: variant.name.trim(),
+                        price: Number(variant.price),
+                        stock: Number(variant.stock),
+                        weight: Number(variant.weight),
+                        image:
+                            typeof variant.image ===
+                                "string"
+                                ? variant.image.trim() ||
+                                null
+                                : null,
+                    };
+
+                    if (
+                        variant.id &&
+                        incomingIds.includes(
+                            Number(variant.id)
+                        )
+                    ) {
+                        await tx.productVariant.update({
+                            where: {
+                                id: Number(variant.id),
+                            },
+                            data: variantData,
+                        });
+                    } else {
+                        await tx.productVariant.create({
+                            data: {
+                                ...variantData,
+                                productId,
+                            },
+                        });
+                    }
+                }
+
+                return tx.product.update({
+                    where: { id: productId },
+                    data: {
+                        name: name.trim(),
+                        slug: slug.trim(),
+                        description:
+                            typeof description === "string"
+                                ? description.trim() ||
+                                null
+                                : null,
+                        category:
+                            typeof category === "string"
+                                ? category.trim() || null
+                                : null,
+                        image:
+                            typeof image === "string"
+                                ? image.trim() || null
+                                : null,
+                        bestseller: Boolean(bestseller),
+                    },
+                    include: {
+                        variants: {
+                            orderBy: { id: "asc" },
+                        },
+                    },
+                });
+            }
+        );
 
         return NextResponse.json({
             success: true,
             message:
-                "Produk berhasil diperbarui.",
+                skippedDeleteCount > 0
+                    ? `Produk berhasil diperbarui. ${skippedDeleteCount} variant tidak dihapus karena sudah punya history pesanan.`
+                    : "Produk berhasil diperbarui.",
             product: {
                 ...product,
                 variants: product.variants.map(

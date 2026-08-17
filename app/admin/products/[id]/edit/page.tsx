@@ -80,7 +80,7 @@ export default function EditProductPage() {
             if (!response.ok) {
                 throw new Error(
                     data.message ||
-                        "Gagal mengambil produk."
+                    "Gagal mengambil produk."
                 );
             }
 
@@ -147,9 +147,9 @@ export default function EditProductPage() {
                 (variant, variantIndex) =>
                     variantIndex === index
                         ? {
-                              ...variant,
-                              [field]: value,
-                          }
+                            ...variant,
+                            [field]: value,
+                        }
                         : variant
             )
         );
@@ -198,6 +198,7 @@ export default function EditProductPage() {
 
                 variants: variants.map(
                     (variant) => ({
+                        id: variant.id,
                         name: variant.name,
                         price: Number(
                             variant.price
@@ -235,7 +236,7 @@ export default function EditProductPage() {
             if (!response.ok) {
                 throw new Error(
                     data.message ||
-                        "Gagal memperbarui produk."
+                    "Gagal memperbarui produk."
                 );
             }
 
@@ -594,6 +595,7 @@ export default function EditProductPage() {
                                                 <input
                                                     type="number"
                                                     min="1"
+                                                    max="9999999999"
                                                     value={
                                                         variant.price
                                                     }
