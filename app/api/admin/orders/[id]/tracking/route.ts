@@ -43,6 +43,14 @@ function normalizeCourier(
         return "tiki";
     }
 
+    if (value.includes("ninja")) {
+        return "ninja";
+    }
+
+    if (value.includes("idexpress")) {
+        return "idexpress";
+    }
+
     return value;
 }
 
@@ -51,6 +59,12 @@ export async function GET(
     { params }: RouteContext
 ) {
     try {
+        /*
+         * ==========================================
+         * AUTH
+         * ==========================================
+         */
+
         const session = await auth();
 
         if (!session?.user?.id) {
@@ -59,9 +73,36 @@ export async function GET(
                     success: false,
                     message: "Unauthorized.",
                 },
-                { status: 401 }
+                {
+                    status: 401,
+                }
             );
         }
+
+        /*
+         * ==========================================
+         * ADMIN AUTHORIZATION
+         * ==========================================
+         */
+
+        if (session.user.role !== "ADMIN") {
+            return NextResponse.json(
+                {
+                    success: false,
+                    message:
+                        "Akses ditolak. Hanya admin yang dapat melihat tracking pesanan.",
+                },
+                {
+                    status: 403,
+                }
+            );
+        }
+
+        /*
+         * ==========================================
+         * PARAMS
+         * ==========================================
+         */
 
         const { id } = await params;
 
@@ -77,15 +118,27 @@ export async function GET(
                     message:
                         "ID pesanan tidak valid.",
                 },
-                { status: 400 }
+                {
+                    status: 400,
+                }
             );
         }
 
+        /*
+         * ==========================================
+         * GET ORDER
+         * ==========================================
+         *
+         * ADMIN TIDAK BOLEH menggunakan userId.
+         *
+         * Karena admin melihat pesanan milik
+         * customer lain.
+         */
+
         const order =
-            await prisma.order.findFirst({
+            await prisma.order.findUnique({
                 where: {
                     id: orderId,
-                    userId: session.user.id,
                 },
 
                 select: {
@@ -108,47 +161,102 @@ export async function GET(
                     message:
                         "Pesanan tidak ditemukan.",
                 },
-                { status: 404 }
+                {
+                    status: 404,
+                }
             );
         }
 
+        /*
+         * ==========================================
+         * VALIDATE TRACKING
+         * ==========================================
+         */
+
         if (!order.trackingNumber) {
-            return NextResponse.json({
-                success: false,
-                message:
-                    "Nomor resi belum tersedia.",
-            });
+            return NextResponse.json(
+                {
+                    success: false,
+                    message:
+                        "Nomor resi belum tersedia.",
+                },
+                {
+                    status: 400,
+                }
+            );
         }
 
         if (!order.shippingCourier) {
-            return NextResponse.json({
-                success: false,
-                message:
-                    "Kurir pesanan belum tersedia.",
-            });
+            return NextResponse.json(
+                {
+                    success: false,
+                    message:
+                        "Kurir belum tersedia.",
+                },
+                {
+                    status: 400,
+                }
+            );
         }
+
+        /*
+         * ==========================================
+         * API KEY
+         * ==========================================
+         */
 
         const apiKey =
             process.env.RAJAONGKIR_API_KEY;
 
         if (!apiKey) {
+            console.error(
+                "RAJAONGKIR_API_KEY belum tersedia."
+            );
+
             return NextResponse.json(
                 {
                     success: false,
                     message:
                         "RAJAONGKIR_API_KEY belum dikonfigurasi.",
                 },
-                { status: 500 }
+                {
+                    status: 500,
+                }
             );
         }
+
+        /*
+         * ==========================================
+         * NORMALIZE COURIER
+         * ==========================================
+         */
 
         const courier =
             normalizeCourier(
                 order.shippingCourier
             );
 
+        if (!courier) {
+            return NextResponse.json(
+                {
+                    success: false,
+                    message:
+                        "Kode kurir tidak valid.",
+                },
+                {
+                    status: 400,
+                }
+            );
+        }
+
+        /*
+         * ==========================================
+         * PHONE
+         * ==========================================
+         */
+
         const phoneDigits =
-            String(order.phone).replace(
+            String(order.phone ?? "").replace(
                 /\D/g,
                 ""
             );
@@ -156,57 +264,96 @@ export async function GET(
         const lastPhoneNumber =
             phoneDigits.slice(-5);
 
-        const url =
-            "https://rajaongkir.komerce.id/api/v1/track/waybill";
+        if (
+            lastPhoneNumber.length !== 5
+        ) {
+            return NextResponse.json(
+                {
+                    success: false,
+                    message:
+                        "Nomor HP penerima tidak valid untuk tracking.",
+                },
+                {
+                    status: 400,
+                }
+            );
+        }
+
+        /*
+         * ==========================================
+         * RAJAONGKIR REQUEST
+         * ==========================================
+         */
+
+        const url = new URL(
+            "https://rajaongkir.komerce.id/api/v1/track/waybill"
+        );
+
+        url.searchParams.set(
+            "awb",
+            order.trackingNumber
+        );
+
+        url.searchParams.set(
+            "courier",
+            courier
+        );
+
+        url.searchParams.set(
+            "last_phone_number",
+            lastPhoneNumber
+        );
+
+        console.log(
+            "ADMIN RAJAONGKIR TRACKING REQUEST:",
+            {
+                adminId: session.user.id,
+                orderId: order.id,
+                orderNumber:
+                    order.orderNumber,
+                awb: order.trackingNumber,
+                courier,
+                lastPhoneNumber,
+            }
+        );
 
         const response = await fetch(
-            url,
+            url.toString(),
             {
                 method: "POST",
 
                 headers: {
                     key: apiKey,
-
-                    "Content-Type":
-                        "application/json",
-
                     Accept:
                         "application/json",
                 },
-
-                body: JSON.stringify({
-                    awb:
-                        order.trackingNumber,
-
-                    courier,
-
-                    last_phone_number:
-                        lastPhoneNumber,
-                }),
 
                 cache: "no-store",
             }
         );
 
+        /*
+         * ==========================================
+         * RAJAONGKIR RESPONSE
+         * ==========================================
+         */
+
         const result =
             await response.json();
 
-        console.log(
-            "RAJAONGKIR TRACKING RESULT:",
-            JSON.stringify(
-                result,
-                null,
-                2
-            )
-        );
-
         if (!response.ok) {
+            console.error(
+                "ADMIN RAJAONGKIR ERROR:",
+                result
+            );
+
             return NextResponse.json(
                 {
                     success: false,
                     message:
                         result?.meta?.message ??
-                        "Gagal mengambil tracking.",
+                        "Gagal mengambil tracking RajaOngkir.",
+                    raw: result,
                 },
                 {
                     status: response.status,
@@ -224,38 +371,96 @@ export async function GET(
                     message:
                         result?.meta?.message ??
                         "Tracking tidak tersedia.",
+                    raw: result,
                 },
-                { status: 400 }
+                {
+                    status: 400,
+                }
+            );
+        }
+
+        if (!result?.data) {
+            return NextResponse.json(
+                {
+                    success: false,
+                    message:
+                        "RajaOngkir tidak mengembalikan data tracking.",
+                },
+                {
+                    status: 400,
+                }
             );
         }
 
         const tracking =
             result.data;
 
+        /*
+         * ==========================================
+         * NORMALIZE RESPONSE
+         * ==========================================
+         */
+
+        const manifest =
+            Array.isArray(
+                tracking.manifest
+            )
+                ? tracking.manifest
+                : [];
+
+        const summary =
+            tracking.summary ??
+            null;
+
+        const deliveryStatus =
+            tracking.delivery_status ??
+            null;
+
+        /*
+         * ==========================================
+         * RESPONSE
+         * ==========================================
+         */
+
         return NextResponse.json({
             success: true,
 
             data: {
-                summary:
-                    tracking.summary,
+                order: {
+                    id: order.id,
+
+                    orderNumber:
+                        order.orderNumber,
+
+                    shippingCourier:
+                        order.shippingCourier,
+
+                    shippingService:
+                        order.shippingService,
+
+                    trackingNumber:
+                        order.trackingNumber,
+                },
+
+                summary,
 
                 details:
-                    tracking.details,
+                    tracking.details ??
+                    null,
 
-                deliveryStatus:
-                    tracking.delivery_status,
+                deliveryStatus,
 
-                manifest:
-                    Array.isArray(
-                        tracking.manifest
-                    )
-                        ? tracking.manifest
-                        : [],
+                manifest,
+
+                delivered:
+                    Boolean(
+                        tracking.delivered
+                    ),
             },
         });
     } catch (error) {
         console.error(
-            "ORDER TRACKING ERROR:",
+            "ADMIN ORDER TRACKING ERROR:",
             error
         );
 
@@ -265,7 +470,9 @@ export async function GET(
                 message:
                     "Gagal mengambil tracking paket.",
             },
-            { status: 500 }
+            {
+                status: 500,
+            }
         );
     }
 }
