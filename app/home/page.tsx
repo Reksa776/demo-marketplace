@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import {
     FiArrowRight,
     FiShoppingBag,
+    FiStar,
 } from "react-icons/fi";
 import BannerSlider from "@/components/products/BannerSlider";
 import { ProductProvider } from "@/components/products/ProductContext";
@@ -29,9 +30,7 @@ function formatRupiah(value: number) {
     return `Rp ${value.toLocaleString("id-ID")}`;
 }
 
-function getProductPrice(
-    product: ProductWithVariant
-) {
+function getProductPrice(product: ProductWithVariant) {
     if (!product.variants.length) {
         return 0;
     }
@@ -43,9 +42,7 @@ function getProductPrice(
     );
 }
 
-function getProductImage(
-    product: ProductWithVariant
-) {
+function getProductImage(product: ProductWithVariant) {
     if (product.image) {
         return product.image;
     }
@@ -55,6 +52,26 @@ function getProductImage(
             (variant) => variant.image
         )?.image ?? null
     );
+}
+
+/**
+ * Contoh tier.
+ *
+ * Nanti bagian ini bisa kamu ganti berdasarkan:
+ * - total transaksi
+ * - total belanja
+ * - jumlah referral
+ * - total komisi
+ *
+ * Untuk sementara dibuat statis Bronze.
+ */
+function getUserTier() {
+    return {
+        name: "Bronze",
+        description: "Terus belanja untuk naik ke tier berikutnya.",
+        nextTier: "Silver",
+        progress: 35,
+    };
 }
 
 async function getProducts() {
@@ -110,11 +127,8 @@ function ProductCard({
 }: {
     product: ProductWithVariant;
 }) {
-    const image =
-        getProductImage(product);
-
-    const price =
-        getProductPrice(product);
+    const image = getProductImage(product);
+    const price = getProductPrice(product);
 
     return (
         <Link
@@ -210,14 +224,12 @@ function ProductSection({
             ) : (
                 <>
                     <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
-                        {products.map(
-                            (product) => (
-                                <ProductCard
-                                    key={product.id}
-                                    product={product}
-                                />
-                            )
-                        )}
+                        {products.map((product) => (
+                            <ProductCard
+                                key={product.id}
+                                product={product}
+                            />
+                        ))}
                     </div>
 
                     <div className="mt-5 sm:hidden">
@@ -235,45 +247,142 @@ function ProductSection({
     );
 }
 
+function WelcomeCard({
+    name,
+}: {
+    name?: string | null;
+}) {
+    const tier = getUserTier();
+
+    const displayName =
+        name?.trim() || "Customer";
+
+    return (
+        <section className="mb-7">
+            <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white">
+                <div className="flex flex-col gap-6 p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6">
+                    {/* GREETING */}
+                    <div>
+                        <p className="text-sm text-gray-500">
+                            Selamat datang kembali 👋
+                        </p>
+
+                        <h1 className="mt-1 text-2xl font-bold tracking-tight text-gray-900 sm:text-3xl">
+                            {displayName}
+                        </h1>
+
+                        <p className="mt-2 max-w-md text-sm leading-6 text-gray-500">
+                            Temukan produk favoritmu dan nikmati
+                            berbagai keuntungan dari akunmu.
+                        </p>
+                    </div>
+
+                    {/* TIER */}
+                    <div className="w-full sm:max-w-sm">
+                        <div className="rounded-xl bg-gray-50 p-4">
+                            <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-3">
+                                    <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white shadow-sm">
+                                        <FiStar
+                                            size={18}
+                                            className="text-amber-500"
+                                        />
+                                    </div>
+
+                                    <div>
+                                        <p className="text-[11px] font-medium uppercase tracking-wider text-gray-400">
+                                            Member Tier
+                                        </p>
+
+                                        <p className="text-sm font-bold text-gray-900">
+                                            {tier.name}
+                                        </p>
+                                    </div>
+                                </div>
+
+                                <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-gray-600 shadow-sm">
+                                    {tier.nextTier}
+                                </span>
+                            </div>
+
+                            <div className="mt-4">
+                                <div className="mb-2 flex items-center justify-between text-[11px] text-gray-400">
+                                    <span>
+                                        Progress menuju{" "}
+                                        {tier.nextTier}
+                                    </span>
+
+                                    <span>
+                                        {tier.progress}%
+                                    </span>
+                                </div>
+
+                                <div className="h-1.5 overflow-hidden rounded-full bg-gray-200">
+                                    <div
+                                        className="h-full rounded-full bg-gray-900 transition-all"
+                                        style={{
+                                            width: `${tier.progress}%`,
+                                        }}
+                                    />
+                                </div>
+                            </div>
+
+                            <p className="mt-3 text-xs text-gray-400">
+                                {tier.description}
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    );
+}
+
 export default async function HomePage() {
-    const {
-        bestSeller,
-        latest,
-    } = await getProducts();
+    const { bestSeller, latest } =
+        await getProducts();
+
     const session = await auth();
+
+    if (!session?.user) {
+        return (
+            <main className="min-h-screen bg-gray-50" />
+        );
+    }
 
     return (
         <ProductProvider>
-            <main className="min-h-screen mb-20 bg-gray-50">
-                {session?.user && (
-                    <>
-                        {/* BANNER */}
-                        <section className="w-full">
-                            <BannerSlider />
-                        </section>
+            <main className="min-h-screen bg-gray-50 pb-20">
+                <div className="mx-auto max-w-7xl px-4 pt-5 mb-9 sm:px-6 sm:pt-7 lg:px-8">
 
-                        <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 sm:py-10 lg:px-8">
-                            <div className="space-y-12">
+                    {/* WELCOME + TIER */}
+                    <WelcomeCard
+                        name={session.user.name}
+                    />
 
-                                {/* BEST SELLER */}
-                                <ProductSection
-                                    title="Best Seller"
-                                    subtitle="Produk yang paling banyak dibeli customer."
-                                    products={bestSeller}
-                                />
+                    {/* BANNER DI BAWAH */}
+                    <section className="mb-10 overflow-hidden rounded-2xl">
+                        <BannerSlider />
+                    </section>
 
-                                {/* TERBARU */}
-                                <ProductSection
-                                    title="Produk Terbaru"
-                                    subtitle="Produk terbaru yang baru ditambahkan."
-                                    products={latest}
-                                />
+                    <div className="space-y-12">
+                        {/* BEST SELLER */}
+                        <ProductSection
+                            title="Best Seller"
+                            subtitle="Produk yang paling banyak dibeli customer."
+                            products={bestSeller}
+                        />
 
-                            </div>
-                        </div>
-                        <BottomNavbar />
-                    </>
-                )}
+                        {/* TERBARU */}
+                        <ProductSection
+                            title="Produk Terbaru"
+                            subtitle="Produk terbaru yang baru ditambahkan."
+                            products={latest}
+                        />
+                    </div>
+                </div>
+
+                <BottomNavbar />
             </main>
         </ProductProvider>
     );

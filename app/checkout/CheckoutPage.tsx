@@ -107,6 +107,7 @@ type Region = {
 };
 
 type ShippingOption = {
+    description: string | undefined;
     courier?: string;
     code?: string;
 
@@ -120,6 +121,41 @@ type ShippingOption = {
     price?: number;
     shipping_cost?: number;
 };
+
+/*
+ * =====================================================
+ * PENJELASAN LAYANAN KURIR
+ * =====================================================
+ */
+
+const SERVICE_EXPLANATIONS: Record<string, string> = {
+    "JNE-OKE": "Layanan ekonomis JNE, harga paling murah tapi estimasi lebih lama.",
+    "JNE-REG": "Layanan reguler JNE, estimasi standar dengan harga wajar.",
+    "JNE-YES": "Yakin Esok Sampai — JNE menjamin paket sampai keesokan hari (khusus kota-kota tertentu).",
+    "JNE-SPS": "Super Speed — pengiriman di hari yang sama, khusus rute tertentu.",
+
+    "JNT-EZ": "Layanan ekonomis J&T, harga lebih murah dengan estimasi lebih lama.",
+    "JNT-REG": "Layanan reguler J&T, estimasi standar.",
+
+    "SICEPAT-REG": "Layanan reguler SiCepat, estimasi standar.",
+    "SICEPAT-BEST": "Besok Sampai Tujuan — SiCepat menjamin paket sampai keesokan hari.",
+    "SICEPAT-GOKIL": "Ongkos Kirim Irit — layanan paling murah SiCepat, estimasi lebih lama.",
+    "SICEPAT-SDS": "Same Day Service — sampai di hari yang sama (khusus kota tertentu).",
+};
+
+function getServiceExplanation(
+    courier: string,
+    service: string,
+    apiDescription?: string
+) {
+    const key = `${courier}-${service}`.toUpperCase();
+
+    return (
+        SERVICE_EXPLANATIONS[key] ||
+        apiDescription ||
+        "Layanan pengiriman standar dari kurir ini."
+    );
+}
 
 const emptyAddressForm: AddressForm = {
     label: "",
@@ -152,6 +188,10 @@ const emptyAddressForm: AddressForm = {
 
 export default function CheckoutPage() {
     const creatingPaymentRef = useRef(false);
+    const [voucherCode, setVoucherCode] = useState("");
+    const [appliedVoucherCode, setAppliedVoucherCode] = useState("");
+    const [voucherDiscount, setVoucherDiscount] = useState(0);
+    const [voucherLoading, setVoucherLoading] = useState(false);
     const snapProcessingRef = useRef(false);
     const router = useRouter();
     const [paymentMethod, setPaymentMethod] = useState<
@@ -223,6 +263,69 @@ export default function CheckoutPage() {
      * LOAD REGIONS
      * ==========================================
      */
+    async function applyVoucher() {
+        const code = voucherCode.trim().toUpperCase();
+
+        if (!code) {
+            toast.error("Masukkan kode voucher.");
+            return;
+        }
+
+        if (!data || data.subtotal <= 0) {
+            toast.error("Subtotal belum valid.");
+            return;
+        }
+
+        try {
+            setVoucherLoading(true);
+
+            const response = await fetch("/api/voucher/validate", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                    code,
+                    subtotal: data.subtotal,
+                }),
+            });
+
+            const result = await response.json();
+
+            if (!response.ok || !result.success) {
+                throw new Error(
+                    result.message || "Voucher tidak bisa digunakan."
+                );
+            }
+
+            setAppliedVoucherCode(result.data.code);
+            setVoucherCode(result.data.code);
+            setVoucherDiscount(
+                Number(result.data.discount) || 0
+            );
+
+            toast.success(
+                `Voucher ${result.data.code} berhasil dipakai.`
+            );
+        } catch (error) {
+            setAppliedVoucherCode("");
+            setVoucherDiscount(0);
+
+            toast.error(
+                error instanceof Error
+                    ? error.message
+                    : "Gagal memvalidasi voucher."
+            );
+        } finally {
+            setVoucherLoading(false);
+        }
+    }
+
+    function removeVoucher() {
+        setVoucherCode("");
+        setAppliedVoucherCode("");
+        setVoucherDiscount(0);
+    }
 
     async function loadRegions(
         type:
@@ -813,6 +916,7 @@ export default function CheckoutPage() {
                 await response.json();
 
             if (!response.ok) {
+                router.push("/cart")
                 throw new Error(
                     result.message ||
                     "Gagal mengambil checkout."
@@ -1341,6 +1445,7 @@ export default function CheckoutPage() {
 
                                 paymentMethod:
                                     "COD",
+                                voucherCode: appliedVoucherCode || null,
                             }),
                         }
                     );
@@ -1422,6 +1527,7 @@ export default function CheckoutPage() {
 
                             paymentMethod:
                                 paymentMethod,
+                            voucherCode: appliedVoucherCode || null,
                         }),
                     }
                 );
@@ -1596,9 +1702,12 @@ export default function CheckoutPage() {
             )
             : 0;
 
-    const grandTotal =
-        data.subtotal +
-        shippingCost;
+    const grandTotal = Math.max(
+        0,
+        data.subtotal -
+        voucherDiscount +
+        shippingCost
+    );
 
     /*
      * ==========================================
@@ -2430,7 +2539,13 @@ export default function CheckoutPage() {
                                                                         hari
                                                                     </div>
                                                                 )}
-
+                                                                <div className="mt-1 text-xs text-gray-400">
+                                                                    {getServiceExplanation(
+                                                                        courier,
+                                                                        service,
+                                                                        option.description
+                                                                    )}
+                                                                </div>
                                                             </div>
 
                                                             <div className="font-bold">
@@ -2640,6 +2755,73 @@ export default function CheckoutPage() {
                                 </span>
 
                             </div>
+                            <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
+                                <div className="text-sm font-semibold">
+                                    Kode Voucher
+                                </div>
+
+                                {!appliedVoucherCode ? (
+                                    <div className="mt-3 flex gap-2">
+                                        <input
+                                            value={voucherCode}
+                                            onChange={(e) =>
+                                                setVoucherCode(
+                                                    e.target.value.toUpperCase()
+                                                )
+                                            }
+                                            onKeyDown={(e) => {
+                                                if (e.key === "Enter") {
+                                                    applyVoucher();
+                                                }
+                                            }}
+                                            placeholder="Contoh: HEMAT10"
+                                            disabled={voucherLoading}
+                                            className="min-w-0 flex-1 rounded-xl border px-3 py-2.5 text-sm"
+                                        />
+
+                                        <button
+                                            type="button"
+                                            onClick={applyVoucher}
+                                            disabled={voucherLoading}
+                                            className="rounded-xl bg-gray-900 px-4 py-2.5 text-sm font-semibold text-white"
+                                        >
+                                            {voucherLoading ? "Cek..." : "Pakai"}
+                                        </button>
+                                    </div>
+                                ) : (
+                                    <div className="mt-3 flex items-center justify-between rounded-xl bg-white px-3 py-2.5">
+                                        <div>
+                                            <div className="font-semibold text-emerald-600">
+                                                {appliedVoucherCode}
+                                            </div>
+
+                                            <div className="text-xs text-gray-500">
+                                                Diskon Rp{" "}
+                                                {voucherDiscount.toLocaleString("id-ID")}
+                                            </div>
+                                        </div>
+
+                                        <button
+                                            type="button"
+                                            onClick={removeVoucher}
+                                            className="text-xs font-semibold text-red-600"
+                                        >
+                                            Hapus
+                                        </button>
+                                    </div>
+                                )}
+                            </div>
+
+                            {voucherDiscount > 0 && (
+                                <div className="flex items-center justify-between text-emerald-600">
+                                    <span>Diskon Voucher</span>
+
+                                    <span className="font-semibold">
+                                        - Rp{" "}
+                                        {voucherDiscount.toLocaleString("id-ID")}
+                                    </span>
+                                </div>
+                            )}
 
                             <div className="border-t border-gray-200 pt-4">
 

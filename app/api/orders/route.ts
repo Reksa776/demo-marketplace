@@ -1,8 +1,50 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import {
+    incrementVoucherUsage,
+    validateAndCalculateVoucher,
+} from "@/lib/voucher";
 
-export async function POST(req: Request) {
+type ShippingOption = {
+    courier?: string;
+    code?: string;
+    service?: string;
+    service_name?: string;
+    etd?: string;
+    estimation?: string;
+    cost?: number;
+    price?: number;
+    shipping_cost?: number;
+};
+
+function getShippingCost(shipping: ShippingOption) {
+    const value = Number(
+        shipping.cost ??
+            shipping.price ??
+            shipping.shipping_cost ??
+            0
+    );
+
+    return Number.isFinite(value) && value >= 0
+        ? Math.round(value)
+        : NaN;
+}
+
+/*
+ * ==========================================
+ * POST /api/orders
+ * ==========================================
+ *
+ * CART + COD
+ *
+ * Voucher:
+ * - voucherCode dari frontend
+ * - discount dihitung server
+ * - quota di-increment secara atomic
+ * - cart dikosongkan setelah order berhasil
+ */
+export async function POST(request: NextRequest) {
     try {
         const session = await auth();
 
@@ -10,7 +52,7 @@ export async function POST(req: Request) {
             return NextResponse.json(
                 {
                     success: false,
-                    message: "Unauthorized.",
+                    message: "Silakan login terlebih dahulu.",
                 },
                 { status: 401 }
             );
@@ -18,32 +60,27 @@ export async function POST(req: Request) {
 
         const userId = session.user.id;
 
-        const body = await req.json();
+        const body = await request.json();
 
         const {
-            mode = "CART",
-
             addressId,
             shipping,
             paymentMethod,
-
-            // BUY NOW
-            productId,
-            variantId,
-            quantity,
+            voucherCode,
         } = body;
 
         /*
          * ==========================================
-         * VALIDATE MODE
+         * PAYMENT
          * ==========================================
          */
 
-        if (!["CART", "BUY_NOW"].includes(mode)) {
+        if (paymentMethod !== "COD") {
             return NextResponse.json(
                 {
                     success: false,
-                    message: "Mode checkout tidak valid.",
+                    message:
+                        "Pembayaran non-COD harus melalui API Midtrans.",
                 },
                 { status: 400 }
             );
@@ -51,11 +88,14 @@ export async function POST(req: Request) {
 
         /*
          * ==========================================
-         * VALIDATE ADDRESS
+         * ADDRESS
          * ==========================================
          */
 
-        if (!addressId) {
+        if (
+            typeof addressId !== "string" ||
+            !addressId.trim()
+        ) {
             return NextResponse.json(
                 {
                     success: false,
@@ -66,13 +106,34 @@ export async function POST(req: Request) {
             );
         }
 
+        const address =
+            await prisma.userAddress.findFirst({
+                where: {
+                    id: addressId,
+                    userId,
+                },
+            });
+
+        if (!address) {
+            return NextResponse.json(
+                {
+                    success: false,
+                    message: "Alamat tidak ditemukan.",
+                },
+                { status: 404 }
+            );
+        }
+
         /*
          * ==========================================
-         * VALIDATE SHIPPING
+         * SHIPPING
          * ==========================================
          */
 
-        if (!shipping) {
+        if (
+            !shipping ||
+            typeof shipping !== "object"
+        ) {
             return NextResponse.json(
                 {
                     success: false,
@@ -83,348 +144,10 @@ export async function POST(req: Request) {
             );
         }
 
-        /*
-         * ==========================================
-         * VALIDATE PAYMENT
-         * ==========================================
-         */
+        const shippingCost =
+            getShippingCost(shipping);
 
-        const allowedPaymentMethods = [
-            "COD",
-            "BANK_TRANSFER",
-            "E_WALLET",
-            "QRIS",
-        ];
-
-        if (
-            !allowedPaymentMethods.includes(
-                paymentMethod
-            )
-        ) {
-            return NextResponse.json(
-                {
-                    success: false,
-                    message:
-                        "Metode pembayaran tidak valid.",
-                },
-                { status: 400 }
-            );
-        }
-
-        /*
-         * ==========================================
-         * GET ADDRESS
-         * ==========================================
-         */
-
-        const address = await prisma.userAddress.findFirst({
-            where: {
-                userId: session.user.id,
-                id: addressId,
-            },
-        });
-
-        if (!address) {
-            return NextResponse.json(
-                {
-                    success: false,
-                    message:
-                        "Alamat tidak ditemukan.",
-                },
-                { status: 404 }
-            );
-        }
-
-        /*
-         * ==========================================
-         * PREPARE ITEMS
-         * ==========================================
-         *
-         * CART:
-         * mengambil item dari cart.
-         *
-         * BUY_NOW:
-         * mengambil langsung product + variant.
-         */
-
-        type CheckoutItem = {
-            productId: number;
-            variantId: number;
-            productName: string;
-            variantName: string;
-            price: number;
-            quantity: number;
-        };
-
-        let checkoutItems: CheckoutItem[] = [];
-
-        /*
-         * ==========================================
-         * BUY NOW
-         * ==========================================
-         */
-
-        if (mode === "BUY_NOW") {
-            const parsedProductId =
-                Number(productId);
-
-            const parsedVariantId =
-                Number(variantId);
-
-            const parsedQuantity =
-                Number(quantity);
-
-            if (
-                !Number.isInteger(
-                    parsedProductId
-                ) ||
-                parsedProductId <= 0
-            ) {
-                return NextResponse.json(
-                    {
-                        success: false,
-                        message:
-                            "Produk tidak valid.",
-                    },
-                    { status: 400 }
-                );
-            }
-
-            if (
-                !Number.isInteger(
-                    parsedVariantId
-                ) ||
-                parsedVariantId <= 0
-            ) {
-                return NextResponse.json(
-                    {
-                        success: false,
-                        message:
-                            "Variant tidak valid.",
-                    },
-                    { status: 400 }
-                );
-            }
-
-            if (
-                !Number.isInteger(
-                    parsedQuantity
-                ) ||
-                parsedQuantity <= 0
-            ) {
-                return NextResponse.json(
-                    {
-                        success: false,
-                        message:
-                            "Quantity tidak valid.",
-                    },
-                    { status: 400 }
-                );
-            }
-
-            const variant =
-                await prisma.productVariant.findFirst(
-                    {
-                        where: {
-                            id: parsedVariantId,
-                            productId:
-                                parsedProductId,
-                        },
-
-                        include: {
-                            product: true,
-                        },
-                    }
-                );
-
-            if (!variant) {
-                return NextResponse.json(
-                    {
-                        success: false,
-                        message:
-                            "Produk atau variant tidak ditemukan.",
-                    },
-                    { status: 404 }
-                );
-            }
-
-            if (
-                parsedQuantity >
-                variant.stock
-            ) {
-                return NextResponse.json(
-                    {
-                        success: false,
-                        message: `Stok ${variant.product.name} - ${variant.name} tidak mencukupi.`,
-                    },
-                    { status: 400 }
-                );
-            }
-
-            checkoutItems = [
-                {
-                    productId:
-                        variant.productId,
-
-                    variantId:
-                        variant.id,
-
-                    productName:
-                        variant.product.name,
-
-                    variantName:
-                        variant.name,
-
-                    price:
-                        Number(
-                            variant.price
-                        ),
-
-                    quantity:
-                        parsedQuantity,
-                },
-            ];
-        }
-
-        /*
-         * ==========================================
-         * CART
-         * ==========================================
-         */
-
-        let cart:
-            | {
-                id: number;
-                items: Array<{
-                    productId: number;
-                    variantId: number;
-                    quantity: number;
-                    product: {
-                        name: string;
-                    };
-                    variant: {
-                        name: string;
-                        price: unknown;
-                        stock: number;
-                    };
-                }>;
-            }
-            | null = null;
-
-        if (mode === "CART") {
-            cart =
-                await prisma.cart.findUnique({
-                    where: {
-                        userId,
-                    },
-
-                    include: {
-                        items: {
-                            include: {
-                                product: true,
-                                variant: true,
-                            },
-                        },
-                    },
-                });
-
-            if (
-                !cart ||
-                cart.items.length === 0
-            ) {
-                return NextResponse.json(
-                    {
-                        success: false,
-                        message:
-                            "Keranjang kosong.",
-                    },
-                    { status: 400 }
-                );
-            }
-
-            for (const item of cart.items) {
-                if (item.quantity <= 0) {
-                    return NextResponse.json(
-                        {
-                            success: false,
-                            message:
-                                "Quantity produk tidak valid.",
-                        },
-                        { status: 400 }
-                    );
-                }
-
-                if (
-                    item.quantity >
-                    item.variant.stock
-                ) {
-                    return NextResponse.json(
-                        {
-                            success: false,
-                            message: `Stok ${item.product.name} - ${item.variant.name} tidak mencukupi.`,
-                        },
-                        { status: 400 }
-                    );
-                }
-
-                checkoutItems.push({
-                    productId:
-                        item.productId,
-
-                    variantId:
-                        item.variantId,
-
-                    productName:
-                        item.product.name,
-
-                    variantName:
-                        item.variant.name,
-
-                    price:
-                        Number(
-                            item.variant.price
-                        ),
-
-                    quantity:
-                        item.quantity,
-                });
-            }
-        }
-
-        /*
-         * ==========================================
-         * SUBTOTAL
-         * ==========================================
-         */
-
-        const subtotal =
-            checkoutItems.reduce(
-                (total, item) =>
-                    total +
-                    item.price *
-                    item.quantity,
-                0
-            );
-
-        /*
-         * ==========================================
-         * SHIPPING COST
-         * ==========================================
-         */
-
-        const shippingCost = Number(
-            shipping.cost ??
-            shipping.price ??
-            shipping.shipping_cost ??
-            0
-        );
-
-        if (
-            !Number.isFinite(
-                shippingCost
-            ) ||
-            shippingCost < 0
-        ) {
+        if (!Number.isFinite(shippingCost)) {
             return NextResponse.json(
                 {
                     success: false,
@@ -434,9 +157,6 @@ export async function POST(req: Request) {
                 { status: 400 }
             );
         }
-
-        const total =
-            subtotal + shippingCost;
 
         /*
          * ==========================================
@@ -453,141 +173,323 @@ export async function POST(req: Request) {
 
         /*
          * ==========================================
-         * PAYMENT STATUS
+         * TRANSACTION
          * ==========================================
          */
 
-        const paymentStatus =
-            paymentMethod === "COD"
-                ? "UNPAID"
-                : "PENDING";
-
-        /*
-         * ==========================================
-         * CREATE ORDER
-         * ==========================================
-         */
-
-        const result =
+        const order =
             await prisma.$transaction(
                 async (tx) => {
-                    const order =
-                        await tx.order.create(
-                            {
-                                data: {
-                                    userId,
-
-                                    orderNumber,
-
-                                    recipientName:
-                                        address.recipientName,
-
-                                    phone:
-                                        address.phone,
-
-                                    address:
-                                        address.address,
-
-                                    province:
-                                        address.province,
-
-                                    city:
-                                        address.city,
-
-                                    district:
-                                        address.district,
-
-                                    postalCode:
-                                        address.postalCode,
-
-                                    latitude:
-                                        address.latitude,
-
-                                    longitude:
-                                        address.longitude,
-
-                                    subtotal,
-
-                                    shippingCost,
-
-                                    total,
-
-                                    status:
-                                        "PENDING",
-
-                                    paymentMethod,
-
-                                    paymentStatus,
-
-                                    /*
-                                     * KURIR DIPILIH CUSTOMER
-                                     */
-                                    shippingCourier:
-                                        shipping.courier ??
-                                        shipping.code ??
-                                        null,
-
-                                    shippingService:
-                                        shipping.service ??
-                                        shipping.service_name ??
-                                        null,
-
-                                    items: {
-                                        create:
-                                            checkoutItems.map(
-                                                (
-                                                    item
-                                                ) => ({
-                                                    productId:
-                                                        item.productId,
-
-                                                    variantId:
-                                                        item.variantId,
-
-                                                    productName:
-                                                        item.productName,
-
-                                                    variantName:
-                                                        item.variantName,
-
-                                                    price:
-                                                        item.price,
-
-                                                    quantity:
-                                                        item.quantity,
-
-                                                    subtotal:
-                                                        item.price *
-                                                        item.quantity,
-                                                })
-                                            ),
+                    /*
+                     * Ambil cart TERBARU di dalam
+                     * transaction.
+                     */
+                    const cart =
+                        await tx.cart.findUnique({
+                            where: {
+                                userId,
+                            },
+                            include: {
+                                items: {
+                                    include: {
+                                        product: true,
+                                        variant: true,
                                     },
                                 },
+                            },
+                        });
 
-                                include: {
-                                    items: true,
-                                },
-                            }
+                    if (
+                        !cart ||
+                        cart.items.length === 0
+                    ) {
+                        throw new Error(
+                            "Keranjang kosong."
                         );
+                    }
 
                     /*
                      * ==========================================
-                     * BUY NOW
+                     * VALIDATE STOCK + HITUNG SUBTOTAL
                      * ==========================================
-                     *
-                     * TIDAK menghapus cart.
                      */
 
+                    let subtotal = 0;
+
+                    const checkoutItems =
+                        [];
+
+                    for (const item of cart.items) {
+                        const quantity =
+                            Number(item.quantity);
+
+                        if (
+                            !Number.isInteger(
+                                quantity
+                            ) ||
+                            quantity <= 0
+                        ) {
+                            throw new Error(
+                                `Quantity ${item.product.name} - ${item.variant.name} tidak valid.`
+                            );
+                        }
+
+                        const price =
+                            Math.round(
+                                Number(
+                                    item.variant.price
+                                )
+                            );
+
+                        if (
+                            !Number.isFinite(
+                                price
+                            ) ||
+                            price < 0
+                        ) {
+                            throw new Error(
+                                `Harga ${item.product.name} - ${item.variant.name} tidak valid.`
+                            );
+                        }
+
+                        /*
+                         * Cek stock terbaru.
+                         */
+                        if (
+                            quantity >
+                            item.variant.stock
+                        ) {
+                            throw new Error(
+                                `Stok ${item.product.name} - ${item.variant.name} tidak mencukupi.`
+                            );
+                        }
+
+                        const itemSubtotal =
+                            price * quantity;
+
+                        subtotal +=
+                            itemSubtotal;
+
+                        checkoutItems.push({
+                            productId:
+                                item.productId,
+                            variantId:
+                                item.variantId,
+                            productName:
+                                item.product.name,
+                            variantName:
+                                item.variant.name,
+                            price,
+                            quantity,
+                            subtotal:
+                                itemSubtotal,
+                        });
+                    }
+
+                    /*
+                     * ==========================================
+                     * VOUCHER
+                     * ==========================================
+                     */
+
+                    let voucherId:
+                        | number
+                        | null = null;
+
+                    let appliedVoucherCode:
+                        | string
+                        | null = null;
+
+                    let discount = 0;
+
                     if (
-                        mode ===
-                        "BUY_NOW"
+                        typeof voucherCode ===
+                            "string" &&
+                        voucherCode.trim()
                     ) {
-                        for (const item of checkoutItems) {
-                            await tx.productVariant.update(
+                        const voucherResult =
+                            await validateAndCalculateVoucher(
+                                voucherCode,
+                                subtotal,
+                                tx
+                            );
+
+                        if (
+                            !voucherResult.valid
+                        ) {
+                            throw new Error(
+                                voucherResult.message
+                            );
+                        }
+
+                        voucherId =
+                            voucherResult.voucher.id;
+
+                        appliedVoucherCode =
+                            voucherResult.voucher.code;
+
+                        discount =
+                            voucherResult.discount;
+
+                        /*
+                         * Atomic quota.
+                         */
+                        const voucherUsed =
+                            await incrementVoucherUsage(
+                                tx,
+                                voucherId
+                            );
+
+                        if (!voucherUsed) {
+                            throw new Error(
+                                "Kuota voucher baru saja habis. Silakan gunakan kode voucher lain."
+                            );
+                        }
+                    }
+
+                    /*
+                     * ==========================================
+                     * TOTAL
+                     * ==========================================
+                     */
+
+                    const total =
+                        subtotal -
+                        discount +
+                        shippingCost;
+
+                    if (
+                        total < 0 ||
+                        !Number.isInteger(total)
+                    ) {
+                        throw new Error(
+                            "Total pesanan tidak valid."
+                        );
+                    }
+
+                    /*
+                     * ==========================================
+                     * CREATE ORDER
+                     * ==========================================
+                     */
+
+                    const createdOrder =
+                        await tx.order.create({
+                            data: {
+                                userId,
+
+                                orderNumber,
+
+                                recipientName:
+                                    address.recipientName,
+
+                                phone:
+                                    address.phone,
+
+                                address:
+                                    address.address,
+
+                                province:
+                                    address.province,
+
+                                city:
+                                    address.city,
+
+                                district:
+                                    address.district,
+
+                                postalCode:
+                                    address.postalCode,
+
+                                latitude:
+                                    address.latitude,
+
+                                longitude:
+                                    address.longitude,
+
+                                subtotal,
+
+                                shippingCost,
+
+                                total,
+
+                                discount,
+
+                                voucherId,
+
+                                voucherCode:
+                                    appliedVoucherCode,
+
+                                status: "PENDING",
+
+                                paymentMethod:
+                                    "COD",
+
+                                paymentStatus:
+                                    "UNPAID",
+
+                                shippingCourier:
+                                    shipping.courier ??
+                                    shipping.code ??
+                                    null,
+
+                                shippingService:
+                                    shipping.service ??
+                                    shipping.service_name ??
+                                    null,
+
+                                items: {
+                                    create:
+                                        checkoutItems.map(
+                                            (item) => ({
+                                                productId:
+                                                    item.productId,
+
+                                                variantId:
+                                                    item.variantId,
+
+                                                productName:
+                                                    item.productName,
+
+                                                variantName:
+                                                    item.variantName,
+
+                                                price:
+                                                    item.price,
+
+                                                quantity:
+                                                    item.quantity,
+
+                                                subtotal:
+                                                    item.subtotal,
+                                            })
+                                        ),
+                                },
+                            },
+
+                            include: {
+                                items: true,
+                            },
+                        });
+
+                    /*
+                     * ==========================================
+                     * KURANGI STOCK
+                     * ==========================================
+                     */
+
+                    for (const item of checkoutItems) {
+                        const stockUpdate =
+                            await tx.productVariant.updateMany(
                                 {
                                     where: {
                                         id:
                                             item.variantId,
+
+                                        stock: {
+                                            gte:
+                                                item.quantity,
+                                        },
                                     },
 
                                     data: {
@@ -599,91 +501,48 @@ export async function POST(req: Request) {
                                 }
                             );
 
-                            await tx.product.update(
-                                {
-                                    where: {
-                                        id:
-                                            item.productId,
-                                    },
-
-                                    data: {
-                                        sold: {
-                                            increment:
-                                                item.quantity,
-                                        },
-                                    },
-                                }
+                        if (
+                            stockUpdate.count !== 1
+                        ) {
+                            throw new Error(
+                                `Stok ${item.productName} - ${item.variantName} sudah berubah. Silakan checkout ulang.`
                             );
                         }
+
+                        await tx.product.update({
+                            where: {
+                                id:
+                                    item.productId,
+                            },
+
+                            data: {
+                                sold: {
+                                    increment:
+                                        item.quantity,
+                                },
+                            },
+                        });
                     }
 
                     /*
                      * ==========================================
-                     * CART CHECKOUT
+                     * KOSONGKAN CART
                      * ==========================================
-                     *
-                     * Hanya mode CART yang
-                     * menghapus isi cart.
                      */
 
-                    if (
-                        mode ===
-                        "CART" &&
-                        cart
-                    ) {
-                        await tx.cartItem.deleteMany(
-                            {
-                                where: {
-                                    cartId:
-                                        cart.id,
-                                },
-                            }
-                        );
+                    await tx.cartItem.deleteMany({
+                        where: {
+                            cartId: cart.id,
+                        },
+                    });
 
-                        for (const item of cart.items) {
-                            await tx.productVariant.update(
-                                {
-                                    where: {
-                                        id:
-                                            item.variantId,
-                                    },
-
-                                    data: {
-                                        stock: {
-                                            decrement:
-                                                item.quantity,
-                                        },
-                                    },
-                                }
-                            );
-
-                            await tx.product.update(
-                                {
-                                    where: {
-                                        id:
-                                            item.productId,
-                                    },
-
-                                    data: {
-                                        sold: {
-                                            increment:
-                                                item.quantity,
-                                        },
-                                    },
-                                }
-                            );
-                        }
-                    }
-
-                    return order;
+                    return createdOrder;
+                },
+                {
+                    timeout: 15000,
+                    maxWait: 10000,
                 }
             );
-
-        /*
-         * ==========================================
-         * RESPONSE
-         * ==========================================
-         */
 
         return NextResponse.json({
             success: true,
@@ -691,24 +550,35 @@ export async function POST(req: Request) {
             message:
                 "Pesanan berhasil dibuat.",
 
-            data: result,
+            data: order,
         });
     } catch (error) {
         console.error(
-            "CREATE ORDER ERROR:",
+            "CREATE CART ORDER ERROR:",
             error
         );
 
         return NextResponse.json(
             {
                 success: false,
+
                 message:
-                    "Gagal membuat pesanan.",
+                    error instanceof Error
+                        ? error.message
+                        : "Gagal membuat pesanan.",
             },
-            { status: 500 }
+            {
+                status: 500,
+            }
         );
     }
 }
+
+/*
+ * ==========================================
+ * GET /api/orders
+ * ==========================================
+ */
 
 export async function GET() {
     try {
@@ -727,7 +597,8 @@ export async function GET() {
         const orders =
             await prisma.order.findMany({
                 where: {
-                    userId: session.user.id,
+                    userId:
+                        session.user.id,
                 },
 
                 orderBy: {
@@ -735,6 +606,15 @@ export async function GET() {
                 },
 
                 include: {
+                    voucher: {
+                        select: {
+                            id: true,
+                            code: true,
+                            type: true,
+                            value: true,
+                        },
+                    },
+
                     items: {
                         take: 1,
 

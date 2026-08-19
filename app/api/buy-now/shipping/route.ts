@@ -3,9 +3,42 @@ import { NextResponse } from "next/server";
 const RAJAONGKIR_BASE_URL =
     "https://rajaongkir.komerce.id/api/v1";
 
-const API_KEY = process.env.RAJAONGKIR_API_KEY;
+const API_KEY =
+    process.env.RAJAONGKIR_API_KEY;
 
-export async function POST(request: Request) {
+/*
+ * ==========================================
+ * TYPE
+ * ==========================================
+ */
+
+type RajaOngkirShipping = {
+    name?: string;
+    code?: string;
+    service?: string;
+    description?: string;
+    cost?: number | string;
+    etd?: string;
+};
+
+type ShippingData = {
+    courier: string;
+    courierName: string;
+    service: string;
+    description: string;
+    cost: number;
+    etd: string;
+};
+
+/*
+ * ==========================================
+ * POST
+ * ==========================================
+ */
+
+export async function POST(
+    request: Request
+) {
     try {
         /*
          * ==========================================
@@ -32,14 +65,14 @@ export async function POST(request: Request) {
          * ==========================================
          */
 
-        const body = await request.json();
+        const body =
+            await request.json();
 
         const {
             origin,
             destination,
             weight,
             courier = "jne:jnt:sicepat",
-            price = "lowest",
         } = body;
 
         /*
@@ -48,16 +81,20 @@ export async function POST(request: Request) {
          * ==========================================
          */
 
-        const originId = Number(origin);
+        const originId =
+            Number(origin);
 
         if (
-            !Number.isInteger(originId) ||
+            !Number.isInteger(
+                originId
+            ) ||
             originId <= 0
         ) {
             return NextResponse.json(
                 {
                     success: false,
-                    message: "Origin tidak valid.",
+                    message:
+                        "Origin tidak valid.",
                 },
                 {
                     status: 400,
@@ -71,16 +108,20 @@ export async function POST(request: Request) {
          * ==========================================
          */
 
-        const destinationId = Number(destination);
+        const destinationId =
+            Number(destination);
 
         if (
-            !Number.isInteger(destinationId) ||
+            !Number.isInteger(
+                destinationId
+            ) ||
             destinationId <= 0
         ) {
             return NextResponse.json(
                 {
                     success: false,
-                    message: "Destination tidak valid.",
+                    message:
+                        "Destination tidak valid.",
                 },
                 {
                     status: 400,
@@ -94,16 +135,20 @@ export async function POST(request: Request) {
          * ==========================================
          */
 
-        const packageWeight = Number(weight);
+        const packageWeight =
+            Number(weight);
 
         if (
-            !Number.isFinite(packageWeight) ||
+            !Number.isFinite(
+                packageWeight
+            ) ||
             packageWeight <= 0
         ) {
             return NextResponse.json(
                 {
                     success: false,
-                    message: "Berat paket tidak valid.",
+                    message:
+                        "Berat paket tidak valid.",
                 },
                 {
                     status: 400,
@@ -112,10 +157,23 @@ export async function POST(request: Request) {
         }
 
         /*
+         * ==========================================
+         * WEIGHT
+         * ==========================================
+         *
          * RajaOngkir menggunakan gram.
+         *
+         * Contoh:
+         *
+         * 500 gram  -> 500
+         * 1.2 kg    -> 1200
+         * 2 kg      -> 2000
          */
 
-        const finalWeight = Math.ceil(packageWeight);
+        const finalWeight =
+            Math.ceil(
+                packageWeight
+            );
 
         /*
          * ==========================================
@@ -124,13 +182,15 @@ export async function POST(request: Request) {
          */
 
         if (
-            typeof courier !== "string" ||
+            typeof courier !==
+            "string" ||
             !courier.trim()
         ) {
             return NextResponse.json(
                 {
                     success: false,
-                    message: "Courier tidak valid.",
+                    message:
+                        "Courier tidak valid.",
                 },
                 {
                     status: 400,
@@ -144,7 +204,8 @@ export async function POST(request: Request) {
          * ==========================================
          */
 
-        const formData = new URLSearchParams();
+        const formData =
+            new URLSearchParams();
 
         formData.append(
             "origin",
@@ -166,10 +227,20 @@ export async function POST(request: Request) {
             courier
         );
 
-        formData.append(
-            "price",
-            price
-        );
+        /*
+         * ==========================================
+         * PENTING
+         * ==========================================
+         *
+         * Jangan pakai "lowest".
+         *
+         * Kita mau semua service yang tersedia.
+         */
+
+        // formData.append(
+        //     "price",
+        //     "all"
+        // );
 
         /*
          * ==========================================
@@ -177,23 +248,24 @@ export async function POST(request: Request) {
          * ==========================================
          */
 
-        const response = await fetch(
-            `${RAJAONGKIR_BASE_URL}/calculate/domestic-cost`,
-            {
-                method: "POST",
+        const response =
+            await fetch(
+                `${RAJAONGKIR_BASE_URL}/calculate/domestic-cost`,
+                {
+                    method: "POST",
 
-                headers: {
-                    key: API_KEY,
+                    headers: {
+                        key: API_KEY,
 
-                    "Content-Type":
-                        "application/x-www-form-urlencoded",
-                },
+                        "Content-Type":
+                            "application/x-www-form-urlencoded",
+                    },
 
-                body: formData,
+                    body: formData,
 
-                cache: "no-store",
-            }
-        );
+                    cache: "no-store",
+                }
+            );
 
         /*
          * ==========================================
@@ -201,10 +273,12 @@ export async function POST(request: Request) {
          * ==========================================
          */
 
-        let result: any = null;
+        let result: any =
+            null;
 
         try {
-            result = await response.json();
+            result =
+                await response.json();
         } catch {
             return NextResponse.json(
                 {
@@ -230,18 +304,23 @@ export async function POST(request: Request) {
                     success: false,
 
                     message:
-                        result?.meta?.message ||
+                        result?.meta
+                            ?.message ||
                         result?.message ||
                         "Gagal menghitung ongkir.",
 
                     data: null,
 
-                    meta: result?.meta ?? null,
+                    meta:
+                        result?.meta ??
+                        null,
                 },
                 {
                     status:
-                        response.status >= 400 &&
-                        response.status <= 599
+                        response.status >=
+                            400 &&
+                            response.status <=
+                            599
                             ? response.status
                             : 502,
                 }
@@ -249,16 +328,153 @@ export async function POST(request: Request) {
         }
 
         /*
+ * ==========================================
+ * RAW SHIPPING DATA
+ * ==========================================
+ */
+
+        const rawData: RajaOngkirShipping[] =
+            Array.isArray(result?.data)
+                ? (result.data as RajaOngkirShipping[])
+                : [];
+
+        /*
          * ==========================================
-         * NORMALIZE DATA
+         * FILTER SERVICE
+         * ==========================================
+         *
+         * Paket biasa jangan menampilkan
+         * layanan cargo/bulky.
+         *
+         * Contoh yang dibuang:
+         *
+         * JTR
+         * JTR<130
+         * JTR>130
+         * JTR>200
+         */
+
+        const shippingData: ShippingData[] =
+            rawData
+                .filter(
+                    (
+                        item: RajaOngkirShipping
+                    ) => {
+                        const service = String(
+                            item.service ?? ""
+                        )
+                            .trim()
+                            .toUpperCase();
+
+                        // Buang semua layanan cargo/trucking JNE
+                        // JTR, JTR<130, JTR>130, JTR>200
+                        if (
+                            service.startsWith(
+                                "JTR"
+                            )
+                        ) {
+                            return false;
+                        }
+
+                        const cost = Number(
+                            item.cost
+                        );
+
+                        if (
+                            !Number.isFinite(
+                                cost
+                            ) ||
+                            cost < 0
+                        ) {
+                            return false;
+                        }
+
+                        return true;
+                    }
+                )
+                .map(
+                    (
+                        item: RajaOngkirShipping
+                    ): ShippingData => ({
+                        courier:
+                            item.code ?? "",
+
+                        courierName:
+                            item.name ?? "",
+
+                        service:
+                            item.service ?? "",
+
+                        description:
+                            item.description ?? "",
+
+                        cost: Number(
+                            item.cost
+                        ),
+
+                        etd: item.etd ?? "",
+                    })
+                );
+
+        /*
+         * ==========================================
+         * REMOVE DUPLICATE
          * ==========================================
          */
 
-        const shippingData = Array.isArray(
-            result?.data
-        )
-            ? result.data
-            : [];
+        const uniqueShipping: ShippingData[] =
+            Array.from(
+                new Map<
+                    string,
+                    ShippingData
+                >(
+                    shippingData.map(
+                        (
+                            item: ShippingData
+                        ) => [
+                                [
+                                    item.courier,
+                                    item.service,
+                                    item.cost,
+                                ].join("|"),
+
+                                item,
+                            ]
+                    )
+                ).values()
+            );
+
+        /*
+         * ==========================================
+         * SORT
+         * ==========================================
+         *
+         * Kurir dulu, kemudian
+         * harga termurah.
+         */
+
+        uniqueShipping.sort(
+            (
+                a: ShippingData,
+                b: ShippingData
+            ) => {
+                const courierCompare =
+                    a.courier.localeCompare(
+                        b.courier
+                    );
+
+                if (
+                    courierCompare !== 0
+                ) {
+                    return courierCompare;
+                }
+
+                return (
+                    a.cost -
+                    b.cost
+                );
+            }
+        );
 
         /*
          * ==========================================
@@ -269,9 +485,13 @@ export async function POST(request: Request) {
         return NextResponse.json({
             success: true,
 
-            data: shippingData,
+            data: uniqueShipping,
 
-            meta: result?.meta ?? null,
+            meta:
+                result?.meta ??
+                null,
+
+            weight: finalWeight,
         });
     } catch (error) {
         console.error(
@@ -282,7 +502,8 @@ export async function POST(request: Request) {
         return NextResponse.json(
             {
                 success: false,
-                message: "Gagal menghitung ongkir.",
+                message:
+                    "Gagal menghitung ongkir.",
             },
             {
                 status: 500,

@@ -5,7 +5,7 @@ const nextConfig: NextConfig = {
         "192.168.2.49",
         "202.73.25.122",
         "demosolusisejalan.my.id",
-        "9ba5-2401-e320-506-9110-9-faed-bae9-244b.ngrok-free.app",
+        "94cb-2401-e320-506-9110-9-faed-bae9-244b.ngrok-free.app",
     ],
     images: {
         remotePatterns: [

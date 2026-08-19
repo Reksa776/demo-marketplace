@@ -381,24 +381,24 @@ export async function GET(request: Request) {
         const orderItems =
             paidOrderIds.length > 0
                 ? await prisma.orderItem.findMany(
-                      {
-                          where: {
-                              orderId: {
-                                  in: paidOrderIds,
-                              },
-                          },
+                    {
+                        where: {
+                            orderId: {
+                                in: paidOrderIds,
+                            },
+                        },
 
-                          select: {
-                              productId: true,
-                              variantId: true,
-                              productName: true,
-                              variantName: true,
-                              price: true,
-                              quantity: true,
-                              subtotal: true,
-                          },
-                      }
-                  )
+                        select: {
+                            productId: true,
+                            variantId: true,
+                            productName: true,
+                            variantName: true,
+                            price: true,
+                            quantity: true,
+                            subtotal: true,
+                        },
+                    }
+                )
                 : [];
 
         const productMap =
@@ -413,6 +413,9 @@ export async function GET(request: Request) {
             >();
 
         for (const item of orderItems) {
+            if (item.productId === null) {
+                continue;
+            }
             const existing =
                 productMap.get(
                     item.productId

@@ -11,21 +11,21 @@ function getPeriodStart(period: Period) {
     if (period === "7d") {
         return new Date(
             now.getTime() -
-                7 * 24 * 60 * 60 * 1000
+            7 * 24 * 60 * 60 * 1000
         );
     }
 
     if (period === "30d") {
         return new Date(
             now.getTime() -
-                30 * 24 * 60 * 60 * 1000
+            30 * 24 * 60 * 60 * 1000
         );
     }
 
     if (period === "90d") {
         return new Date(
             now.getTime() -
-                90 * 24 * 60 * 60 * 1000
+            90 * 24 * 60 * 60 * 1000
         );
     }
 
@@ -120,9 +120,9 @@ export async function GET(
         const period: Period =
             requestedPeriod ===
                 "30d" ||
-            requestedPeriod ===
+                requestedPeriod ===
                 "90d" ||
-            requestedPeriod ===
+                requestedPeriod ===
                 "all"
                 ? requestedPeriod
                 : "7d";
@@ -135,11 +135,11 @@ export async function GET(
 
         const where = periodStart
             ? {
-                  createdAt: {
-                      gte: periodStart,
-                      lte: periodEnd,
-                  },
-              }
+                createdAt: {
+                    gte: periodStart,
+                    lte: periodEnd,
+                },
+            }
             : {};
 
         /*
@@ -230,12 +230,19 @@ export async function GET(
                 }
             >();
 
-        for (
-            const order of paidOrders
-        ) {
-            for (
-                const item of order.items
-            ) {
+        for (const order of paidOrders) {
+            for (const item of order.items) {
+                /*
+                 * productId bisa null karena relasi
+                 * product -> order item kemungkinan optional.
+                 *
+                 * Untuk laporan produk terjual,
+                 * item tanpa productId kita skip.
+                 */
+                if (item.productId === null) {
+                    continue;
+                }
+
                 const existing =
                     productMap.get(
                         item.productId
@@ -306,8 +313,8 @@ export async function GET(
                 "Mulai":
                     periodStart
                         ? formatDate(
-                              periodStart
-                          )
+                            periodStart
+                        )
                         : "Semua",
 
                 "Sampai":

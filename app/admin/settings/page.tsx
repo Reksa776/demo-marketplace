@@ -13,7 +13,7 @@ export default async function AdminSettingsPage() {
     const role = (session.user as any).role;
 
     if (role !== "ADMIN") {
-        redirect("/products");
+        redirect("/home");
     }
 
     return <AdminSettingsForm />;

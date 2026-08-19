@@ -19,9 +19,6 @@ import { ProductProvider } from "@/components/products/ProductContext";
 
 const menuItems = [
     { href: "/orders", label: "Pesanan Saya", icon: FiPackage },
-    { href: "/wishlist", label: "Wishlist", icon: FiHeart },
-    { href: "/address", label: "Alamat", icon: FiMapPin },
-    { href: "/settings", label: "Pengaturan", icon: FiSettings },
 ];
 
 export default async function ProfilePage() {

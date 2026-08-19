@@ -3,7 +3,23 @@ import { NextResponse } from "next/server";
 const RAJAONGKIR_BASE_URL =
     "https://rajaongkir.komerce.id/api/v1";
 
+/*
+ * ==========================================
+ * TYPE
+ * ==========================================
+ */
+
+type RajaOngkirShipping = {
+    name?: string;   // nama kurir, misal "SiCepat Express"
+    code?: string;   // kode kurir, misal "sicepat"
+    service?: string;
+    description?: string;
+    cost?: number;
+    etd?: string;
+};
+
 const API_KEY = process.env.RAJAONGKIR_API_KEY;
+
 
 export async function POST(request: Request) {
     try {
@@ -241,7 +257,7 @@ export async function POST(request: Request) {
                 {
                     status:
                         response.status >= 400 &&
-                        response.status <= 599
+                            response.status <= 599
                             ? response.status
                             : 502,
                 }
@@ -249,16 +265,80 @@ export async function POST(request: Request) {
         }
 
         /*
+ * ==========================================
+ * RAW SHIPPING DATA
+ * ==========================================
+ */
+
+        const rawData: RajaOngkirShipping[] = Array.isArray(result?.data)
+            ? result.data
+            : [];
+
+        /*
          * ==========================================
-         * NORMALIZE DATA
+         * FILTER SERVICE
+         * ==========================================
+         *
+         * Paket biasa jangan menampilkan
+         * layanan cargo/bulky (JTR, JTR<130, JTR>130, JTR>200, dst).
+         */
+
+        const shippingData = rawData
+            .filter((item) => {
+                const service = String(item.service ?? "").trim().toUpperCase();
+
+                if (service.startsWith("JTR")) {
+                    return false;
+                }
+
+                const cost = Number(item.cost);
+                if (!Number.isFinite(cost) || cost < 0) {
+                    return false;
+                }
+
+                return true;
+            })
+            .map((item) => ({
+                courier: item.code ?? "",
+                courierName: item.name ?? "",
+                service: item.service ?? "",
+                description: item.description ?? "",
+                cost: Number(item.cost),
+                etd: item.etd ?? "",
+            }));
+
+        /*
+         * ==========================================
+         * REMOVE DUPLICATE
          * ==========================================
          */
 
-        const shippingData = Array.isArray(
-            result?.data
-        )
-            ? result.data
-            : [];
+        const uniqueShipping = Array.from(
+            new Map(
+                shippingData.map((item) => [
+                    [item.courier, item.service, item.cost].join("|"),
+                    item,
+                ])
+            ).values()
+        );
+
+        /*
+         * ==========================================
+         * SORT
+         * ==========================================
+         *
+         * Kurir dulu, kemudian harga termurah.
+         */
+
+        uniqueShipping.sort((a, b) => {
+            const courierCompare = a.courier.localeCompare(b.courier);
+
+            if (courierCompare !== 0) {
+                return courierCompare;
+            }
+
+            return a.cost - b.cost;
+        });
 
         /*
          * ==========================================
@@ -269,9 +349,11 @@ export async function POST(request: Request) {
         return NextResponse.json({
             success: true,
 
-            data: shippingData,
+            data: uniqueShipping,
 
             meta: result?.meta ?? null,
+
+            weight: finalWeight,
         });
     } catch (error) {
         console.error(

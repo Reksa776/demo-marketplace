@@ -168,15 +168,12 @@ CREATE TABLE `Order` (
     `shippingCost` DECIMAL(12, 2) NOT NULL,
     `total` DECIMAL(12, 2) NOT NULL,
     `status` ENUM('PENDING', 'PAID', 'PROCESSING', 'SHIPPED', 'COMPLETED', 'CANCELLED') NOT NULL DEFAULT 'PENDING',
-    `paymentMethod` ENUM('COD', 'BANK_TRANSFER', 'E_WALLET') NOT NULL DEFAULT 'COD',
+    `paymentMethod` ENUM('COD', 'BANK_TRANSFER', 'E_WALLET', 'QRIS') NOT NULL DEFAULT 'COD',
     `paymentStatus` ENUM('UNPAID', 'PENDING', 'PAID', 'FAILED', 'EXPIRED', 'REFUNDED') NOT NULL DEFAULT 'UNPAID',
-    `paymentReference` VARCHAR(191) NULL,
     `paidAt` DATETIME(3) NULL,
     `shippingCourier` VARCHAR(191) NULL,
     `shippingService` VARCHAR(191) NULL,
     `trackingNumber` VARCHAR(191) NULL,
-    `shippedAt` DATETIME(3) NULL,
-    `completedAt` DATETIME(3) NULL,
     `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     `updatedAt` DATETIME(3) NOT NULL,
     `city` VARCHAR(191) NULL,
@@ -185,9 +182,13 @@ CREATE TABLE `Order` (
     `longitude` DECIMAL(10, 7) NULL,
     `postalCode` VARCHAR(191) NULL,
     `province` VARCHAR(191) NULL,
+    `paymentReference` VARCHAR(191) NULL,
+    `voucherId` INTEGER NULL,
+    `voucherCode` VARCHAR(191) NULL,
+    `discount` DECIMAL(12, 2) NOT NULL DEFAULT 0,
+    `trackingUrl` VARCHAR(191) NULL,
 
     UNIQUE INDEX `Order_orderNumber_key`(`orderNumber`),
-    UNIQUE INDEX `Order_paymentReference_key`(`paymentReference`),
     INDEX `Order_userId_idx`(`userId`),
     INDEX `Order_status_idx`(`status`),
     INDEX `Order_paymentStatus_idx`(`paymentStatus`),
@@ -304,6 +305,28 @@ CREATE TABLE `RajaOngkirRegion` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
+-- CreateTable
+CREATE TABLE `Voucher` (
+    `id` INTEGER NOT NULL AUTO_INCREMENT,
+    `code` VARCHAR(191) NOT NULL,
+    `description` VARCHAR(191) NULL,
+    `type` ENUM('PERCENTAGE', 'FIXED') NOT NULL,
+    `value` DECIMAL(12, 2) NOT NULL,
+    `maxDiscount` DECIMAL(12, 2) NULL,
+    `minPurchase` DECIMAL(12, 2) NULL,
+    `quota` INTEGER NULL,
+    `usedCount` INTEGER NOT NULL DEFAULT 0,
+    `isActive` BOOLEAN NOT NULL DEFAULT true,
+    `startDate` DATETIME(3) NULL,
+    `endDate` DATETIME(3) NULL,
+    `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `updatedAt` DATETIME(3) NOT NULL,
+
+    UNIQUE INDEX `Voucher_code_key`(`code`),
+    INDEX `Voucher_isActive_idx`(`isActive`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
 -- AddForeignKey
 ALTER TABLE `Account` ADD CONSTRAINT `Account_userId_fkey` FOREIGN KEY (`userId`) REFERENCES `User`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
 
@@ -341,16 +364,19 @@ ALTER TABLE `UserAddress` ADD CONSTRAINT `UserAddress_userId_fkey` FOREIGN KEY (
 ALTER TABLE `UserAddress` ADD CONSTRAINT `UserAddress_villageId_fkey` FOREIGN KEY (`villageId`) REFERENCES `Village`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE `Order` ADD CONSTRAINT `Order_voucherId_fkey` FOREIGN KEY (`voucherId`) REFERENCES `Voucher`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE `Order` ADD CONSTRAINT `Order_userId_fkey` FOREIGN KEY (`userId`) REFERENCES `User`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE `OrderItem` ADD CONSTRAINT `OrderItem_orderId_fkey` FOREIGN KEY (`orderId`) REFERENCES `Order`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE `OrderItem` ADD CONSTRAINT `OrderItem_productId_fkey` FOREIGN KEY (`productId`) REFERENCES `Product`(`id`) ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE `OrderItem` ADD CONSTRAINT `OrderItem_productId_fkey` FOREIGN KEY (`productId`) REFERENCES `Product`(`id`) ON DELETE NO ACTION ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE `OrderItem` ADD CONSTRAINT `OrderItem_variantId_fkey` FOREIGN KEY (`variantId`) REFERENCES `ProductVariant`(`id`) ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE `OrderItem` ADD CONSTRAINT `OrderItem_variantId_fkey` FOREIGN KEY (`variantId`) REFERENCES `ProductVariant`(`id`) ON DELETE NO ACTION ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE `Regency` ADD CONSTRAINT `Regency_provinceId_fkey` FOREIGN KEY (`provinceId`) REFERENCES `Province`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;

@@ -5,6 +5,12 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import toast from "react-hot-toast";
 
+/*
+ * =========================================================
+ * TYPES
+ * =========================================================
+ */
+
 type Address = {
     id: string;
 
@@ -71,6 +77,72 @@ type Region = {
     zip_code?: string;
 };
 
+type ProductData = {
+    id: number;
+    name: string;
+    slug: string;
+    image: string | null;
+};
+
+type VariantData = {
+    id: number;
+    name: string;
+    image: string | null;
+    price: number;
+    weight: number;
+    stock: number;
+};
+
+type BuyNowData = {
+    product: ProductData;
+
+    variant: VariantData;
+
+    quantity: number;
+
+    subtotal: number;
+
+    totalWeight: number;
+
+    addresses: Address[];
+
+    store: {
+        id: number;
+
+        storeName: string;
+
+        rajaOngkirDestinationId: number | null;
+    };
+};
+
+type ShippingOption = {
+    description: string | undefined;
+    courier?: string;
+    code?: string;
+
+    service?: string;
+    service_name?: string;
+
+    etd?: string;
+    estimation?: string;
+
+    cost?: number;
+    price?: number;
+    shipping_cost?: number;
+};
+
+type PaymentMethod =
+    | "COD"
+    | "BANK_TRANSFER"
+    | "E_WALLET"
+    | "QRIS";
+
+type Props = {
+    productId: string;
+    variantId: string;
+    quantity: string;
+};
+
 const emptyAddressForm: AddressForm = {
     label: "",
 
@@ -100,126 +172,67 @@ const emptyAddressForm: AddressForm = {
     isDefault: false,
 };
 
-type ProductData = {
-    id: number;
-
-    name: string;
-
-    slug: string;
-
-    image: string | null;
-};
-
-type VariantData = {
-    id: number;
-
-    name: string;
-
-    image: string | null;
-
-    price: number;
-
-    weight: number;
-
-    stock: number;
-};
-
-type BuyNowData = {
-    product: ProductData;
-
-    variant: VariantData;
-
-    quantity: number;
-
-    subtotal: number;
-
-    totalWeight: number;
-
-    addresses: Address[];
-
-    store: {
-        id: number;
-
-        storeName: string;
-
-        rajaOngkirDestinationId:
-        number | null;
-    };
-};
-
-type ShippingOption = {
-    courier?: string;
-
-    code?: string;
-
-    service?: string;
-
-    service_name?: string;
-
-    etd?: string;
-
-    estimation?: string;
-
-    cost?: number;
-
-    price?: number;
-
-    shipping_cost?: number;
-};
-
-type Props = {
-    productId: string;
-
-    variantId: string;
-
-    quantity: string;
-};
-
 /*
- * ==========================================
- * AUTO RETRY HELPER
- * ==========================================
+ * =========================================================
+ * RETRY HELPER
+ * =========================================================
  *
- * Dipakai untuk semua request yang rawan
- * kena ETIMEDOUT / fetch failed dari upstream
- * (RajaOngkir, dll). Ketika gagal, function
- * ini otomatis coba lagi dengan delay yang
- * makin lama (exponential-ish backoff),
- * sambil ngasih tau UI lewat onRetry supaya
- * bisa nampilin status "mencoba lagi...".
+ * Dipakai hanya untuk request yang aman diulang:
  *
- * Kalau semua percobaan gagal, error terakhir
- * akan di-throw supaya caller bisa nampilin
- * toast + tombol retry manual.
+ * GET region
+ * GET buy-now
+ * GET destination
+ * POST shipping calculation
+ *
+ * JANGAN pakai helper ini untuk:
+ *
+ * POST create order
+ * POST create Midtrans transaction
+ * POST save address
+ *
+ * supaya tidak berpotensi membuat data/transaksi dobel.
  */
+
 async function withRetry<T>(
     fn: () => Promise<T>,
     options?: {
         retries?: number;
         delayMs?: number;
-        onRetry?: (attempt: number, totalRetries: number) => void;
+        onRetry?: (
+            attempt: number,
+            totalRetries: number
+        ) => void;
     }
 ): Promise<T> {
-    const retries = options?.retries ?? 6;
+    const retries = options?.retries ?? 4;
     const delayMs = options?.delayMs ?? 1000;
 
     let lastError: unknown;
 
-    for (let attempt = 1; attempt <= retries; attempt++) {
+    for (
+        let attempt = 1;
+        attempt <= retries;
+        attempt++
+    ) {
         try {
             return await fn();
         } catch (error) {
             lastError = error;
 
-            if (attempt === retries) {
+            if (attempt >= retries) {
                 break;
             }
 
-            options?.onRetry?.(attempt, retries);
+            options?.onRetry?.(
+                attempt,
+                retries
+            );
 
-            // backoff makin lama tiap percobaan (1s, 2s, 3s, ...)
             await new Promise((resolve) =>
-                setTimeout(resolve, delayMs * attempt)
+                setTimeout(
+                    resolve,
+                    delayMs * attempt
+                )
             );
         }
     }
@@ -227,12 +240,129 @@ async function withRetry<T>(
     throw lastError;
 }
 
+/*
+ * =========================================================
+ * SAFE JSON RESPONSE
+ * =========================================================
+ */
+
+async function parseApiResponse(
+    response: Response
+) {
+    const contentType =
+        response.headers.get(
+            "content-type"
+        ) || "";
+
+    if (
+        contentType.includes(
+            "application/json"
+        )
+    ) {
+        return response.json();
+    }
+
+    const text =
+        await response.text();
+
+    throw new Error(
+        text ||
+        `Server mengembalikan response tidak valid (${response.status}).`
+    );
+}
+/*
+ * =====================================================
+ * PENJELASAN LAYANAN KURIR
+ * =====================================================
+ *
+ * Key format: "KODE_KURIR-KODE_SERVICE" (uppercase).
+ * Kalau gak ketemu di sini, fallback ke `description`
+ * bawaan dari RajaOngkir.
+ */
+
+const SERVICE_EXPLANATIONS: Record<string, string> = {
+    // JNE
+    "JNE-OKE": "Layanan ekonomis JNE, harga paling murah tapi estimasi lebih lama.",
+    "JNE-REG": "Layanan reguler JNE, estimasi standar dengan harga wajar.",
+    "JNE-YES": "Yakin Esok Sampai — JNE menjamin paket sampai keesokan hari (khusus kota-kota tertentu).",
+    "JNE-SPS": "Super Speed — pengiriman di hari yang sama, khusus rute tertentu.",
+
+    // J&T
+    "JNT-EZ": "Layanan ekonomis J&T, harga lebih murah dengan estimasi lebih lama.",
+    "JNT-REG": "Layanan reguler J&T, estimasi standar.",
+
+    // SiCepat
+    "SICEPAT-REG": "Layanan reguler SiCepat, estimasi standar.",
+    "SICEPAT-BEST": "Besok Sampai Tujuan — SiCepat menjamin paket sampai keesokan hari.",
+    "SICEPAT-GOKIL": "Ongkos Kirim Irit — layanan paling murah SiCepat, estimasi lebih lama.",
+    "SICEPAT-SDS": "Same Day Service — sampai di hari yang sama (khusus kota tertentu).",
+};
+
+function getServiceExplanation(
+    courier: string,
+    service: string,
+    apiDescription?: string
+) {
+    const key = `${courier}-${service}`.toUpperCase();
+
+    return (
+        SERVICE_EXPLANATIONS[key] ||
+        apiDescription ||
+        "Layanan pengiriman standar dari kurir ini."
+    );
+}
+
+/*
+ * =========================================================
+ * COMPONENT
+ * =========================================================
+ */
+
 export default function BuyNowPage({
     productId,
     variantId,
     quantity,
 }: Props) {
     const router = useRouter();
+
+    /*
+     * =====================================================
+     * BASIC DATA
+     * =====================================================
+     */
+
+    const numericProductId =
+        Number(productId);
+
+    const numericVariantId =
+        Number(variantId);
+
+    const numericQuantity =
+        Number(quantity);
+
+    /*
+     * =====================================================
+     * VOUCHER
+     * =====================================================
+     */
+
+    const [voucherCode, setVoucherCode] =
+        useState("");
+
+    const [appliedVoucherCode, setAppliedVoucherCode] =
+        useState("");
+
+    const [voucherDiscount, setVoucherDiscount] =
+        useState(0);
+
+    const [voucherLoading, setVoucherLoading] =
+        useState(false);
+
+    /*
+     * =====================================================
+     * BUY NOW DATA
+     * =====================================================
+     */
 
     const [loading, setLoading] =
         useState(true);
@@ -247,9 +377,9 @@ export default function BuyNowPage({
         useState<BuyNowData | null>(null);
 
     /*
-     * ==========================================
+     * =====================================================
      * ADDRESS
-     * ==========================================
+     * =====================================================
      */
 
     const [selectedAddress, setSelectedAddress] =
@@ -267,9 +397,9 @@ export default function BuyNowPage({
         });
 
     /*
-     * ==========================================
+     * =====================================================
      * REGION
-     * ==========================================
+     * =====================================================
      */
 
     const [provinces, setProvinces] =
@@ -315,9 +445,9 @@ export default function BuyNowPage({
         useState(false);
 
     /*
-     * ==========================================
+     * =====================================================
      * SHIPPING
-     * ==========================================
+     * =====================================================
      */
 
     const [shippingOptions, setShippingOptions] =
@@ -333,26 +463,22 @@ export default function BuyNowPage({
         useState(false);
 
     /*
-     * ==========================================
+     * =====================================================
      * PAYMENT
-     * ==========================================
+     * =====================================================
      */
 
     const [paymentMethod, setPaymentMethod] =
-        useState<
-            | "COD"
-            | "BANK_TRANSFER"
-            | "E_WALLET"
-            | "QRIS"
-        >("COD");
+        useState<PaymentMethod>("COD");
 
     const [creatingOrder, setCreatingOrder] =
         useState(false);
+
     /*
- * ==========================================
- * MIDTRANS SNAP.JS
- * ==========================================
- */
+     * =====================================================
+     * MIDTRANS SNAP
+     * =====================================================
+     */
 
     const [snapReady, setSnapReady] =
         useState(false);
@@ -360,27 +486,61 @@ export default function BuyNowPage({
     const [snapLoading, setSnapLoading] =
         useState(true);
 
+    const [snapError, setSnapError] =
+        useState<string | null>(null);
+
+    /*
+     * =====================================================
+     * LOAD MIDTRANS SNAP.JS
+     * =====================================================
+     */
+
     useEffect(() => {
         let script =
             document.getElementById(
                 "midtrans-snap"
             ) as HTMLScriptElement | null;
 
-        /*
-         * Kalau Snap.js sudah ada
-         */
-        if (
-            script &&
-            (window as any).snap
-        ) {
-            setSnapReady(true);
+        const isProduction =
+            process.env
+                .NEXT_PUBLIC_MIDTRANS_IS_PRODUCTION ===
+            "true";
+
+        const clientKey =
+            process.env
+                .NEXT_PUBLIC_MIDTRANS_CLIENT_KEY ||
+            "";
+
+        if (!clientKey) {
+            console.error(
+                "NEXT_PUBLIC_MIDTRANS_CLIENT_KEY belum diset."
+            );
+
+            setSnapReady(false);
             setSnapLoading(false);
+            setSnapError(
+                "Midtrans Client Key belum dikonfigurasi."
+            );
+
             return;
         }
 
         /*
-         * Kalau script belum ada,
-         * buat script baru.
+         * Snap sudah tersedia.
+         */
+
+        if (
+            (window as any).snap
+        ) {
+            setSnapReady(true);
+            setSnapLoading(false);
+            setSnapError(null);
+
+            return;
+        }
+
+        /*
+         * Buat script kalau belum ada.
          */
 
         if (!script) {
@@ -392,17 +552,13 @@ export default function BuyNowPage({
             script.id =
                 "midtrans-snap";
 
-            script.src =
-                process.env
-                    .NEXT_PUBLIC_MIDTRANS_IS_PRODUCTION === "true"
-                    ? "https://app.midtrans.com/snap/snap.js"
-                    : "https://app.sandbox.midtrans.com/snap/snap.js";
+            script.src = isProduction
+                ? "https://app.midtrans.com/snap/snap.js"
+                : "https://app.sandbox.midtrans.com/snap/snap.js";
 
             script.setAttribute(
                 "data-client-key",
-                process.env
-                    .NEXT_PUBLIC_MIDTRANS_CLIENT_KEY ||
-                ""
+                clientKey
             );
 
             script.async = true;
@@ -417,6 +573,13 @@ export default function BuyNowPage({
                 (window as any).snap
             ) {
                 setSnapReady(true);
+                setSnapError(null);
+            } else {
+                setSnapReady(false);
+
+                setSnapError(
+                    "Snap.js berhasil dimuat tetapi object Snap tidak tersedia."
+                );
             }
 
             setSnapLoading(false);
@@ -428,7 +591,12 @@ export default function BuyNowPage({
             );
 
             setSnapReady(false);
+
             setSnapLoading(false);
+
+            setSnapError(
+                "Gagal memuat Midtrans Snap.js."
+            );
         };
 
         script.addEventListener(
@@ -442,9 +610,8 @@ export default function BuyNowPage({
         );
 
         /*
-         * Kalau ternyata script sudah
-         * selesai loading sebelum listener
-         * dipasang.
+         * Cek sekali lagi kalau script
+         * ternyata sudah selesai loading.
          */
 
         if (
@@ -452,6 +619,7 @@ export default function BuyNowPage({
         ) {
             setSnapReady(true);
             setSnapLoading(false);
+            setSnapError(null);
         }
 
         return () => {
@@ -466,6 +634,12 @@ export default function BuyNowPage({
             );
         };
     }, []);
+
+    /*
+     * =====================================================
+     * DESTINATION EFFECT
+     * =====================================================
+     */
 
     useEffect(() => {
         if (
@@ -487,6 +661,7 @@ export default function BuyNowPage({
         }
 
         loadRajaOngkirDestination();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [
         addressForm.provinceId,
         addressForm.cityId,
@@ -494,95 +669,151 @@ export default function BuyNowPage({
         addressForm.subdistrictId,
     ]);
 
-    async function handleCityChange(
-        cityId: string
-    ) {
-        const city =
-            cities.find(
-                (item) =>
-                    String(item.id) ===
-                    cityId
+    /*
+     * =====================================================
+     * REGION LOAD
+     * =====================================================
+     */
+
+    async function loadRegions(
+        type:
+            | "province"
+            | "city"
+            | "district"
+            | "subdistrict",
+        id?: string
+    ): Promise<Region[]> {
+        const params =
+            new URLSearchParams();
+
+        params.set(
+            "type",
+            type
+        );
+
+        if (id) {
+            params.set(
+                "id",
+                id
             );
-
-        setAddressForm((prev) => ({
-            ...prev,
-
-            cityId,
-
-            city:
-                city?.name ?? "",
-
-            districtId: "",
-            district: "",
-
-            subdistrictId: "",
-            subdistrict: "",
-
-            postalCode: "",
-
-            rajaOngkirDestinationId:
-                null,
-        }));
-
-        setDistricts([]);
-        setSubdistricts([]);
-
-        if (!cityId) {
-            return;
         }
 
-        try {
-            setLoadingDistricts(true);
-            setDistrictsRetrying(false);
-
-            const result = await withRetry(
-                () => loadRegions("district", cityId),
+        const response =
+            await fetch(
+                `/api/rajaongkir/regions?${params.toString()}`,
                 {
-                    onRetry: () => setDistrictsRetrying(true),
+                    method: "GET",
+                    cache: "no-store",
                 }
             );
 
-            setDistricts(result);
+        const result =
+            await parseApiResponse(
+                response
+            );
+
+        if (
+            !response.ok ||
+            !result?.success
+        ) {
+            throw new Error(
+                result?.message ||
+                "Gagal mengambil data wilayah."
+            );
+        }
+
+        return Array.isArray(
+            result.data
+        )
+            ? result.data
+            : [];
+    }
+
+    /*
+     * =====================================================
+     * LOAD PROVINCES
+     * =====================================================
+     */
+
+    async function loadProvinces() {
+        try {
+            setLoadingProvinces(true);
+            setProvincesRetrying(false);
+
+            const result =
+                await withRetry(
+                    () =>
+                        loadRegions(
+                            "province"
+                        ),
+                    {
+                        onRetry: () =>
+                            setProvincesRetrying(
+                                true
+                            ),
+                    }
+                );
+
+            setProvinces(result);
         } catch (error) {
+            console.error(
+                "LOAD PROVINCES ERROR:",
+                error
+            );
+
             toast.error(
                 error instanceof Error
                     ? error.message
-                    : "Gagal mengambil kecamatan."
+                    : "Gagal mengambil provinsi."
             );
         } finally {
-            setLoadingDistricts(false);
-            setDistrictsRetrying(false);
+            setLoadingProvinces(false);
+            setProvincesRetrying(false);
         }
     }
+
+    /*
+     * =====================================================
+     * PROVINCE CHANGE
+     * =====================================================
+     */
+
     async function handleProvinceChange(
         provinceId: string
     ) {
-        const province = provinces.find(
-            (item) =>
-                String(item.id) === provinceId
+        const province =
+            provinces.find(
+                (item) =>
+                    String(
+                        item.id
+                    ) === provinceId
+            );
+
+        setAddressForm(
+            (prev) => ({
+                ...prev,
+
+                provinceId,
+
+                province:
+                    province?.name ||
+                    "",
+
+                cityId: "",
+                city: "",
+
+                districtId: "",
+                district: "",
+
+                subdistrictId: "",
+                subdistrict: "",
+
+                postalCode: "",
+
+                rajaOngkirDestinationId:
+                    null,
+            })
         );
-
-        setAddressForm((prev) => ({
-            ...prev,
-
-            provinceId,
-
-            province:
-                province?.name ?? "",
-
-            cityId: "",
-            city: "",
-
-            districtId: "",
-            district: "",
-
-            subdistrictId: "",
-            subdistrict: "",
-
-            postalCode: "",
-
-            rajaOngkirDestinationId: null,
-        }));
 
         setCities([]);
         setDistricts([]);
@@ -596,17 +827,25 @@ export default function BuyNowPage({
             setLoadingCities(true);
             setCitiesRetrying(false);
 
-            const result = await withRetry(
-                () => loadRegions("city", provinceId),
-                {
-                    onRetry: () => setCitiesRetrying(true),
-                }
-            );
+            const result =
+                await withRetry(
+                    () =>
+                        loadRegions(
+                            "city",
+                            provinceId
+                        ),
+                    {
+                        onRetry: () =>
+                            setCitiesRetrying(
+                                true
+                            ),
+                    }
+                );
 
             setCities(result);
         } catch (error) {
             console.error(
-                "BUY NOW LOAD CITIES ERROR:",
+                "LOAD CITIES ERROR:",
                 error
             );
 
@@ -620,36 +859,96 @@ export default function BuyNowPage({
             setCitiesRetrying(false);
         }
     }
-    async function handleSubdistrictChange(
-        subdistrictId: string
+
+    /*
+     * =====================================================
+     * CITY CHANGE
+     * =====================================================
+     */
+
+    async function handleCityChange(
+        cityId: string
     ) {
-        const subdistrict =
-            subdistricts.find(
+        const city =
+            cities.find(
                 (item) =>
-                    String(item.id) ===
-                    subdistrictId
+                    String(
+                        item.id
+                    ) === cityId
             );
 
-        if (!subdistrict) {
+        setAddressForm(
+            (prev) => ({
+                ...prev,
+
+                cityId,
+
+                city:
+                    city?.name ||
+                    "",
+
+                districtId: "",
+                district: "",
+
+                subdistrictId: "",
+                subdistrict: "",
+
+                postalCode: "",
+
+                rajaOngkirDestinationId:
+                    null,
+            })
+        );
+
+        setDistricts([]);
+        setSubdistricts([]);
+
+        if (!cityId) {
             return;
         }
 
-        setAddressForm((prev) => ({
-            ...prev,
+        try {
+            setLoadingDistricts(true);
+            setDistrictsRetrying(false);
 
-            subdistrictId,
+            const result =
+                await withRetry(
+                    () =>
+                        loadRegions(
+                            "district",
+                            cityId
+                        ),
+                    {
+                        onRetry: () =>
+                            setDistrictsRetrying(
+                                true
+                            ),
+                    }
+                );
 
-            subdistrict:
-                subdistrict.name,
+            setDistricts(result);
+        } catch (error) {
+            console.error(
+                "LOAD DISTRICTS ERROR:",
+                error
+            );
 
-            postalCode:
-                subdistrict.zip_code ??
-                "",
-
-            rajaOngkirDestinationId:
-                null,
-        }));
+            toast.error(
+                error instanceof Error
+                    ? error.message
+                    : "Gagal mengambil kecamatan."
+            );
+        } finally {
+            setLoadingDistricts(false);
+            setDistrictsRetrying(false);
+        }
     }
+
+    /*
+     * =====================================================
+     * DISTRICT CHANGE
+     * =====================================================
+     */
 
     async function handleDistrictChange(
         districtId: string
@@ -657,26 +956,30 @@ export default function BuyNowPage({
         const district =
             districts.find(
                 (item) =>
-                    String(item.id) ===
-                    districtId
+                    String(
+                        item.id
+                    ) === districtId
             );
 
-        setAddressForm((prev) => ({
-            ...prev,
+        setAddressForm(
+            (prev) => ({
+                ...prev,
 
-            districtId,
+                districtId,
 
-            district:
-                district?.name ?? "",
+                district:
+                    district?.name ||
+                    "",
 
-            subdistrictId: "",
-            subdistrict: "",
+                subdistrictId: "",
+                subdistrict: "",
 
-            postalCode: "",
+                postalCode: "",
 
-            rajaOngkirDestinationId:
-                null,
-        }));
+                rajaOngkirDestinationId:
+                    null,
+            })
+        );
 
         setSubdistricts([]);
 
@@ -685,28 +988,95 @@ export default function BuyNowPage({
         }
 
         try {
-            setLoadingSubdistricts(true);
-            setSubdistrictsRetrying(false);
-
-            const result = await withRetry(
-                () => loadRegions("subdistrict", districtId),
-                {
-                    onRetry: () => setSubdistrictsRetrying(true),
-                }
+            setLoadingSubdistricts(
+                true
             );
+
+            setSubdistrictsRetrying(
+                false
+            );
+
+            const result =
+                await withRetry(
+                    () =>
+                        loadRegions(
+                            "subdistrict",
+                            districtId
+                        ),
+                    {
+                        onRetry: () =>
+                            setSubdistrictsRetrying(
+                                true
+                            ),
+                    }
+                );
 
             setSubdistricts(result);
         } catch (error) {
+            console.error(
+                "LOAD SUBDISTRICTS ERROR:",
+                error
+            );
+
             toast.error(
                 error instanceof Error
                     ? error.message
                     : "Gagal mengambil kelurahan."
             );
         } finally {
-            setLoadingSubdistricts(false);
-            setSubdistrictsRetrying(false);
+            setLoadingSubdistricts(
+                false
+            );
+
+            setSubdistrictsRetrying(
+                false
+            );
         }
     }
+
+    /*
+     * =====================================================
+     * SUBDISTRICT CHANGE
+     * =====================================================
+     */
+
+    function handleSubdistrictChange(
+        subdistrictId: string
+    ) {
+        const subdistrict =
+            subdistricts.find(
+                (item) =>
+                    String(
+                        item.id
+                    ) ===
+                    subdistrictId
+            );
+
+        setAddressForm(
+            (prev) => ({
+                ...prev,
+
+                subdistrictId,
+
+                subdistrict:
+                    subdistrict?.name ||
+                    "",
+
+                postalCode:
+                    subdistrict?.zip_code ||
+                    "",
+
+                rajaOngkirDestinationId:
+                    null,
+            })
+        );
+    }
+
+    /*
+     * =====================================================
+     * RAJA ONGKIR DESTINATION
+     * =====================================================
+     */
 
     async function loadRajaOngkirDestination() {
         if (
@@ -728,121 +1098,143 @@ export default function BuyNowPage({
         }
 
         try {
-            setLoadingDestination(true);
-            setDestinationRetrying(false);
-
-            const destinationId = await withRetry(
-                async () => {
-                    const params =
-                        new URLSearchParams();
-
-                    params.set(
-                        "provinceId",
-                        addressForm.provinceId
-                    );
-
-                    params.set(
-                        "cityId",
-                        addressForm.cityId
-                    );
-
-                    params.set(
-                        "districtId",
-                        addressForm.districtId
-                    );
-
-                    params.set(
-                        "subdistrictId",
-                        addressForm.subdistrictId
-                    );
-
-                    params.set(
-                        "province",
-                        addressForm.province
-                    );
-
-                    params.set(
-                        "city",
-                        addressForm.city
-                    );
-
-                    params.set(
-                        "district",
-                        addressForm.district
-                    );
-
-                    params.set(
-                        "subdistrict",
-                        addressForm.subdistrict
-                    );
-
-                    if (addressForm.postalCode) {
-                        params.set(
-                            "postalCode",
-                            addressForm.postalCode
-                        );
-                    }
-
-                    const response =
-                        await fetch(
-                            `/api/rajaongkir/destination?${params.toString()}`,
-                            {
-                                cache: "no-store",
-                            }
-                        );
-
-                    const result =
-                        await response.json();
-
-                    if (
-                        !response.ok ||
-                        !result.success
-                    ) {
-                        throw new Error(
-                            result.message ||
-                            "Destination RajaOngkir tidak ditemukan."
-                        );
-                    }
-
-                    const id =
-                        Number(
-                            result.data
-                                ?.rajaOngkirDestinationId
-                        );
-
-                    if (
-                        !Number.isInteger(id) ||
-                        id <= 0
-                    ) {
-                        throw new Error(
-                            "Destination RajaOngkir yang diterima tidak valid."
-                        );
-                    }
-
-                    return id;
-                },
-                {
-                    onRetry: () => setDestinationRetrying(true),
-                }
+            setLoadingDestination(
+                true
             );
 
-            setAddressForm((prev) => ({
-                ...prev,
+            setDestinationRetrying(
+                false
+            );
 
-                rajaOngkirDestinationId:
-                    destinationId,
-            }));
+            const destinationId =
+                await withRetry(
+                    async () => {
+                        const params =
+                            new URLSearchParams();
+
+                        params.set(
+                            "provinceId",
+                            addressForm.provinceId
+                        );
+
+                        params.set(
+                            "cityId",
+                            addressForm.cityId
+                        );
+
+                        params.set(
+                            "districtId",
+                            addressForm.districtId
+                        );
+
+                        params.set(
+                            "subdistrictId",
+                            addressForm.subdistrictId
+                        );
+
+                        params.set(
+                            "province",
+                            addressForm.province
+                        );
+
+                        params.set(
+                            "city",
+                            addressForm.city
+                        );
+
+                        params.set(
+                            "district",
+                            addressForm.district
+                        );
+
+                        params.set(
+                            "subdistrict",
+                            addressForm.subdistrict
+                        );
+
+                        if (
+                            addressForm.postalCode
+                        ) {
+                            params.set(
+                                "postalCode",
+                                addressForm.postalCode
+                            );
+                        }
+
+                        const response =
+                            await fetch(
+                                `/api/rajaongkir/destination?${params.toString()}`,
+                                {
+                                    method: "GET",
+                                    cache: "no-store",
+                                }
+                            );
+
+                        const result =
+                            await parseApiResponse(
+                                response
+                            );
+
+                        if (
+                            !response.ok ||
+                            !result?.success
+                        ) {
+                            throw new Error(
+                                result?.message ||
+                                "Destination RajaOngkir tidak ditemukan."
+                            );
+                        }
+
+                        const id =
+                            Number(
+                                result
+                                    ?.data
+                                    ?.rajaOngkirDestinationId
+                            );
+
+                        if (
+                            !Number.isInteger(
+                                id
+                            ) ||
+                            id <= 0
+                        ) {
+                            throw new Error(
+                                "Destination RajaOngkir tidak valid."
+                            );
+                        }
+
+                        return id;
+                    },
+                    {
+                        onRetry: () =>
+                            setDestinationRetrying(
+                                true
+                            ),
+                    }
+                );
+
+            setAddressForm(
+                (prev) => ({
+                    ...prev,
+
+                    rajaOngkirDestinationId:
+                        destinationId,
+                })
+            );
         } catch (error) {
             console.error(
-                "BUY NOW LOAD DESTINATION ERROR:",
+                "DESTINATION ERROR:",
                 error
             );
 
-            setAddressForm((prev) => ({
-                ...prev,
-                rajaOngkirDestinationId:
-                    null,
-            }));
+            setAddressForm(
+                (prev) => ({
+                    ...prev,
+
+                    rajaOngkirDestinationId:
+                        null,
+                })
+            );
 
             toast.error(
                 error instanceof Error
@@ -850,145 +1242,181 @@ export default function BuyNowPage({
                     : "Gagal mencari destination RajaOngkir."
             );
         } finally {
-            setLoadingDestination(false);
-            setDestinationRetrying(false);
-        }
-    }
+            setLoadingDestination(
+                false
+            );
 
-    async function loadRegions(
-        type:
-            | "province"
-            | "city"
-            | "district"
-            | "subdistrict",
-        id?: string
-    ): Promise<Region[]> {
-        const params = new URLSearchParams();
-
-        params.set("type", type);
-
-        if (id) {
-            params.set("id", id);
-        }
-
-        const response = await fetch(
-            `/api/rajaongkir/regions?${params.toString()}`,
-            {
-                cache: "no-store",
-            }
-        );
-
-        const result = await response.json();
-
-        if (!response.ok || !result.success) {
-            throw new Error(
-                result.message ||
-                "Gagal mengambil data wilayah."
+            setDestinationRetrying(
+                false
             );
         }
-
-        return Array.isArray(result.data)
-            ? result.data
-            : [];
     }
 
     /*
-     * ==========================================
+     * =====================================================
      * LOAD BUY NOW
-     * ==========================================
+     * =====================================================
      */
 
     async function loadBuyNow() {
+        if (
+            !Number.isInteger(
+                numericProductId
+            ) ||
+            numericProductId <= 0
+        ) {
+            setLoadError(
+                "Product ID tidak valid."
+            );
+
+            setLoading(false);
+
+            return;
+        }
+
+        if (
+            !Number.isInteger(
+                numericVariantId
+            ) ||
+            numericVariantId <= 0
+        ) {
+            setLoadError(
+                "Variant ID tidak valid."
+            );
+
+            setLoading(false);
+
+            return;
+        }
+
+        if (
+            !Number.isInteger(
+                numericQuantity
+            ) ||
+            numericQuantity <= 0
+        ) {
+            setLoadError(
+                "Quantity tidak valid."
+            );
+
+            setLoading(false);
+
+            return;
+        }
+
         try {
             setLoading(true);
             setLoadError(null);
             setLoadRetrying(false);
 
-            const checkoutData = await withRetry(
-                async () => {
-                    const params = new URLSearchParams();
+            const checkoutData =
+                await withRetry(
+                    async () => {
+                        const params =
+                            new URLSearchParams();
 
-                    params.set("productId", productId);
-                    params.set("variantId", variantId);
-                    params.set("quantity", quantity);
+                        params.set(
+                            "productId",
+                            String(
+                                numericProductId
+                            )
+                        );
 
-                    const response = await fetch(
-                        `/api/buy-now?${params.toString()}`,
-                        {
-                            method: "GET",
-                            cache: "no-store",
+                        params.set(
+                            "variantId",
+                            String(
+                                numericVariantId
+                            )
+                        );
+
+                        params.set(
+                            "quantity",
+                            String(
+                                numericQuantity
+                            )
+                        );
+
+                        const response =
+                            await fetch(
+                                `/api/buy-now?${params.toString()}`,
+                                {
+                                    method: "GET",
+                                    cache: "no-store",
+                                }
+                            );
+
+                        const result =
+                            await parseApiResponse(
+                                response
+                            );
+
+                        if (
+                            !response.ok ||
+                            !result?.success
+                        ) {
+                            throw new Error(
+                                result?.message ||
+                                `Gagal mengambil data Buy Now (${response.status}).`
+                            );
                         }
-                    );
 
-                    const contentType =
-                        response.headers.get(
-                            "content-type"
-                        ) || "";
-
-                    let result: any = null;
-
-                    if (
-                        contentType.includes(
-                            "application/json"
-                        )
-                    ) {
-                        result =
-                            await response.json();
-                    } else {
-                        const text =
-                            await response.text();
-
-                        console.error(
-                            "BUY NOW NON JSON RESPONSE:",
-                            {
-                                status: response.status,
-                                statusText:
-                                    response.statusText,
-                                text,
-                            }
-                        );
-
-                        throw new Error(
-                            text ||
-                            `API Buy Now gagal (${response.status} ${response.statusText})`
-                        );
+                        return result.data as BuyNowData;
+                    },
+                    {
+                        onRetry: () =>
+                            setLoadRetrying(
+                                true
+                            ),
                     }
+                );
 
-                    if (
-                        !response.ok ||
-                        !result?.success
-                    ) {
-                        throw new Error(
-                            result?.message ||
-                            `Gagal mengambil data Buy Now (${response.status}).`
-                        );
-                    }
-
-                    return result.data as BuyNowData;
-                },
-                {
-                    onRetry: () => setLoadRetrying(true),
-                }
+            setData(
+                checkoutData
             );
 
-            setData(checkoutData);
+            /*
+             * Reset shipping ketika reload.
+             */
+
+            setShippingOptions(
+                []
+            );
+
+            setSelectedShipping(
+                null
+            );
+
+            /*
+             * Pilih default address.
+             */
 
             const defaultAddress =
                 checkoutData.addresses.find(
-                    (item) =>
+                    (
+                        item
+                    ) =>
                         item.isDefault
                 );
 
-            if (defaultAddress) {
+            if (
+                defaultAddress
+            ) {
                 setSelectedAddress(
                     defaultAddress.id
                 );
             } else if (
-                checkoutData.addresses.length >
-                0
+                checkoutData
+                    .addresses
+                    .length > 0
             ) {
                 setSelectedAddress(
-                    checkoutData.addresses[0].id
+                    checkoutData
+                        .addresses[0]
+                        .id
+                );
+            } else {
+                setSelectedAddress(
+                    ""
                 );
             }
         } catch (error) {
@@ -1002,43 +1430,41 @@ export default function BuyNowPage({
                     ? error.message
                     : "Gagal mengambil data Buy Now.";
 
-            setLoadError(message);
+            setLoadError(
+                message
+            );
 
-            toast.error(message);
+            toast.error(
+                message
+            );
         } finally {
             setLoading(false);
             setLoadRetrying(false);
         }
     }
-    async function loadProvinces() {
-        try {
-            setLoadingProvinces(true);
-            setProvincesRetrying(false);
 
-            const result = await withRetry(
-                () => loadRegions("province"),
-                {
-                    onRetry: () => setProvincesRetrying(true),
-                }
-            );
+    /*
+     * =====================================================
+     * INITIAL LOAD
+     * =====================================================
+     */
 
-            setProvinces(result);
-        } catch (error) {
-            console.error(
-                "BUY NOW LOAD PROVINCES ERROR:",
-                error
-            );
+    useEffect(() => {
+        loadBuyNow();
+        loadProvinces();
 
-            toast.error(
-                error instanceof Error
-                    ? error.message
-                    : "Gagal mengambil provinsi."
-            );
-        } finally {
-            setLoadingProvinces(false);
-            setProvincesRetrying(false);
-        }
-    }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [
+        productId,
+        variantId,
+        quantity,
+    ]);
+
+    /*
+     * =====================================================
+     * SAVE ADDRESS
+     * =====================================================
+     */
 
     async function saveAddress() {
         if (
@@ -1047,211 +1473,258 @@ export default function BuyNowPage({
             toast.error(
                 "Nama penerima wajib diisi."
             );
+
             return;
         }
 
-        if (!addressForm.phone.trim()) {
+        if (
+            !addressForm.phone.trim()
+        ) {
             toast.error(
                 "Nomor HP wajib diisi."
             );
+
             return;
         }
 
-        if (!addressForm.address.trim()) {
+        if (
+            !addressForm.address.trim()
+        ) {
             toast.error(
                 "Alamat lengkap wajib diisi."
             );
+
             return;
         }
 
-        if (!addressForm.provinceId) {
+        if (
+            !addressForm.provinceId
+        ) {
             toast.error(
                 "Pilih provinsi."
             );
+
             return;
         }
 
-        if (!addressForm.cityId) {
+        if (
+            !addressForm.cityId
+        ) {
             toast.error(
                 "Pilih kota/kabupaten."
             );
+
             return;
         }
 
-        if (!addressForm.districtId) {
+        if (
+            !addressForm.districtId
+        ) {
             toast.error(
                 "Pilih kecamatan."
             );
+
             return;
         }
 
-        if (!addressForm.subdistrictId) {
+        if (
+            !addressForm.subdistrictId
+        ) {
             toast.error(
                 "Pilih kelurahan/desa."
             );
+
             return;
         }
 
-        if (loadingDestination) {
+        if (
+            !addressForm.postalCode.trim()
+        ) {
+            toast.error(
+                "Kode pos belum tersedia."
+            );
+
+            return;
+        }
+
+        if (
+            loadingDestination
+        ) {
             toast.error(
                 "Sedang mencari Destination RajaOngkir. Tunggu sebentar."
             );
+
             return;
         }
 
         if (
             !addressForm.rajaOngkirDestinationId ||
-            addressForm.rajaOngkirDestinationId <= 0
+            addressForm
+                .rajaOngkirDestinationId <=
+            0
         ) {
             toast.error(
                 "Destination RajaOngkir belum ditemukan."
             );
-            return;
-        }
 
-        if (!addressForm.postalCode.trim()) {
-            toast.error(
-                "Kode pos belum tersedia."
-            );
             return;
         }
 
         try {
-            setSavingAddress(true);
+            setSavingAddress(
+                true
+            );
 
-            const result = await withRetry(async () => {
-                const response =
-                    await fetch(
-                        "/api/addresses",
-                        {
-                            method: "POST",
+            /*
+             * PENTING:
+             *
+             * Tidak pakai withRetry di sini.
+             *
+             * Karena POST address kalau retry
+             * bisa membuat duplicate address.
+             */
 
-                            headers: {
-                                "Content-Type":
-                                    "application/json",
-                            },
+            const response =
+                await fetch(
+                    "/api/addresses",
+                    {
+                        method: "POST",
 
-                            body: JSON.stringify({
-                                label:
-                                    addressForm.label.trim() ||
-                                    null,
+                        headers: {
+                            "Content-Type":
+                                "application/json",
+                        },
 
-                                recipientName:
-                                    addressForm.recipientName.trim(),
+                        body: JSON.stringify({
+                            label:
+                                addressForm.label.trim() ||
+                                null,
 
-                                phone:
-                                    addressForm.phone.trim(),
+                            recipientName:
+                                addressForm
+                                    .recipientName
+                                    .trim(),
 
-                                address:
-                                    addressForm.address.trim(),
+                            phone:
+                                addressForm.phone.trim(),
 
-                                province:
-                                    addressForm.province,
+                            address:
+                                addressForm.address.trim(),
 
-                                city:
-                                    addressForm.city,
+                            province:
+                                addressForm.province,
 
-                                district:
-                                    addressForm.district,
+                            city:
+                                addressForm.city,
 
-                                subdistrict:
-                                    addressForm.subdistrict,
+                            district:
+                                addressForm.district,
 
-                                postalCode:
-                                    addressForm.postalCode,
+                            subdistrict:
+                                addressForm.subdistrict,
 
-                                provinceId:
-                                    Number(
-                                        addressForm.provinceId
-                                    ),
+                            postalCode:
+                                addressForm.postalCode,
 
-                                regencyId:
-                                    Number(
-                                        addressForm.cityId
-                                    ),
+                            provinceId:
+                                Number(
+                                    addressForm.provinceId
+                                ),
 
-                                districtId:
-                                    Number(
-                                        addressForm.districtId
-                                    ),
+                            regencyId:
+                                Number(
+                                    addressForm.cityId
+                                ),
 
-                                villageId:
-                                    Number(
-                                        addressForm.subdistrictId
-                                    ),
+                            districtId:
+                                Number(
+                                    addressForm.districtId
+                                ),
 
-                                rajaOngkirDestinationId:
-                                    Number(
-                                        addressForm.rajaOngkirDestinationId
-                                    ),
+                            villageId:
+                                Number(
+                                    addressForm.subdistrictId
+                                ),
 
-                                latitude:
-                                    addressForm.latitude
-                                        ? Number(
-                                            addressForm.latitude
-                                        )
-                                        : null,
+                            rajaOngkirDestinationId:
+                                Number(
+                                    addressForm
+                                        .rajaOngkirDestinationId
+                                ),
 
-                                longitude:
-                                    addressForm.longitude
-                                        ? Number(
-                                            addressForm.longitude
-                                        )
-                                        : null,
+                            latitude:
+                                addressForm.latitude
+                                    ? Number(
+                                        addressForm.latitude
+                                    )
+                                    : null,
 
-                                isDefault:
-                                    addressForm.isDefault,
-                            }),
-                        }
-                    );
+                            longitude:
+                                addressForm.longitude
+                                    ? Number(
+                                        addressForm.longitude
+                                    )
+                                    : null,
 
-                const json =
-                    await response.json();
+                            isDefault:
+                                addressForm.isDefault,
+                        }),
+                    }
+                );
 
-                if (
-                    !response.ok ||
-                    !json.success
-                ) {
-                    throw new Error(
-                        json.message ||
-                        "Gagal menyimpan alamat."
-                    );
-                }
+            const result =
+                await parseApiResponse(
+                    response
+                );
 
-                return json;
-            }, { retries: 3 });
+            if (
+                !response.ok ||
+                !result?.success
+            ) {
+                throw new Error(
+                    result?.message ||
+                    "Gagal menyimpan alamat."
+                );
+            }
+
+            const savedAddress =
+                result?.data ??
+                result?.address ??
+                null;
 
             toast.success(
                 "Alamat berhasil disimpan."
             );
 
-            setShowAddressForm(false);
+            setShowAddressForm(
+                false
+            );
 
             setAddressForm({
                 ...emptyAddressForm,
             });
 
             /*
-             * Reload Buy Now supaya address
-             * baru masuk ke data.addresses.
+             * Reload addresses.
              */
+
             await loadBuyNow();
 
             /*
-             * Otomatis pilih alamat yang baru dibuat.
+             * Pilih address baru kalau API
+             * mengembalikan ID.
              */
-            const savedAddress =
-                result.data ??
-                result.address;
 
-            if (savedAddress?.id) {
+            if (
+                savedAddress?.id
+            ) {
                 setSelectedAddress(
                     savedAddress.id
                 );
             }
         } catch (error) {
             console.error(
-                "BUY NOW SAVE ADDRESS ERROR:",
+                "SAVE ADDRESS ERROR:",
                 error
             );
 
@@ -1261,25 +1734,16 @@ export default function BuyNowPage({
                     : "Gagal menyimpan alamat."
             );
         } finally {
-            setSavingAddress(false);
+            setSavingAddress(
+                false
+            );
         }
     }
 
-
-
-    useEffect(() => {
-        loadBuyNow();
-        loadProvinces();
-    }, [
-        productId,
-        variantId,
-        quantity,
-    ]);
-
     /*
-     * ==========================================
-     * SHIPPING
-     * ==========================================
+     * =====================================================
+     * LOAD SHIPPING
+     * =====================================================
      */
 
     async function loadShippingCost() {
@@ -1287,27 +1751,46 @@ export default function BuyNowPage({
             return;
         }
 
-        if (!selectedAddress) {
-            setShippingOptions([]);
-            setSelectedShipping(null);
+        if (
+            !selectedAddress
+        ) {
+            setShippingOptions(
+                []
+            );
+
+            setSelectedShipping(
+                null
+            );
+
             return;
         }
 
         const address =
             data.addresses.find(
-                (item) =>
+                (
+                    item
+                ) =>
                     item.id ===
                     selectedAddress
             );
 
         if (!address) {
+            setShippingOptions(
+                []
+            );
+
+            setSelectedShipping(
+                null
+            );
+
             return;
         }
 
-        const origin = Number(
-            data.store
-                .rajaOngkirDestinationId
-        );
+        const origin =
+            Number(
+                data.store
+                    .rajaOngkirDestinationId
+            );
 
         const destination =
             Number(
@@ -1315,7 +1798,9 @@ export default function BuyNowPage({
             );
 
         if (
-            !Number.isInteger(origin) ||
+            !Number.isInteger(
+                origin
+            ) ||
             origin <= 0
         ) {
             toast.error(
@@ -1338,84 +1823,104 @@ export default function BuyNowPage({
             return;
         }
 
-        const weight = Math.max(
-            Math.ceil(
-                Number(
-                    data.totalWeight
-                )
-            ),
-            1
-        );
+        const weight =
+            Math.max(
+                Math.ceil(
+                    Number(
+                        data.totalWeight
+                    )
+                ),
+                1
+            );
 
         try {
-            setLoadingShipping(true);
-            setShippingRetrying(false);
-
-            setShippingOptions([]);
-
-            setSelectedShipping(null);
-
-            const options = await withRetry(
-                async () => {
-                    const response =
-                        await fetch(
-                            "/api/buy-now/shipping",
-                            {
-                                method: "POST",
-
-                                headers: {
-                                    "Content-Type":
-                                        "application/json",
-                                },
-
-                                body: JSON.stringify({
-                                    origin,
-
-                                    destination,
-
-                                    weight,
-
-                                    courier:
-                                        "jne:jnt:sicepat",
-
-                                    price:
-                                        "lowest",
-                                }),
-
-                                cache: "no-store",
-                            }
-                        );
-
-                    const result =
-                        await response.json();
-
-                    if (
-                        !response.ok ||
-                        !result.success
-                    ) {
-                        throw new Error(
-                            result.message ||
-                            "Gagal mengambil ongkir."
-                        );
-                    }
-
-                    return Array.isArray(
-                        result.data
-                    )
-                        ? result.data
-                        : [];
-                },
-                {
-                    onRetry: () => setShippingRetrying(true),
-                }
+            setLoadingShipping(
+                true
             );
+
+            setShippingRetrying(
+                false
+            );
+
+            setShippingOptions(
+                []
+            );
+
+            setSelectedShipping(
+                null
+            );
+
+            const options =
+                await withRetry(
+                    async () => {
+                        const response =
+                            await fetch(
+                                "/api/buy-now/shipping",
+                                {
+                                    method: "POST",
+
+                                    headers: {
+                                        "Content-Type":
+                                            "application/json",
+                                    },
+
+                                    body:
+                                        JSON.stringify(
+                                            {
+                                                origin,
+
+                                                destination,
+
+                                                weight,
+
+                                                courier:
+                                                    "jne:jnt:sicepat",
+
+                                                price:
+                                                    "lowest",
+                                            }
+                                        ),
+
+                                    cache: "no-store",
+                                }
+                            );
+
+                        const result =
+                            await parseApiResponse(
+                                response
+                            );
+
+                        if (
+                            !response.ok ||
+                            !result?.success
+                        ) {
+                            throw new Error(
+                                result?.message ||
+                                "Gagal mengambil ongkir."
+                            );
+                        }
+
+                        return Array.isArray(
+                            result.data
+                        )
+                            ? result.data
+                            : [];
+                    },
+                    {
+                        onRetry: () =>
+                            setShippingRetrying(
+                                true
+                            ),
+                    }
+                );
 
             setShippingOptions(
                 options
             );
 
             if (
-                options.length === 0
+                options.length ===
+                0
             ) {
                 toast.error(
                     "Tidak ada layanan pengiriman."
@@ -1423,13 +1928,17 @@ export default function BuyNowPage({
             }
         } catch (error) {
             console.error(
-                "BUY NOW SHIPPING ERROR:",
+                "SHIPPING ERROR:",
                 error
             );
 
-            setShippingOptions([]);
+            setShippingOptions(
+                []
+            );
 
-            setSelectedShipping(null);
+            setSelectedShipping(
+                null
+            );
 
             toast.error(
                 error instanceof Error
@@ -1437,10 +1946,21 @@ export default function BuyNowPage({
                     : "Gagal mengambil ongkir."
             );
         } finally {
-            setLoadingShipping(false);
-            setShippingRetrying(false);
+            setLoadingShipping(
+                false
+            );
+
+            setShippingRetrying(
+                false
+            );
         }
     }
+
+    /*
+     * =====================================================
+     * SHIPPING AUTO LOAD
+     * =====================================================
+     */
 
     useEffect(() => {
         if (!data) {
@@ -1448,58 +1968,163 @@ export default function BuyNowPage({
         }
 
         loadShippingCost();
+
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [
         data,
         selectedAddress,
     ]);
 
     /*
-     * ==========================================
+     * =====================================================
      * SHIPPING COST
-     * ==========================================
+     * =====================================================
      */
 
-    const shippingCost = useMemo(() => {
-        if (!selectedShipping) {
-            return 0;
-        }
+    const shippingCost =
+        useMemo(() => {
+            if (
+                !selectedShipping
+            ) {
+                return 0;
+            }
 
-        return Number(
-            selectedShipping.cost ??
-            selectedShipping.price ??
-            selectedShipping.shipping_cost ??
-            0
-        );
-    }, [
-        selectedShipping,
-    ]);
-
-    const grandTotal = useMemo(() => {
-        if (!data) {
-            return 0;
-        }
-
-        return (
-            data.subtotal +
-            shippingCost
-        );
-    }, [
-        data,
-        shippingCost,
-    ]);
+            return Number(
+                selectedShipping.cost ??
+                selectedShipping.price ??
+                selectedShipping.shipping_cost ??
+                0
+            );
+        }, [
+            selectedShipping,
+        ]);
 
     /*
- * ==========================================
- * CREATE ORDER / PAYMENT
- * ==========================================
- */
+     * =====================================================
+     * GRAND TOTAL
+     * =====================================================
+     */
 
-    async function createOrder() {
+    const grandTotal =
+        useMemo(() => {
+            if (!data) {
+                return 0;
+            }
+
+            return Math.max(
+                0,
+
+                Number(
+                    data.subtotal
+                ) -
+
+                Number(
+                    voucherDiscount
+                ) +
+
+                Number(
+                    shippingCost
+                )
+            );
+        }, [
+            data,
+            voucherDiscount,
+            shippingCost,
+        ]);
+
+    /*
+     * =====================================================
+     * APPLY VOUCHER
+     * =====================================================
+     *
+     * Catatan:
+     *
+     * Karena schema API voucher yang lu kasih belum
+     * menentukan endpoint validasi voucher, function ini
+     * tidak menebak-nebak endpoint.
+     *
+     * Voucher final tetap sebaiknya dihitung ulang
+     * oleh backend saat create order.
+     */
+
+    async function applyVoucher() {
+        const code = voucherCode.trim().toUpperCase();
+
+        if (!code) {
+            toast.error("Masukkan kode voucher.");
+            return;
+        }
+
+        if (!data || data.subtotal <= 0) {
+            toast.error("Subtotal belum valid.");
+            return;
+        }
+
+        try {
+            setVoucherLoading(true);
+
+            const response = await fetch("/api/voucher/validate", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                    code,
+                    subtotal: data.subtotal,
+                }),
+            });
+
+            const result = await response.json();
+
+            if (!response.ok || !result.success) {
+                throw new Error(
+                    result.message || "Voucher tidak bisa digunakan."
+                );
+            }
+
+            setAppliedVoucherCode(result.data.code);
+            setVoucherCode(result.data.code);
+            setVoucherDiscount(
+                Number(result.data.discount) || 0
+            );
+
+            toast.success(
+                `Voucher ${result.data.code} berhasil dipakai.`
+            );
+        } catch (error) {
+            setAppliedVoucherCode("");
+            setVoucherDiscount(0);
+
+            toast.error(
+                error instanceof Error
+                    ? error.message
+                    : "Gagal memvalidasi voucher."
+            );
+        } finally {
+            setVoucherLoading(false);
+        }
+    }
+
+    function removeVoucher() {
+        setVoucherCode("");
+        setAppliedVoucherCode("");
+        setVoucherDiscount(0);
+    }
+
+    /*
+     * =====================================================
+     * CREATE COD ORDER
+     * =====================================================
+     */
+
+    async function createCodOrder() {
         if (!data) {
             return;
         }
 
-        if (!selectedAddress) {
+        if (
+            !selectedAddress
+        ) {
             toast.error(
                 "Pilih alamat pengiriman."
             );
@@ -1507,7 +2132,9 @@ export default function BuyNowPage({
             return;
         }
 
-        if (!selectedShipping) {
+        if (
+            !selectedShipping
+        ) {
             toast.error(
                 "Pilih pengiriman."
             );
@@ -1516,127 +2143,158 @@ export default function BuyNowPage({
         }
 
         /*
-         * ==========================================
-         * COD
-         * ==========================================
+         * Jangan retry POST order.
          */
 
-        if (
-            paymentMethod ===
-            "COD"
-        ) {
-            try {
-                setCreatingOrder(true);
+        try {
+            setCreatingOrder(
+                true
+            );
 
-                const response =
-                    await fetch(
-                        "/api/buy-now",
-                        {
-                            method: "POST",
+            const response =
+                await fetch(
+                    "/api/buy-now",
+                    {
+                        method: "POST",
 
-                            headers: {
-                                "Content-Type":
-                                    "application/json",
-                            },
+                        headers: {
+                            "Content-Type":
+                                "application/json",
+                        },
 
-                            body:
-                                JSON.stringify({
-                                    productId:
-                                        Number(
-                                            productId
-                                        ),
+                        body:
+                            JSON.stringify({
+                                productId:
+                                    numericProductId,
 
-                                    variantId:
-                                        Number(
-                                            variantId
-                                        ),
+                                variantId:
+                                    numericVariantId,
 
-                                    quantity:
-                                        Number(
-                                            quantity
-                                        ),
+                                quantity:
+                                    numericQuantity,
 
-                                    addressId:
-                                        selectedAddress,
+                                addressId:
+                                    selectedAddress,
 
-                                    shipping:
-                                        selectedShipping,
+                                shipping:
+                                    selectedShipping,
 
-                                    paymentMethod:
-                                        "COD",
-                                }),
-                        }
-                    );
+                                paymentMethod:
+                                    "COD",
 
-                const result =
-                    await response.json();
-
-                if (
-                    !response.ok ||
-                    !result.success
-                ) {
-                    throw new Error(
-                        result.message ||
-                        "Gagal membuat pesanan."
-                    );
-                }
-
-                const order =
-                    result.data;
-
-                if (!order?.id) {
-                    throw new Error(
-                        "Order berhasil dibuat tetapi ID order tidak ditemukan."
-                    );
-                }
-
-                toast.success(
-                    "Pesanan berhasil dibuat."
+                                voucherCode:
+                                    appliedVoucherCode ||
+                                    null,
+                            }),
+                    }
                 );
 
-                window.location.href =
-                    `/checkout/success?order=${order.id}`;
-            } catch (error) {
-                console.error(
-                    "BUY NOW COD ERROR:",
-                    error
+            const result =
+                await parseApiResponse(
+                    response
                 );
 
-                toast.error(
-                    error instanceof Error
-                        ? error.message
-                        : "Gagal membuat pesanan."
+            if (
+                !response.ok ||
+                !result?.success
+            ) {
+                throw new Error(
+                    result?.message ||
+                    "Gagal membuat pesanan."
                 );
-            } finally {
-                setCreatingOrder(false);
             }
+
+            const order =
+                result?.data;
+
+            if (
+                !order?.id
+            ) {
+                throw new Error(
+                    "Order berhasil dibuat tetapi ID order tidak ditemukan."
+                );
+            }
+
+            toast.success(
+                "Pesanan berhasil dibuat."
+            );
+
+            window.location.href =
+                `/checkout/success?order=${encodeURIComponent(
+                    String(
+                        order.id
+                    )
+                )}`;
+        } catch (error) {
+            console.error(
+                "COD ORDER ERROR:",
+                error
+            );
+
+            toast.error(
+                error instanceof Error
+                    ? error.message
+                    : "Gagal membuat pesanan."
+            );
+        } finally {
+            setCreatingOrder(
+                false
+            );
+        }
+    }
+
+    /*
+     * =====================================================
+     * CREATE MIDTRANS PAYMENT
+     * =====================================================
+     */
+
+    async function createMidtransPayment() {
+        if (!data) {
+            return;
+        }
+
+        if (
+            !selectedAddress
+        ) {
+            toast.error(
+                "Pilih alamat pengiriman."
+            );
 
             return;
         }
 
-        /*
-         * ==========================================
-         * MIDTRANS
-         * ==========================================
-         */
-
-        if (!snapReady) {
+        if (
+            !selectedShipping
+        ) {
             toast.error(
-                snapLoading
-                    ? "Pembayaran sedang dimuat. Tunggu sebentar."
-                    : "Midtrans belum siap. Silakan refresh halaman."
+                "Pilih pengiriman."
+            );
+
+            return;
+        }
+
+        if (
+            !snapReady
+        ) {
+            toast.error(
+                snapError ||
+                "Midtrans belum siap. Silakan tunggu atau refresh halaman."
             );
 
             return;
         }
 
         try {
-            setCreatingOrder(true);
+            setCreatingOrder(
+                true
+            );
 
             /*
-             * ==========================================
-             * CREATE MIDTRANS TRANSACTION
-             * ==========================================
+             * Jangan retry request ini.
+             *
+             * Endpoint backend seharusnya idempotent
+             * menggunakan paymentReference/orderNumber.
              */
 
             const paymentResponse =
@@ -1653,19 +2311,13 @@ export default function BuyNowPage({
                         body:
                             JSON.stringify({
                                 productId:
-                                    Number(
-                                        productId
-                                    ),
+                                    numericProductId,
 
                                 variantId:
-                                    Number(
-                                        variantId
-                                    ),
+                                    numericVariantId,
 
                                 quantity:
-                                    Number(
-                                        quantity
-                                    ),
+                                    numericQuantity,
 
                                 addressId:
                                     selectedAddress,
@@ -1675,31 +2327,31 @@ export default function BuyNowPage({
 
                                 paymentMethod:
                                     paymentMethod,
+
+                                voucherCode:
+                                    appliedVoucherCode ||
+                                    null,
                             }),
                     }
                 );
 
             const paymentResult =
-                await paymentResponse.json();
+                await parseApiResponse(
+                    paymentResponse
+                );
 
             if (
                 !paymentResponse.ok ||
-                !paymentResult.success
+                !paymentResult?.success
             ) {
                 throw new Error(
-                    paymentResult.message ||
+                    paymentResult?.message ||
                     "Gagal membuat pembayaran Midtrans."
                 );
             }
 
             const paymentData =
-                paymentResult.data;
-
-            /*
-             * ==========================================
-             * TOKEN WAJIB
-             * ==========================================
-             */
+                paymentResult?.data;
 
             if (
                 !paymentData?.token
@@ -1715,10 +2367,22 @@ export default function BuyNowPage({
             }
 
             /*
-             * ==========================================
-             * SNAP
-             * ==========================================
+             * Payment reference wajib ada
+             * karena dipakai setelah Snap callback.
              */
+
+            if (
+                !paymentData?.paymentReference
+            ) {
+                console.error(
+                    "MIDTRANS PAYMENT REFERENCE TIDAK ADA:",
+                    paymentData
+                );
+
+                throw new Error(
+                    "Payment reference Midtrans tidak ditemukan."
+                );
+            }
 
             const snap =
                 (window as any).snap;
@@ -1730,35 +2394,18 @@ export default function BuyNowPage({
             }
 
             /*
-             * ==========================================
-             * BUKA TRANSPARENT PAYMENT
-             * ==========================================
+             * Tutup state loading SEBELUM membuka Snap.
              *
-             * PENTING:
-             *
-             * JANGAN:
-             *
-             * window.location.href =
-             * paymentData.redirectUrl
-             *
-             * Karena itu akan membawa user
-             * ke halaman hosted Midtrans.
-             *
-             * Kita gunakan snap.pay()
-             * supaya payment muncul sebagai
-             * modal/transparan di halaman
-             * Buy Now.
+             * Snap punya lifecycle sendiri.
              */
+
+            setCreatingOrder(
+                false
+            );
 
             snap.pay(
                 paymentData.token,
                 {
-                    /*
-                     * ==================================
-                     * SUCCESS
-                     * ==================================
-                     */
-
                     onSuccess: (
                         result: any
                     ) => {
@@ -1773,16 +2420,12 @@ export default function BuyNowPage({
 
                         router.push(
                             `/checkout/payment-finish?payment=${encodeURIComponent(
-                                paymentData.paymentReference
+                                String(
+                                    paymentData.paymentReference
+                                )
                             )}&status=success`
                         );
                     },
-
-                    /*
-                     * ==================================
-                     * PENDING
-                     * ==================================
-                     */
 
                     onPending: (
                         result: any
@@ -1798,16 +2441,12 @@ export default function BuyNowPage({
 
                         router.push(
                             `/checkout/payment-finish?payment=${encodeURIComponent(
-                                paymentData.paymentReference
+                                String(
+                                    paymentData.paymentReference
+                                )
                             )}&status=pending`
                         );
                     },
-
-                    /*
-                     * ==================================
-                     * ERROR
-                     * ==================================
-                     */
 
                     onError: (
                         result: any
@@ -1826,19 +2465,6 @@ export default function BuyNowPage({
                         );
                     },
 
-                    /*
-                     * ==================================
-                     * CLOSE / X
-                     * ==================================
-                     *
-                     * PENTING:
-                     *
-                     * JANGAN redirect.
-                     *
-                     * User tetap berada di
-                     * halaman Buy Now.
-                     */
-
                     onClose: () => {
                         console.log(
                             "MIDTRANS SNAP DITUTUP USER."
@@ -1856,7 +2482,7 @@ export default function BuyNowPage({
             );
         } catch (error) {
             console.error(
-                "BUY NOW MIDTRANS ERROR:",
+                "MIDTRANS PAYMENT ERROR:",
                 error
             );
 
@@ -1866,14 +2492,138 @@ export default function BuyNowPage({
                     : "Gagal membuat pembayaran Midtrans."
             );
 
-            setCreatingOrder(false);
+            setCreatingOrder(
+                false
+            );
         }
     }
 
     /*
-     * ==========================================
+     * =====================================================
+     * CREATE ORDER DISPATCHER
+     * =====================================================
+     */
+
+    async function createOrder() {
+        if (!data) {
+            return;
+        }
+
+        if (
+            !Number.isInteger(
+                numericProductId
+            ) ||
+            numericProductId <= 0
+        ) {
+            toast.error(
+                "Product ID tidak valid."
+            );
+
+            return;
+        }
+
+        if (
+            !Number.isInteger(
+                numericVariantId
+            ) ||
+            numericVariantId <= 0
+        ) {
+            toast.error(
+                "Variant ID tidak valid."
+            );
+
+            return;
+        }
+
+        if (
+            !Number.isInteger(
+                numericQuantity
+            ) ||
+            numericQuantity <= 0
+        ) {
+            toast.error(
+                "Quantity tidak valid."
+            );
+
+            return;
+        }
+
+        if (
+            !selectedAddress
+        ) {
+            toast.error(
+                "Pilih alamat pengiriman."
+            );
+
+            return;
+        }
+
+        if (
+            !selectedShipping
+        ) {
+            toast.error(
+                "Pilih pengiriman."
+            );
+
+            return;
+        }
+
+        if (
+            creatingOrder
+        ) {
+            return;
+        }
+
+        if (
+            paymentMethod ===
+            "COD"
+        ) {
+            await createCodOrder();
+
+            return;
+        }
+
+        await createMidtransPayment();
+    }
+
+    /*
+     * =====================================================
+     * SELECTED ADDRESS
+     * =====================================================
+     */
+
+    const address =
+        data?.addresses.find(
+            (
+                item
+            ) =>
+                item.id ===
+                selectedAddress
+        ) || null;
+
+    /*
+     * =====================================================
+     * PAYMENT BUTTON STATE
+     * =====================================================
+     */
+
+    const paymentButtonDisabled =
+        creatingOrder ||
+        !address ||
+        !selectedShipping ||
+        (
+            paymentMethod !==
+            "COD" &&
+            (
+                snapLoading ||
+                !snapReady
+            )
+        );
+
+    /*
+     * =====================================================
      * LOADING
-     * ==========================================
+     * =====================================================
      */
 
     if (loading) {
@@ -1889,7 +2639,8 @@ export default function BuyNowPage({
 
                         {loadRetrying && (
                             <p className="mt-1 text-sm text-gray-500">
-                                Koneksi lambat, mencoba lagi...
+                                Koneksi lambat,
+                                mencoba lagi...
                             </p>
                         )}
                     </div>
@@ -1897,6 +2648,12 @@ export default function BuyNowPage({
             </main>
         );
     }
+
+    /*
+     * =====================================================
+     * LOAD ERROR
+     * =====================================================
+     */
 
     if (!data) {
         return (
@@ -1910,7 +2667,9 @@ export default function BuyNowPage({
 
                         <button
                             type="button"
-                            onClick={() => loadBuyNow()}
+                            onClick={() =>
+                                loadBuyNow()
+                            }
                             className="mt-4 rounded-xl bg-rose-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-rose-700"
                         >
                             Coba Lagi
@@ -1921,24 +2680,19 @@ export default function BuyNowPage({
         );
     }
 
-    const address =
-        data.addresses.find(
-            (item) =>
-                item.id ===
-                selectedAddress
-        );
-
     /*
-     * ==========================================
+     * =====================================================
      * UI
-     * ==========================================
+     * =====================================================
      */
 
     return (
         <main className="min-h-screen bg-gray-50 px-4 py-8 sm:px-6">
             <div className="mx-auto max-w-6xl">
 
-                {/* HEADER */}
+                {/* =================================================
+                    HEADER
+                ================================================= */}
 
                 <div className="mb-8">
                     <Link
@@ -1957,18 +2711,17 @@ export default function BuyNowPage({
 
                     <div className="space-y-6">
 
-                        {/* PRODUCT */}
+                        {/* =================================================
+                            PRODUCT
+                        ================================================= */}
 
                         <section className="rounded-3xl border border-gray-200 bg-white p-6">
-
                             <h2 className="text-lg font-bold">
                                 Produk
                             </h2>
 
                             <div className="mt-5 flex gap-4">
-
                                 <div className="h-24 w-24 shrink-0 overflow-hidden rounded-2xl bg-gray-100">
-
                                     {(
                                         data.variant
                                             .image ||
@@ -1990,11 +2743,9 @@ export default function BuyNowPage({
                                                 className="h-full w-full object-cover"
                                             />
                                         )}
-
                                 </div>
 
                                 <div className="min-w-0 flex-1">
-
                                     <h3 className="font-bold text-gray-900">
                                         {
                                             data.product
@@ -2011,38 +2762,42 @@ export default function BuyNowPage({
 
                                     <p className="mt-2 text-sm">
                                         {data.quantity} × Rp{" "}
-                                        {data.variant.price.toLocaleString(
+                                        {Number(
+                                            data.variant
+                                                .price
+                                        ).toLocaleString(
                                             "id-ID"
                                         )}
                                     </p>
 
                                     <p className="mt-1 text-xs text-gray-400">
                                         Berat{" "}
-                                        {data.totalWeight.toLocaleString(
+                                        {Number(
+                                            data.totalWeight
+                                        ).toLocaleString(
                                             "id-ID"
                                         )}{" "}
                                         gram
                                     </p>
-
                                 </div>
 
                                 <div className="font-bold">
                                     Rp{" "}
-                                    {data.subtotal.toLocaleString(
+                                    {Number(
+                                        data.subtotal
+                                    ).toLocaleString(
                                         "id-ID"
                                     )}
                                 </div>
-
                             </div>
-
                         </section>
 
-                        {/* ADDRESS */}
+                        {/* =================================================
+                            ADDRESS
+                        ================================================= */}
 
                         <section className="rounded-3xl border border-gray-200 bg-white p-6">
-
                             <div className="flex items-center justify-between gap-3">
-
                                 <div>
                                     <h2 className="text-lg font-bold">
                                         Alamat Pengiriman
@@ -2060,23 +2815,26 @@ export default function BuyNowPage({
                                             ...emptyAddressForm,
                                         });
 
-                                        setShowAddressForm(true);
+                                        setShowAddressForm(
+                                            true
+                                        );
                                     }}
                                     className="text-sm font-semibold text-rose-600 hover:text-rose-700"
                                 >
                                     + Tambah Alamat
                                 </button>
-
                             </div>
 
-                            {data.addresses.length === 0 ? (
+                            {data.addresses.length ===
+                                0 ? (
                                 <div className="mt-5 rounded-2xl border border-dashed border-gray-300 p-6 text-center">
                                     <p className="font-medium">
                                         Belum ada alamat
                                     </p>
 
                                     <p className="mt-1 text-sm text-gray-500">
-                                        Tambahkan alamat terlebih dahulu.
+                                        Tambahkan alamat
+                                        terlebih dahulu.
                                     </p>
 
                                     <button
@@ -2086,16 +2844,17 @@ export default function BuyNowPage({
                                                 ...emptyAddressForm,
                                             });
 
-                                            setShowAddressForm(true);
+                                            setShowAddressForm(
+                                                true
+                                            );
                                         }}
-                                        className="mt-4 inline-block rounded-xl bg-rose-600 px-5 py-2.5 text-sm font-semibold text-white"
+                                        className="mt-4 rounded-xl bg-rose-600 px-5 py-2.5 text-sm font-semibold text-white"
                                     >
                                         + Tambah Alamat
                                     </button>
                                 </div>
                             ) : (
                                 <div className="mt-5 space-y-3">
-
                                     {data.addresses.map(
                                         (
                                             item
@@ -2105,24 +2864,28 @@ export default function BuyNowPage({
                                                     item.id
                                                 }
                                                 type="button"
-                                                onClick={() =>
+                                                onClick={() => {
                                                     setSelectedAddress(
                                                         item.id
-                                                    )
-                                                }
+                                                    );
+
+                                                    setSelectedShipping(
+                                                        null
+                                                    );
+
+                                                    setShippingOptions(
+                                                        []
+                                                    );
+                                                }}
                                                 className={`w-full rounded-2xl border p-4 text-left transition ${selectedAddress ===
                                                     item.id
                                                     ? "border-rose-500 bg-rose-50"
                                                     : "border-gray-200 hover:border-gray-300"
                                                     }`}
                                             >
-
                                                 <div className="flex items-start justify-between gap-4">
-
                                                     <div>
-
                                                         <div className="flex flex-wrap items-center gap-2 font-semibold">
-
                                                             {
                                                                 item.recipientName
                                                             }
@@ -2134,7 +2897,6 @@ export default function BuyNowPage({
                                                                     }
                                                                 </span>
                                                             )}
-
                                                         </div>
 
                                                         <div className="mt-1 text-sm text-gray-500">
@@ -2169,7 +2931,6 @@ export default function BuyNowPage({
                                                             {item.postalCode &&
                                                                 ` ${item.postalCode}`}
                                                         </div>
-
                                                     </div>
 
                                                     {item.isDefault && (
@@ -2177,15 +2938,17 @@ export default function BuyNowPage({
                                                             Utama
                                                         </span>
                                                     )}
-
                                                 </div>
-
                                             </button>
                                         )
                                     )}
-
                                 </div>
                             )}
+
+                            {/* =================================================
+                                ADDRESS FORM
+                            ================================================= */}
+
                             {showAddressForm && (
                                 <div className="mt-5 rounded-2xl border border-gray-200 bg-gray-50 p-5">
                                     <div className="flex items-center justify-between gap-3">
@@ -2195,14 +2958,18 @@ export default function BuyNowPage({
                                             </h3>
 
                                             <p className="mt-1 text-sm text-gray-500">
-                                                Isi alamat lengkap untuk pengiriman.
+                                                Isi alamat
+                                                lengkap untuk
+                                                pengiriman.
                                             </p>
                                         </div>
 
                                         <button
                                             type="button"
                                             onClick={() =>
-                                                setShowAddressForm(false)
+                                                setShowAddressForm(
+                                                    false
+                                                )
                                             }
                                             className="text-sm text-gray-500 hover:text-gray-900"
                                         >
@@ -2220,12 +2987,21 @@ export default function BuyNowPage({
                                             </label>
 
                                             <input
-                                                value={addressForm.label}
-                                                onChange={(e) =>
+                                                value={
+                                                    addressForm.label
+                                                }
+                                                onChange={(
+                                                    e
+                                                ) =>
                                                     setAddressForm(
-                                                        (prev) => ({
+                                                        (
+                                                            prev
+                                                        ) => ({
                                                             ...prev,
-                                                            label: e.target.value,
+                                                            label:
+                                                                e
+                                                                    .target
+                                                                    .value,
                                                         })
                                                     )
                                                 }
@@ -2234,7 +3010,7 @@ export default function BuyNowPage({
                                             />
                                         </div>
 
-                                        {/* NAMA */}
+                                        {/* NAME */}
 
                                         <div>
                                             <label className="text-sm font-medium">
@@ -2245,12 +3021,18 @@ export default function BuyNowPage({
                                                 value={
                                                     addressForm.recipientName
                                                 }
-                                                onChange={(e) =>
+                                                onChange={(
+                                                    e
+                                                ) =>
                                                     setAddressForm(
-                                                        (prev) => ({
+                                                        (
+                                                            prev
+                                                        ) => ({
                                                             ...prev,
                                                             recipientName:
-                                                                e.target.value,
+                                                                e
+                                                                    .target
+                                                                    .value,
                                                         })
                                                     )
                                                 }
@@ -2267,12 +3049,21 @@ export default function BuyNowPage({
                                             </label>
 
                                             <input
-                                                value={addressForm.phone}
-                                                onChange={(e) =>
+                                                value={
+                                                    addressForm.phone
+                                                }
+                                                onChange={(
+                                                    e
+                                                ) =>
                                                     setAddressForm(
-                                                        (prev) => ({
+                                                        (
+                                                            prev
+                                                        ) => ({
                                                             ...prev,
-                                                            phone: e.target.value,
+                                                            phone:
+                                                                e
+                                                                    .target
+                                                                    .value,
                                                         })
                                                     )
                                                 }
@@ -2292,16 +3083,24 @@ export default function BuyNowPage({
                                                 value={
                                                     addressForm.address
                                                 }
-                                                onChange={(e) =>
+                                                onChange={(
+                                                    e
+                                                ) =>
                                                     setAddressForm(
-                                                        (prev) => ({
+                                                        (
+                                                            prev
+                                                        ) => ({
                                                             ...prev,
                                                             address:
-                                                                e.target.value,
+                                                                e
+                                                                    .target
+                                                                    .value,
                                                         })
                                                     )
                                                 }
-                                                rows={3}
+                                                rows={
+                                                    3
+                                                }
                                                 placeholder="Nama jalan, nomor rumah, RT/RW, dll."
                                                 className="mt-1 w-full rounded-xl border border-gray-300 bg-white px-4 py-3 text-sm outline-none focus:border-rose-500"
                                             />
@@ -2318,9 +3117,13 @@ export default function BuyNowPage({
                                                 value={
                                                     addressForm.provinceId
                                                 }
-                                                onChange={(e) =>
+                                                onChange={(
+                                                    e
+                                                ) =>
                                                     handleProvinceChange(
-                                                        e.target.value
+                                                        e
+                                                            .target
+                                                            .value
                                                     )
                                                 }
                                                 disabled={
@@ -2337,25 +3140,38 @@ export default function BuyNowPage({
                                                 </option>
 
                                                 {provinces.map(
-                                                    (item) => (
+                                                    (
+                                                        item
+                                                    ) => (
                                                         <option
-                                                            key={item.id}
-                                                            value={item.id}
+                                                            key={
+                                                                item.id
+                                                            }
+                                                            value={
+                                                                item.id
+                                                            }
                                                         >
-                                                            {item.name}
+                                                            {
+                                                                item.name
+                                                            }
                                                         </option>
                                                     )
                                                 )}
                                             </select>
 
                                             {!loadingProvinces &&
-                                                provinces.length === 0 && (
+                                                provinces.length ===
+                                                0 && (
                                                     <button
                                                         type="button"
-                                                        onClick={() => loadProvinces()}
+                                                        onClick={() =>
+                                                            loadProvinces()
+                                                        }
                                                         className="mt-1 text-xs font-semibold text-rose-600 hover:text-rose-700"
                                                     >
-                                                        Gagal memuat provinsi, coba lagi
+                                                        Gagal memuat
+                                                        provinsi,
+                                                        coba lagi
                                                     </button>
                                                 )}
                                         </div>
@@ -2364,16 +3180,21 @@ export default function BuyNowPage({
 
                                         <div>
                                             <label className="text-sm font-medium">
-                                                Kota / Kabupaten
+                                                Kota /
+                                                Kabupaten
                                             </label>
 
                                             <select
                                                 value={
                                                     addressForm.cityId
                                                 }
-                                                onChange={(e) =>
+                                                onChange={(
+                                                    e
+                                                ) =>
                                                     handleCityChange(
-                                                        e.target.value
+                                                        e
+                                                            .target
+                                                            .value
                                                     )
                                                 }
                                                 disabled={
@@ -2391,12 +3212,20 @@ export default function BuyNowPage({
                                                 </option>
 
                                                 {cities.map(
-                                                    (item) => (
+                                                    (
+                                                        item
+                                                    ) => (
                                                         <option
-                                                            key={item.id}
-                                                            value={item.id}
+                                                            key={
+                                                                item.id
+                                                            }
+                                                            value={
+                                                                item.id
+                                                            }
                                                         >
-                                                            {item.name}
+                                                            {
+                                                                item.name
+                                                            }
                                                         </option>
                                                     )
                                                 )}
@@ -2414,9 +3243,13 @@ export default function BuyNowPage({
                                                 value={
                                                     addressForm.districtId
                                                 }
-                                                onChange={(e) =>
+                                                onChange={(
+                                                    e
+                                                ) =>
                                                     handleDistrictChange(
-                                                        e.target.value
+                                                        e
+                                                            .target
+                                                            .value
                                                     )
                                                 }
                                                 disabled={
@@ -2434,12 +3267,20 @@ export default function BuyNowPage({
                                                 </option>
 
                                                 {districts.map(
-                                                    (item) => (
+                                                    (
+                                                        item
+                                                    ) => (
                                                         <option
-                                                            key={item.id}
-                                                            value={item.id}
+                                                            key={
+                                                                item.id
+                                                            }
+                                                            value={
+                                                                item.id
+                                                            }
                                                         >
-                                                            {item.name}
+                                                            {
+                                                                item.name
+                                                            }
                                                         </option>
                                                     )
                                                 )}
@@ -2450,16 +3291,21 @@ export default function BuyNowPage({
 
                                         <div>
                                             <label className="text-sm font-medium">
-                                                Kelurahan / Desa
+                                                Kelurahan /
+                                                Desa
                                             </label>
 
                                             <select
                                                 value={
                                                     addressForm.subdistrictId
                                                 }
-                                                onChange={(e) =>
+                                                onChange={(
+                                                    e
+                                                ) =>
                                                     handleSubdistrictChange(
-                                                        e.target.value
+                                                        e
+                                                            .target
+                                                            .value
                                                     )
                                                 }
                                                 disabled={
@@ -2477,19 +3323,27 @@ export default function BuyNowPage({
                                                 </option>
 
                                                 {subdistricts.map(
-                                                    (item) => (
+                                                    (
+                                                        item
+                                                    ) => (
                                                         <option
-                                                            key={item.id}
-                                                            value={item.id}
+                                                            key={
+                                                                item.id
+                                                            }
+                                                            value={
+                                                                item.id
+                                                            }
                                                         >
-                                                            {item.name}
+                                                            {
+                                                                item.name
+                                                            }
                                                         </option>
                                                     )
                                                 )}
                                             </select>
                                         </div>
 
-                                        {/* POSTAL CODE */}
+                                        {/* POSTAL */}
 
                                         <div>
                                             <label className="text-sm font-medium">
@@ -2500,12 +3354,18 @@ export default function BuyNowPage({
                                                 value={
                                                     addressForm.postalCode
                                                 }
-                                                onChange={(e) =>
+                                                onChange={(
+                                                    e
+                                                ) =>
                                                     setAddressForm(
-                                                        (prev) => ({
+                                                        (
+                                                            prev
+                                                        ) => ({
                                                             ...prev,
                                                             postalCode:
-                                                                e.target.value,
+                                                                e
+                                                                    .target
+                                                                    .value,
                                                         })
                                                     )
                                                 }
@@ -2518,7 +3378,8 @@ export default function BuyNowPage({
 
                                         <div className="rounded-xl bg-white p-4">
                                             <div className="text-xs text-gray-500">
-                                                RajaOngkir Destination
+                                                RajaOngkir
+                                                Destination
                                             </div>
 
                                             <div className="mt-1 font-semibold">
@@ -2540,19 +3401,26 @@ export default function BuyNowPage({
                                                 checked={
                                                     addressForm.isDefault
                                                 }
-                                                onChange={(e) =>
+                                                onChange={(
+                                                    e
+                                                ) =>
                                                     setAddressForm(
-                                                        (prev) => ({
+                                                        (
+                                                            prev
+                                                        ) => ({
                                                             ...prev,
                                                             isDefault:
-                                                                e.target.checked,
+                                                                e
+                                                                    .target
+                                                                    .checked,
                                                         })
                                                     )
                                                 }
                                             />
 
                                             <span className="text-sm">
-                                                Jadikan alamat utama
+                                                Jadikan
+                                                alamat utama
                                             </span>
                                         </label>
 
@@ -2560,7 +3428,9 @@ export default function BuyNowPage({
 
                                         <button
                                             type="button"
-                                            onClick={saveAddress}
+                                            onClick={
+                                                saveAddress
+                                            }
                                             disabled={
                                                 savingAddress ||
                                                 loadingDestination
@@ -2576,22 +3446,22 @@ export default function BuyNowPage({
                                     </div>
                                 </div>
                             )}
-
                         </section>
 
-                        {/* SHIPPING */}
+                        {/* =================================================
+                            SHIPPING
+                        ================================================= */}
 
                         <section className="rounded-3xl border border-gray-200 bg-white p-6">
-
                             <div className="flex items-center justify-between">
-
                                 <div>
                                     <h2 className="text-lg font-bold">
                                         Pilih Pengiriman
                                     </h2>
 
                                     <p className="mt-1 text-sm text-gray-500">
-                                        Pilih kurir dan layanan.
+                                        Pilih kurir dan
+                                        layanan.
                                     </p>
                                 </div>
 
@@ -2602,19 +3472,32 @@ export default function BuyNowPage({
                                             : "Menghitung..."}
                                     </span>
                                 )}
-
                             </div>
+
+                            {!selectedAddress && (
+                                <div className="mt-5 rounded-2xl bg-gray-50 p-5 text-sm text-gray-500">
+                                    Pilih alamat
+                                    pengiriman terlebih
+                                    dahulu.
+                                </div>
+                            )}
 
                             {selectedAddress &&
                                 !loadingShipping &&
                                 shippingOptions.length ===
                                 0 && (
                                     <div className="mt-5 rounded-2xl bg-gray-50 p-5 text-sm text-gray-500">
-                                        <p>Tidak ada layanan pengiriman.</p>
+                                        <p>
+                                            Tidak ada
+                                            layanan
+                                            pengiriman.
+                                        </p>
 
                                         <button
                                             type="button"
-                                            onClick={() => loadShippingCost()}
+                                            onClick={() =>
+                                                loadShippingCost()
+                                            }
                                             className="mt-2 text-xs font-semibold text-rose-600 hover:text-rose-700"
                                         >
                                             Coba lagi
@@ -2625,7 +3508,6 @@ export default function BuyNowPage({
                             {shippingOptions.length >
                                 0 && (
                                     <div className="mt-5 space-y-3">
-
                                         {shippingOptions.map(
                                             (
                                                 option,
@@ -2672,11 +3554,8 @@ export default function BuyNowPage({
                                                             : "border-gray-200 hover:border-gray-300"
                                                             }`}
                                                     >
-
                                                         <div className="flex items-center justify-between gap-4">
-
                                                             <div>
-
                                                                 <div className="font-bold uppercase">
                                                                     {
                                                                         courier
@@ -2698,7 +3577,13 @@ export default function BuyNowPage({
                                                                         hari
                                                                     </div>
                                                                 )}
-
+                                                                <div className="mt-1 text-xs text-gray-400">
+                                                                    {getServiceExplanation(
+                                                                        courier,
+                                                                        service,
+                                                                        option.description
+                                                                    )}
+                                                                </div>
                                                             </div>
 
                                                             <div className="font-bold">
@@ -2707,31 +3592,35 @@ export default function BuyNowPage({
                                                                     "id-ID"
                                                                 )}
                                                             </div>
-
                                                         </div>
-
                                                     </button>
                                                 );
                                             }
                                         )}
-
                                     </div>
                                 )}
-
                         </section>
 
-                        {/* PAYMENT */}
+                        {/* =================================================
+                            PAYMENT
+                        ================================================= */}
 
                         <section className="rounded-3xl border border-gray-200 bg-white p-6">
-
                             <h2 className="text-lg font-bold">
                                 Metode Pembayaran
                             </h2>
 
                             <div className="mt-5 space-y-3">
 
-                                <label className="flex cursor-pointer items-center gap-3 rounded-2xl border p-4">
+                                {/* COD */}
 
+                                <label
+                                    className={`flex cursor-pointer items-center gap-3 rounded-2xl border p-4 ${paymentMethod ===
+                                        "COD"
+                                        ? "border-rose-500 bg-rose-50"
+                                        : "border-gray-200"
+                                        }`}
+                                >
                                     <input
                                         type="radio"
                                         name="payment"
@@ -2752,14 +3641,22 @@ export default function BuyNowPage({
                                         </div>
 
                                         <div className="text-sm text-gray-500">
-                                            Bayar saat barang diterima.
+                                            Bayar saat
+                                            barang
+                                            diterima.
                                         </div>
                                     </div>
-
                                 </label>
 
-                                <label className="flex cursor-pointer items-center gap-3 rounded-2xl border p-4">
+                                {/* BANK TRANSFER */}
 
+                                <label
+                                    className={`flex cursor-pointer items-center gap-3 rounded-2xl border p-4 ${paymentMethod ===
+                                        "BANK_TRANSFER"
+                                        ? "border-rose-500 bg-rose-50"
+                                        : "border-gray-200"
+                                        }`}
+                                >
                                     <input
                                         type="radio"
                                         name="payment"
@@ -2780,14 +3677,22 @@ export default function BuyNowPage({
                                         </div>
 
                                         <div className="text-sm text-gray-500">
-                                            Pembayaran melalui Midtrans.
+                                            Pembayaran
+                                            melalui
+                                            Midtrans.
                                         </div>
                                     </div>
-
                                 </label>
 
-                                <label className="flex cursor-pointer items-center gap-3 rounded-2xl border p-4">
+                                {/* E-WALLET */}
 
+                                <label
+                                    className={`flex cursor-pointer items-center gap-3 rounded-2xl border p-4 ${paymentMethod ===
+                                        "E_WALLET"
+                                        ? "border-rose-500 bg-rose-50"
+                                        : "border-gray-200"
+                                        }`}
+                                >
                                     <input
                                         type="radio"
                                         name="payment"
@@ -2808,14 +3713,23 @@ export default function BuyNowPage({
                                         </div>
 
                                         <div className="text-sm text-gray-500">
-                                            GoPay / ShopeePay melalui Midtrans.
+                                            GoPay /
+                                            ShopeePay
+                                            melalui
+                                            Midtrans.
                                         </div>
                                     </div>
-
                                 </label>
 
-                                <label className="flex cursor-pointer items-center gap-3 rounded-2xl border p-4">
+                                {/* QRIS */}
 
+                                <label
+                                    className={`flex cursor-pointer items-center gap-3 rounded-2xl border p-4 ${paymentMethod ===
+                                        "QRIS"
+                                        ? "border-rose-500 bg-rose-50"
+                                        : "border-gray-200"
+                                        }`}
+                                >
                                     <input
                                         type="radio"
                                         name="payment"
@@ -2836,55 +3750,93 @@ export default function BuyNowPage({
                                         </div>
 
                                         <div className="text-sm text-gray-500">
-                                            Bayar menggunakan QRIS melalui Midtrans.
+                                            Bayar
+                                            menggunakan
+                                            QRIS melalui
+                                            Midtrans.
                                         </div>
                                     </div>
-
                                 </label>
-
                             </div>
 
+                            {paymentMethod !==
+                                "COD" && (
+                                    <div className="mt-4 rounded-2xl bg-gray-50 p-4">
+                                        {snapLoading ? (
+                                            <div className="text-sm text-gray-500">
+                                                Memuat
+                                                Midtrans
+                                                Snap...
+                                            </div>
+                                        ) : snapError ? (
+                                            <div className="text-sm text-red-600">
+                                                {snapError}
+                                            </div>
+                                        ) : snapReady ? (
+                                            <div className="text-sm text-green-600">
+                                                Midtrans
+                                                siap
+                                                digunakan.
+                                            </div>
+                                        ) : (
+                                            <div className="text-sm text-gray-500">
+                                                Midtrans
+                                                belum siap.
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
                         </section>
-
                     </div>
 
-                    {/* SUMMARY */}
+                    {/* =====================================================
+                        SUMMARY
+                    ===================================================== */}
 
                     <aside className="h-fit rounded-3xl border border-gray-200 bg-white p-6 lg:sticky lg:top-6">
-
                         <h2 className="text-lg font-bold">
                             Ringkasan
                         </h2>
 
                         <div className="mt-5 space-y-4 text-sm">
 
-                            <div className="flex justify-between">
+                            {/* PRODUCT */}
+
+                            <div className="flex justify-between gap-4">
                                 <span className="text-gray-500">
                                     Produk
                                 </span>
 
                                 <span className="font-medium">
                                     Rp{" "}
-                                    {data.subtotal.toLocaleString(
+                                    {Number(
+                                        data.subtotal
+                                    ).toLocaleString(
                                         "id-ID"
                                     )}
                                 </span>
                             </div>
 
-                            <div className="flex justify-between">
+                            {/* WEIGHT */}
+
+                            <div className="flex justify-between gap-4">
                                 <span className="text-gray-500">
                                     Berat
                                 </span>
 
                                 <span className="font-medium">
-                                    {data.totalWeight.toLocaleString(
+                                    {Number(
+                                        data.totalWeight
+                                    ).toLocaleString(
                                         "id-ID"
                                     )}{" "}
                                     gram
                                 </span>
                             </div>
 
-                            <div className="flex justify-between">
+                            {/* SHIPPING */}
+
+                            <div className="flex justify-between gap-4">
                                 <span className="text-gray-500">
                                     Ongkir
                                 </span>
@@ -2898,10 +3850,26 @@ export default function BuyNowPage({
                                 </span>
                             </div>
 
+                            {/* VOUCHER */}
+
+                            {voucherDiscount >
+                                0 && (
+                                    <div className="flex justify-between gap-4 text-green-600">
+                                        <span>
+                                            Diskon Voucher
+                                        </span>
+
+                                        <span className="font-medium">
+                                            - Rp{" "}
+                                            {voucherDiscount.toLocaleString(
+                                                "id-ID"
+                                            )}
+                                        </span>
+                                    </div>
+                                )}
+
                             <div className="border-t pt-4">
-
-                                <div className="flex justify-between">
-
+                                <div className="flex justify-between gap-4">
                                     <span className="font-bold">
                                         Total
                                     </span>
@@ -2912,21 +3880,85 @@ export default function BuyNowPage({
                                             "id-ID"
                                         )}
                                     </span>
-
                                 </div>
+                            </div>
+                        </div>
 
+                        {/* =================================================
+    VOUCHER
+================================================= */}
+
+                        <div className="mt-6 border-t pt-6">
+                            <div className="mb-2 text-sm font-semibold">
+                                Kode Voucher
                             </div>
 
+                            {!appliedVoucherCode ? (
+                                <div className="flex gap-2">
+                                    <input
+                                        value={voucherCode}
+                                        onChange={(e) =>
+                                            setVoucherCode(
+                                                e.target.value.toUpperCase()
+                                            )
+                                        }
+                                        onKeyDown={(e) => {
+                                            if (e.key === "Enter") {
+                                                applyVoucher();
+                                            }
+                                        }}
+                                        placeholder="Masukkan kode"
+                                        disabled={voucherLoading}
+                                        className="min-w-0 flex-1 rounded-xl border border-gray-300 px-3 py-2.5 text-sm outline-none focus:border-rose-500"
+                                    />
+
+                                    <button
+                                        type="button"
+                                        onClick={applyVoucher}
+                                        disabled={
+                                            voucherLoading ||
+                                            !voucherCode.trim()
+                                        }
+                                        className="rounded-xl bg-gray-900 px-4 py-2.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-gray-300"
+                                    >
+                                        {voucherLoading ? "Cek..." : "Pakai"}
+                                    </button>
+                                </div>
+                            ) : (
+                                <div className="flex items-center justify-between rounded-xl bg-gray-50 px-3 py-3">
+                                    <div>
+                                        <div className="font-semibold text-emerald-600">
+                                            {appliedVoucherCode}
+                                        </div>
+
+                                        <div className="text-xs text-gray-500">
+                                            Diskon Rp{" "}
+                                            {voucherDiscount.toLocaleString("id-ID")}
+                                        </div>
+                                    </div>
+
+                                    <button
+                                        type="button"
+                                        onClick={removeVoucher}
+                                        className="text-xs font-semibold text-red-600"
+                                    >
+                                        Hapus
+                                    </button>
+                                </div>
+                            )}
                         </div>
+
+                        {/* =================================================
+                            CHECKOUT BUTTON
+                        ================================================= */}
 
                         <button
                             type="button"
-                            onClick={createOrder}
+                            onClick={
+                                createOrder
+                            }
                             disabled={
-                                creatingOrder ||
-                                snapLoading ||
-                                !address ||
-                                !selectedShipping
+                                paymentButtonDisabled
                             }
                             className="mt-6 w-full rounded-xl bg-rose-600 px-5 py-3 font-semibold text-white hover:bg-rose-700 disabled:cursor-not-allowed disabled:bg-gray-300"
                         >
@@ -2936,15 +3968,27 @@ export default function BuyNowPage({
                                     ? "Pilih Alamat"
                                     : !selectedShipping
                                         ? "Pilih Pengiriman"
-                                        : paymentMethod === "COD"
+                                        : paymentMethod ===
+                                            "COD"
                                             ? "Buat Pesanan"
                                             : snapLoading
                                                 ? "Memuat Pembayaran..."
-                                                : "Bayar Sekarang"}
+                                                : !snapReady
+                                                    ? "Midtrans Tidak Siap"
+                                                    : "Bayar Sekarang"}
                         </button>
 
-                    </aside>
+                        {/* =================================================
+                            SECURITY NOTE
+                        ================================================= */}
 
+                        <p className="mt-4 text-center text-xs leading-5 text-gray-400">
+                            Total pembayaran akan
+                            divalidasi kembali di
+                            server sebelum pesanan
+                            dibuat.
+                        </p>
+                    </aside>
                 </div>
             </div>
         </main>

@@ -1,8 +1,23 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/auth";
-import { prisma } from "@/lib/prisma";
+import { Prisma } from "@prisma/client";
+import type { Voucher } from "@prisma/client";
+import {
+    incrementVoucherUsage,
+    validateAndCalculateVoucher,
+} from "@/lib/voucher";
 
-type ShippingOption = {
+import { prisma } from "@/lib/prisma";
+import { auth } from "@/auth";
+
+export const dynamic = "force-dynamic";
+
+type PaymentMethod =
+    | "COD"
+    | "BANK_TRANSFER"
+    | "E_WALLET"
+    | "QRIS";
+
+type ShippingPayload = {
     courier?: string;
     code?: string;
     service?: string;
@@ -14,80 +29,183 @@ type ShippingOption = {
     shipping_cost?: number;
 };
 
-function getShippingCost(
-    shipping: ShippingOption
-) {
-    const value = Number(
-        shipping.cost ??
-        shipping.price ??
-        shipping.shipping_cost ??
-        0
-    );
+type BuyNowPostBody = {
+    productId: number;
+    variantId: number;
+    quantity: number;
+    addressId: string;
+    shipping: ShippingPayload;
+    paymentMethod: PaymentMethod;
+    voucherCode?: string | null;
+};
 
-    return Number.isFinite(value) && value >= 0
-        ? Math.round(value)
-        : NaN;
+function jsonError(
+    message: string,
+    status = 400
+) {
+    return NextResponse.json(
+        {
+            success: false,
+            message,
+        },
+        { status }
+    );
+}
+
+function jsonSuccess(
+    data: unknown,
+    status = 200
+) {
+    return NextResponse.json(
+        {
+            success: true,
+            data,
+        },
+        { status }
+    );
+}
+
+function decimalToNumber(
+    value: Prisma.Decimal | number | null | undefined
+) {
+    if (value === null || value === undefined) {
+        return 0;
+    }
+
+    return Number(value.toString());
+}
+
+function normalizeVoucherCode(
+    value: unknown
+): string | null {
+    if (
+        typeof value !== "string"
+    ) {
+        return null;
+    }
+
+    const code =
+        value.trim().toUpperCase();
+
+    return code || null;
+}
+
+function getShippingCost(
+    shipping: ShippingPayload
+) {
+    const candidates = [
+        shipping.cost,
+        shipping.price,
+        shipping.shipping_cost,
+    ];
+
+    for (const value of candidates) {
+        const number =
+            Number(value);
+
+        if (
+            Number.isFinite(number) &&
+            number >= 0
+        ) {
+            return Math.round(number);
+        }
+    }
+
+    return 0;
+}
+
+function getShippingCourier(
+    shipping: ShippingPayload
+) {
+    return (
+        shipping.courier ||
+        shipping.code ||
+        null
+    );
+}
+
+function getShippingService(
+    shipping: ShippingPayload
+) {
+    return (
+        shipping.service ||
+        shipping.service_name ||
+        null
+    );
+}
+
+async function getCurrentUser() {
+    const session =
+        await auth();
+
+    if (!session?.user?.id) {
+        return null;
+    }
+
+    return session.user;
 }
 
 /*
- * ==========================================
- * GET BUY NOW
- * ==========================================
+ * ============================================================
+ * GET /api/buy-now
+ * ============================================================
  *
- * /api/buy-now?productId=1&variantId=2&quantity=1
+ * Dipakai oleh halaman Buy Now untuk mengambil:
  *
- * TIDAK membaca Cart.
+ * - product
+ * - variant
+ * - quantity
+ * - subtotal
+ * - totalWeight
+ * - addresses
+ * - store
+ *
+ * Harga selalu berasal dari database.
  */
 export async function GET(
     request: NextRequest
 ) {
     try {
-        const session = await auth();
+        const user =
+            await getCurrentUser();
 
-        if (!session?.user?.id) {
-            return NextResponse.json(
-                {
-                    success: false,
-                    message:
-                        "Silakan login terlebih dahulu.",
-                },
-                { status: 401 }
+        if (!user) {
+            return jsonError(
+                "Anda harus login terlebih dahulu.",
+                401
             );
         }
 
-        const userId = session.user.id;
+        const searchParams =
+            request.nextUrl.searchParams;
 
-        const { searchParams } =
-            new URL(request.url);
+        const productId =
+            Number(
+                searchParams.get(
+                    "productId"
+                )
+            );
 
-        const productId = Number(
-            searchParams.get("productId")
-        );
+        const variantId =
+            Number(
+                searchParams.get(
+                    "variantId"
+                )
+            );
 
-        const variantId = Number(
-            searchParams.get("variantId")
-        );
-
-        const quantity = Number(
-            searchParams.get("quantity") ?? "1"
-        );
-
-        /*
-         * ==========================================
-         * VALIDATE
-         * ==========================================
-         */
+        const quantity =
+            Number(
+                searchParams.get(
+                    "quantity"
+                )
+            );
 
         if (
             !Number.isInteger(productId) ||
             productId <= 0
         ) {
-            return NextResponse.json(
-                {
-                    success: false,
-                    message: "Produk tidak valid.",
-                },
-                { status: 400 }
+            return jsonError(
+                "Product ID tidak valid."
             );
         }
 
@@ -95,548 +213,483 @@ export async function GET(
             !Number.isInteger(variantId) ||
             variantId <= 0
         ) {
-            return NextResponse.json(
-                {
-                    success: false,
-                    message: "Variant tidak valid.",
-                },
-                { status: 400 }
+            return jsonError(
+                "Variant ID tidak valid."
             );
         }
 
         if (
             !Number.isInteger(quantity) ||
-            quantity <= 0
+            quantity <= 0 ||
+            quantity > 100
         ) {
-            return NextResponse.json(
-                {
-                    success: false,
-                    message:
-                        "Quantity tidak valid.",
-                },
-                { status: 400 }
+            return jsonError(
+                "Quantity tidak valid."
             );
         }
 
-        /*
-         * ==========================================
-         * PRODUCT + VARIANT
-         * ==========================================
-         */
+        const [
+            product,
+            addresses,
+            store,
+        ] =
+            await Promise.all([
+                prisma.product.findUnique({
+                    where: {
+                        id: productId,
+                    },
+                    include: {
+                        variants: {
+                            where: {
+                                id: variantId,
+                            },
+                            take: 1,
+                        },
+                    },
+                }),
+
+                prisma.userAddress.findMany({
+                    where: {
+                        userId: user.id,
+                    },
+                    orderBy: [
+                        {
+                            isDefault:
+                                "desc",
+                        },
+                        {
+                            createdAt:
+                                "desc",
+                        },
+                    ],
+                }),
+
+                prisma.storeSetting.findUnique({
+                    where: {
+                        id: 1,
+                    },
+                }),
+            ]);
+
+        if (!product) {
+            return jsonError(
+                "Produk tidak ditemukan.",
+                404
+            );
+        }
 
         const variant =
-            await prisma.productVariant.findFirst({
-                where: {
-                    id: variantId,
-                    productId,
-                },
-                include: {
-                    product: true,
-                },
-            });
+            product.variants[0];
 
         if (!variant) {
-            return NextResponse.json(
-                {
-                    success: false,
-                    message:
-                        "Produk atau variant tidak ditemukan.",
-                },
-                { status: 404 }
+            return jsonError(
+                "Variant produk tidak ditemukan.",
+                404
             );
         }
 
-        /*
-         * ==========================================
-         * STOCK
-         * ==========================================
-         */
-
-        if (quantity > variant.stock) {
-            return NextResponse.json(
-                {
-                    success: false,
-                    message:
-                        `Stok ${variant.product.name} - ${variant.name} tidak mencukupi.`,
-                },
-                { status: 400 }
+        const price =
+            decimalToNumber(
+                variant.price
             );
-        }
-
-        /*
-         * ==========================================
-         * ADDRESSES
-         * ==========================================
-         */
-
-        const addresses =
-            await prisma.userAddress.findMany({
-                where: {
-                    userId,
-                },
-                orderBy: [
-                    {
-                        isDefault: "desc",
-                    },
-                    {
-                        createdAt: "desc",
-                    },
-                ],
-            });
-
-        /*
-         * ==========================================
-         * STORE
-         * ==========================================
-         */
-
-        const store =
-            await prisma.storeSetting.findUnique({
-                where: {
-                    id: 1,
-                },
-                select: {
-                    id: true,
-                    storeName: true,
-                    rajaOngkirDestinationId:
-                        true,
-                },
-            });
-
-        if (!store) {
-            return NextResponse.json(
-                {
-                    success: false,
-                    message:
-                        "Data toko belum dikonfigurasi.",
-                },
-                { status: 500 }
-            );
-        }
-
-        const storeDestination =
-            Number(
-                store.rajaOngkirDestinationId
-            );
-
-        if (
-            !Number.isInteger(
-                storeDestination
-            ) ||
-            storeDestination <= 0
-        ) {
-            return NextResponse.json(
-                {
-                    success: false,
-                    message:
-                        "Destination RajaOngkir toko belum dikonfigurasi.",
-                },
-                { status: 500 }
-            );
-        }
-
-        /*
-         * ==========================================
-         * PRICE
-         * ==========================================
-         */
-
-        const price = Math.round(
-            Number(variant.price)
-        );
-
-        const weightRaw = Number(
-            variant.weight
-        );
-
-        const weight =
-            Number.isFinite(weightRaw) &&
-            weightRaw >= 0
-                ? Math.round(weightRaw)
-                : 0;
 
         const subtotal =
             price * quantity;
 
         const totalWeight =
-            weight * quantity;
+            Math.max(
+                1,
+                Number(
+                    variant.weight
+                ) * quantity
+            );
 
-        /*
-         * ==========================================
-         * RESPONSE
-         * ==========================================
-         */
+        if (!store) {
+            return jsonError(
+                "Pengaturan toko belum tersedia.",
+                500
+            );
+        }
 
-        return NextResponse.json({
-            success: true,
+        return jsonSuccess({
+            product: {
+                id: product.id,
+                name: product.name,
+                slug: product.slug,
+                image: product.image,
+            },
 
-            data: {
-                product: {
-                    id: variant.product.id,
-                    name: variant.product.name,
-                    slug: variant.product.slug,
-                    image: variant.product.image,
-                },
+            variant: {
+                id: variant.id,
+                name: variant.name,
+                image: variant.image,
+                price,
+                weight:
+                    variant.weight,
+                stock:
+                    variant.stock,
+            },
 
-                variant: {
-                    id: variant.id,
-                    name: variant.name,
-                    image: variant.image,
-                    price,
-                    weight,
-                    stock: variant.stock,
-                },
+            quantity,
 
-                quantity,
+            subtotal,
 
-                subtotal,
+            totalWeight,
 
-                totalWeight,
+            addresses:
+                addresses.map(
+                    (address) => ({
+                        id: address.id,
+                        label:
+                            address.label,
+                        recipientName:
+                            address.recipientName,
+                        phone:
+                            address.phone,
+                        address:
+                            address.address,
+                        province:
+                            address.province,
+                        city:
+                            address.city,
+                        district:
+                            address.district,
+                        subdistrict:
+                            address.subdistrict,
+                        postalCode:
+                            address.postalCode,
+                        provinceId:
+                            address.provinceId,
+                        regencyId:
+                            address.regencyId,
+                        districtId:
+                            address.districtId,
+                        villageId:
+                            address.villageId,
+                        rajaOngkirDestinationId:
+                            address.rajaOngkirDestinationId,
+                        latitude:
+                            address.latitude?.toString() ??
+                            null,
+                        longitude:
+                            address.longitude?.toString() ??
+                            null,
+                        isDefault:
+                            address.isDefault,
+                    })
+                ),
 
-                addresses,
-
-                store: {
-                    id: store.id,
-                    storeName:
-                        store.storeName,
-                    rajaOngkirDestinationId:
-                        store.rajaOngkirDestinationId,
-                },
+            store: {
+                id: store.id,
+                storeName:
+                    store.storeName,
+                rajaOngkirDestinationId:
+                    store.rajaOngkirDestinationId,
             },
         });
     } catch (error) {
         console.error(
-            "BUY NOW GET ERROR:",
+            "GET /api/buy-now ERROR:",
             error
         );
 
-        return NextResponse.json(
-            {
-                success: false,
-                message:
-                    "Gagal mengambil data Buy Now.",
-            },
-            { status: 500 }
+        return jsonError(
+            "Gagal mengambil data Buy Now.",
+            500
         );
     }
 }
 
 /*
- * ==========================================
- * POST BUY NOW
- * ==========================================
+ * ============================================================
+ * POST /api/buy-now
+ * ============================================================
  *
- * Dipakai untuk COD.
+ * Khusus COD.
  *
- * Midtrans non-COD dibuat melalui
- * /api/payment/midtrans.
+ * Untuk payment non-COD, frontend menggunakan:
+ *
+ * /api/buy-now/midtrans
  */
 export async function POST(
     request: NextRequest
 ) {
     try {
-        const session = await auth();
+        const user =
+            await getCurrentUser();
 
-        if (!session?.user?.id) {
-            return NextResponse.json(
-                {
-                    success: false,
-                    message:
-                        "Silakan login terlebih dahulu.",
-                },
-                { status: 401 }
+        if (!user) {
+            return jsonError(
+                "Anda harus login terlebih dahulu.",
+                401
             );
         }
 
-        const userId = session.user.id;
+        let body: BuyNowPostBody;
 
-        const body =
-            await request.json();
+        try {
+            body =
+                await request.json();
+        } catch {
+            return jsonError(
+                "Body request tidak valid."
+            );
+        }
 
-        const {
-            productId,
-            variantId,
-            quantity,
-            addressId,
-            shipping,
-            paymentMethod,
-        } = body;
+        const productId =
+            Number(body.productId);
 
-        /*
-         * ==========================================
-         * VALIDATE PRODUCT
-         * ==========================================
-         */
+        const variantId =
+            Number(body.variantId);
 
-        const parsedProductId =
-            Number(productId);
+        const quantity =
+            Number(body.quantity);
 
-        const parsedVariantId =
-            Number(variantId);
+        const addressId =
+            String(
+                body.addressId || ""
+            );
 
-        const parsedQuantity =
-            Number(quantity);
+        const paymentMethod =
+            body.paymentMethod;
+
+        const voucherCode =
+            normalizeVoucherCode(
+                body.voucherCode
+            );
 
         if (
-            !Number.isInteger(
-                parsedProductId
-            ) ||
-            parsedProductId <= 0
+            !Number.isInteger(productId) ||
+            productId <= 0
         ) {
-            return NextResponse.json(
-                {
-                    success: false,
-                    message:
-                        "Produk tidak valid.",
-                },
-                { status: 400 }
+            return jsonError(
+                "Product ID tidak valid."
             );
         }
 
         if (
-            !Number.isInteger(
-                parsedVariantId
-            ) ||
-            parsedVariantId <= 0
+            !Number.isInteger(variantId) ||
+            variantId <= 0
         ) {
-            return NextResponse.json(
-                {
-                    success: false,
-                    message:
-                        "Variant tidak valid.",
-                },
-                { status: 400 }
+            return jsonError(
+                "Variant ID tidak valid."
             );
         }
 
         if (
-            !Number.isInteger(
-                parsedQuantity
-            ) ||
-            parsedQuantity <= 0
+            !Number.isInteger(quantity) ||
+            quantity <= 0 ||
+            quantity > 100
         ) {
-            return NextResponse.json(
-                {
-                    success: false,
-                    message:
-                        "Quantity tidak valid.",
-                },
-                { status: 400 }
+            return jsonError(
+                "Quantity tidak valid."
             );
         }
-
-        /*
-         * ==========================================
-         * PAYMENT
-         * ==========================================
-         */
-
-        if (
-            paymentMethod !== "COD"
-        ) {
-            return NextResponse.json(
-                {
-                    success: false,
-                    message:
-                        "Pembayaran non-COD untuk Buy Now harus dibuat melalui API Midtrans.",
-                },
-                { status: 400 }
-            );
-        }
-
-        /*
-         * ==========================================
-         * ADDRESS
-         * ==========================================
-         */
 
         if (!addressId) {
-            return NextResponse.json(
-                {
-                    success: false,
-                    message:
-                        "Alamat pengiriman wajib dipilih.",
-                },
-                { status: 400 }
+            return jsonError(
+                "Alamat pengiriman wajib dipilih."
             );
         }
 
-        const address =
-            await prisma.userAddress.findFirst(
-                {
-                    where: {
-                        id: addressId,
-                        userId,
-                    },
-                }
-            );
-
-        if (!address) {
-            return NextResponse.json(
-                {
-                    success: false,
-                    message:
-                        "Alamat tidak ditemukan.",
-                },
-                { status: 404 }
+        if (
+            paymentMethod !==
+            "COD"
+        ) {
+            return jsonError(
+                "Gunakan endpoint Midtrans untuk pembayaran non-COD."
             );
         }
 
-        /*
-         * ==========================================
-         * SHIPPING
-         * ==========================================
-         */
-
-        if (!shipping) {
-            return NextResponse.json(
-                {
-                    success: false,
-                    message:
-                        "Layanan pengiriman wajib dipilih.",
-                },
-                { status: 400 }
+        if (
+            !body.shipping ||
+            typeof body.shipping !==
+            "object"
+        ) {
+            return jsonError(
+                "Pengiriman wajib dipilih."
             );
         }
 
         const shippingCost =
-            getShippingCost(shipping);
-
-        if (!Number.isFinite(shippingCost)) {
-            return NextResponse.json(
-                {
-                    success: false,
-                    message:
-                        "Biaya pengiriman tidak valid.",
-                },
-                { status: 400 }
+            getShippingCost(
+                body.shipping
             );
-        }
 
-        /*
-         * ==========================================
-         * PRODUCT + VARIANT
-         * ==========================================
-         */
-
-        const variant =
-            await prisma.productVariant.findFirst({
-                where: {
-                    id: parsedVariantId,
-                    productId:
-                        parsedProductId,
-                },
-                include: {
-                    product: true,
-                },
-            });
-
-        if (!variant) {
-            return NextResponse.json(
-                {
-                    success: false,
-                    message:
-                        "Produk atau variant tidak ditemukan.",
-                },
-                { status: 404 }
+        const shippingCourier =
+            getShippingCourier(
+                body.shipping
             );
-        }
 
-        /*
-         * ==========================================
-         * STOCK
-         * ==========================================
-         */
-
-        if (
-            parsedQuantity >
-            variant.stock
-        ) {
-            return NextResponse.json(
-                {
-                    success: false,
-                    message:
-                        `Stok ${variant.product.name} - ${variant.name} tidak mencukupi.`,
-                },
-                { status: 400 }
+        const shippingService =
+            getShippingService(
+                body.shipping
             );
-        }
 
         /*
-         * ==========================================
-         * TOTAL
-         * ==========================================
-         */
-
-        const price = Math.round(
-            Number(variant.price)
-        );
-
-        const subtotal =
-            price * parsedQuantity;
-
-        const total =
-            subtotal + shippingCost;
-
-        /*
-         * ==========================================
-         * ORDER NUMBER
-         * ==========================================
-         */
-
-        const orderNumber =
-            `ORD-${Date.now()}-${Math.floor(
-                Math.random() * 10000
-            )
-                .toString()
-                .padStart(4, "0")}`;
-
-        /*
-         * ==========================================
-         * CREATE ORDER
-         * ==========================================
+         * =====================================================
+         * TRANSACTION
+         * =====================================================
          *
-         * BUY NOW:
-         *
-         * - membuat order
-         * - mengurangi stock
-         * - menambah sold
-         * - TIDAK menyentuh Cart
+         * Semua validasi penting dilakukan lagi di server.
          */
-
         const result =
             await prisma.$transaction(
                 async (tx) => {
-                    /*
-                     * Re-check stock
-                     * di dalam transaction.
-                     */
-
-                    const freshVariant =
+                    const variant =
                         await tx.productVariant.findUnique(
                             {
                                 where: {
-                                    id:
-                                        parsedVariantId,
+                                    id: variantId,
+                                },
+                                include: {
+                                    product: true,
+                                },
+                            }
+                        );
+
+                    if (!variant) {
+                        throw new Error(
+                            "VARIANT_NOT_FOUND"
+                        );
+                    }
+
+                    if (
+                        variant.productId !==
+                        productId
+                    ) {
+                        throw new Error(
+                            "VARIANT_PRODUCT_MISMATCH"
+                        );
+                    }
+
+                    /*
+                     * Lock-like validation:
+                     *
+                     * updateMany dengan kondisi
+                     * stock >= quantity.
+                     *
+                     * Ini lebih aman daripada:
+                     *
+                     * find -> cek stock -> update
+                     *
+                     * karena dua request concurrent
+                     * bisa lolos bersamaan.
+                     */
+                    const stockUpdate =
+                        await tx.productVariant.updateMany(
+                            {
+                                where: {
+                                    id: variantId,
+                                    stock: {
+                                        gte:
+                                            quantity,
+                                    },
+                                },
+                                data: {
+                                    stock: {
+                                        decrement:
+                                            quantity,
+                                    },
                                 },
                             }
                         );
 
                     if (
-                        !freshVariant ||
-                        freshVariant.stock <
-                            parsedQuantity
+                        stockUpdate.count !==
+                        1
                     ) {
                         throw new Error(
-                            "Stok produk sudah tidak mencukupi."
+                            "OUT_OF_STOCK"
                         );
                     }
+
+                    const address =
+                        await tx.userAddress.findFirst(
+                            {
+                                where: {
+                                    id:
+                                        addressId,
+                                    userId:
+                                        user.id,
+                                },
+                            }
+                        );
+
+                    if (!address) {
+                        throw new Error(
+                            "ADDRESS_NOT_FOUND"
+                        );
+                    }
+
+                    if (
+                        !address.rajaOngkirDestinationId
+                    ) {
+                        throw new Error(
+                            "ADDRESS_DESTINATION_NOT_FOUND"
+                        );
+                    }
+
+                    const price =
+                        decimalToNumber(
+                            variant.price
+                        );
+
+                    const subtotal =
+                        price * quantity;
+
+                    /*
+                     * =================================================
+                     * VOUCHER
+                     * =================================================
+                     */
+
+                    let discount = 0;
+                    let voucherId: number | null = null;
+                    let appliedVoucherCode: string | null = null;
+
+                    if (voucherCode) {
+                        const voucherResult = await validateAndCalculateVoucher(
+                            voucherCode,
+                            subtotal,
+                            tx
+                        );
+
+                        if (!voucherResult.valid) {
+                            throw new Error(voucherResult.message);
+                        }
+
+                        voucherId = voucherResult.voucher.id;
+                        appliedVoucherCode = voucherResult.voucher.code;
+                        discount = voucherResult.discount;
+
+                        const voucherUsed = await incrementVoucherUsage(tx, voucherId);
+
+                        if (!voucherUsed) {
+                            throw new Error("Kuota voucher baru saja habis. Silakan gunakan kode voucher lain.");
+                        }
+                    }
+
+                    const total =
+                        Math.max(
+                            0,
+                            subtotal -
+                            discount +
+                            shippingCost
+                        );
+
+                    const orderNumber =
+                        `ORD-${Date.now()}-${Math.random()
+                            .toString(36)
+                            .slice(2, 8)
+                            .toUpperCase()}`;
 
                     const order =
                         await tx.order.create(
                             {
                                 data: {
-                                    userId,
+                                    userId:
+                                        user.id,
 
                                     orderNumber,
 
@@ -661,17 +714,33 @@ export async function POST(
                                     postalCode:
                                         address.postalCode,
 
-                                    latitude:
-                                        address.latitude,
+                                    subtotal:
+                                        new Prisma.Decimal(
+                                            subtotal.toFixed(
+                                                2
+                                            )
+                                        ),
 
-                                    longitude:
-                                        address.longitude,
+                                    shippingCost:
+                                        new Prisma.Decimal(
+                                            shippingCost.toFixed(
+                                                2
+                                            )
+                                        ),
 
-                                    subtotal,
+                                    discount:
+                                        new Prisma.Decimal(
+                                            discount.toFixed(
+                                                2
+                                            )
+                                        ),
 
-                                    shippingCost,
-
-                                    total,
+                                    total:
+                                        new Prisma.Decimal(
+                                            total.toFixed(
+                                                2
+                                            )
+                                        ),
 
                                     status:
                                         "PENDING",
@@ -682,43 +751,50 @@ export async function POST(
                                     paymentStatus:
                                         "UNPAID",
 
-                                    shippingCourier:
-                                        shipping.courier ??
-                                        shipping.code ??
-                                        null,
+                                    shippingCourier,
 
-                                    shippingService:
-                                        shipping.service ??
-                                        shipping.service_name ??
-                                        null,
+                                    shippingService,
+
+                                    voucherId:
+                                        voucherId,
+
+                                    voucherCode:
+                                        appliedVoucherCode,
+
+                                    latitude:
+                                        address.latitude,
+
+                                    longitude:
+                                        address.longitude,
 
                                     items: {
-                                        create: [
-                                            {
-                                                productId:
-                                                    variant.productId,
+                                        create: {
+                                            productId:
+                                                variant.productId,
 
-                                                variantId:
-                                                    variant.id,
+                                            variantId:
+                                                variant.id,
 
-                                                productName:
-                                                    variant
-                                                        .product
-                                                        .name,
+                                            productName:
+                                                variant
+                                                    .product
+                                                    .name,
 
-                                                variantName:
-                                                    variant.name,
+                                            variantName:
+                                                variant.name,
 
-                                                price,
+                                            price:
+                                                variant.price,
 
-                                                quantity:
-                                                    parsedQuantity,
+                                            quantity,
 
-                                                subtotal:
-                                                    price *
-                                                    parsedQuantity,
-                                            },
-                                        ],
+                                            subtotal:
+                                                new Prisma.Decimal(
+                                                    subtotal.toFixed(
+                                                        2
+                                                    )
+                                                ),
+                                        },
                                     },
                                 },
 
@@ -729,72 +805,81 @@ export async function POST(
                         );
 
                     /*
-                     * Kurangi stock.
+                     * sold hanya bertambah ketika order
+                     * benar-benar dibuat.
                      */
-
-                    await tx.productVariant.update(
-                        {
-                            where: {
-                                id:
-                                    variant.id,
+                    await tx.product.update({
+                        where: {
+                            id:
+                                variant.productId,
+                        },
+                        data: {
+                            sold: {
+                                increment:
+                                    quantity,
                             },
+                        },
+                    });
 
-                            data: {
-                                stock: {
-                                    decrement:
-                                        parsedQuantity,
-                                },
-                            },
-                        }
-                    );
-
-                    /*
-                     * Tambah sold.
-                     */
-
-                    await tx.product.update(
-                        {
-                            where: {
-                                id:
-                                    variant.productId,
-                            },
-
-                            data: {
-                                sold: {
-                                    increment:
-                                        parsedQuantity,
-                                },
-                            },
-                        }
-                    );
-
-                    return order;
+                    return {
+                        order,
+                        subtotal,
+                        shippingCost,
+                        discount,
+                        total,
+                    };
+                },
+                {
+                    isolationLevel:
+                        Prisma.TransactionIsolationLevel.Serializable,
                 }
             );
 
-        return NextResponse.json({
-            success: true,
+        return jsonSuccess(
+            {
+                id:
+                    result.order.id,
 
-            message:
-                "Pesanan Buy Now berhasil dibuat.",
+                orderNumber:
+                    result.order.orderNumber,
 
-            data: result,
-        });
+                status:
+                    result.order.status,
+
+                paymentStatus:
+                    result.order.paymentStatus,
+
+                paymentMethod:
+                    result.order.paymentMethod,
+
+                subtotal:
+                    result.subtotal,
+
+                shippingCost:
+                    result.shippingCost,
+
+                discount:
+                    result.discount,
+
+                total:
+                    result.total,
+            },
+            201
+        );
     } catch (error) {
         console.error(
-            "BUY NOW POST ERROR:",
+            "POST /api/buy-now ERROR:",
             error
         );
 
-        return NextResponse.json(
-            {
-                success: false,
-                message:
-                    error instanceof Error
-                        ? error.message
-                        : "Gagal membuat pesanan Buy Now.",
-            },
-            { status: 500 }
-        );
+        const message =
+            error instanceof Error
+                ? error.message
+                : "";
+
+        switch (message) {
+            default:
+                return jsonError(message || "Gagal membuat pesanan.", 400);
+        }
     }
 }

@@ -1,812 +1,1412 @@
-import { NextResponse } from "next/server";
-import { auth } from "@/auth";
+import { NextRequest, NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
+import type { Voucher } from "@prisma/client";
+
 import { prisma } from "@/lib/prisma";
-import Midtrans from "midtrans-client";
+import { auth } from "@/auth";
+
+export const dynamic = "force-dynamic";
+
+type PaymentMethod =
+    | "BANK_TRANSFER"
+    | "E_WALLET"
+    | "QRIS";
+
+type ShippingPayload = {
+    courier?: string;
+    code?: string;
+    service?: string;
+    service_name?: string;
+    etd?: string;
+    estimation?: string;
+    cost?: number;
+    price?: number;
+    shipping_cost?: number;
+};
+
+type Body = {
+    productId: number;
+    variantId: number;
+    quantity: number;
+    addressId: string;
+    shipping: ShippingPayload;
+    paymentMethod: PaymentMethod;
+    voucherCode?: string | null;
+};
 
 /*
- * ==========================================
- * MIDTRANS SNAP
- * ==========================================
+ * Batas nama item Midtrans adalah 50 karakter.
+ * Nama yang lebih panjang membuat request ditolak
+ * dengan pesan "item_details Name is too long".
  */
+const MIDTRANS_ITEM_NAME_MAX_LENGTH = 50;
 
-const snap = new Midtrans.Snap({
-    isProduction:
-        process.env.MIDTRANS_IS_PRODUCTION === "true",
+function truncateItemName(
+    name: string
+) {
+    if (
+        name.length <=
+        MIDTRANS_ITEM_NAME_MAX_LENGTH
+    ) {
+        return name;
+    }
 
-    serverKey:
-        process.env.MIDTRANS_SERVER_KEY!,
+    return name
+        .slice(
+            0,
+            MIDTRANS_ITEM_NAME_MAX_LENGTH
+        )
+        .trim();
+}
 
-    clientKey:
-        process.env.MIDTRANS_CLIENT_KEY!,
-});
+function jsonError(
+    message: string,
+    status = 400
+) {
+    return NextResponse.json(
+        {
+            success: false,
+            message,
+        },
+        { status }
+    );
+}
 
-/*
- * ==========================================
- * POST
- * ==========================================
- *
- * PENTING - PERUBAHAN UTAMA:
- *
- * Order SEKARANG dibuat di sini, SEBELUM
- * Snap token dikembalikan ke client, dengan
- * status PENDING / paymentStatus PENDING.
- *
- * Ini supaya:
- *
- * 1. Order tidak hilang kalau user menutup
- *    browser saat proses bayar.
- *
- * 2. Halaman /checkout/payment-finish bisa
- *    menemukan Order-nya (sebelumnya order
- *    memang tidak pernah dibuat sama sekali).
- *
- * 3. Webhook
- *    /api/payment/midtrans/notification
- *    bisa mencari Order lewat orderNumber
- *    (= Midtrans order_id) untuk update
- *    status final (PAID / FAILED / EXPIRED).
- */
+function jsonSuccess(
+    data: unknown,
+    status = 200
+) {
+    return NextResponse.json(
+        {
+            success: true,
+            data,
+        },
+        { status }
+    );
+}
 
-export async function POST(req: Request) {
+function decimalToNumber(
+    value:
+        | Prisma.Decimal
+        | number
+        | null
+        | undefined
+) {
+    if (
+        value === null ||
+        value === undefined
+    ) {
+        return 0;
+    }
+
+    return Number(
+        value.toString()
+    );
+}
+
+function normalizeVoucherCode(
+    value: unknown
+) {
+    if (
+        typeof value !==
+        "string"
+    ) {
+        return null;
+    }
+
+    const code =
+        value.trim().toUpperCase();
+
+    return code || null;
+}
+
+function getShippingCost(
+    shipping: ShippingPayload
+) {
+    const values = [
+        shipping.cost,
+        shipping.price,
+        shipping.shipping_cost,
+    ];
+
+    for (const value of values) {
+        const number =
+            Number(value);
+
+        if (
+            Number.isFinite(
+                number
+            ) &&
+            number >= 0
+        ) {
+            return Math.round(
+                number
+            );
+        }
+    }
+
+    return 0;
+}
+
+function getCourier(
+    shipping: ShippingPayload
+) {
+    return (
+        shipping.courier ||
+        shipping.code ||
+        null
+    );
+}
+
+function getService(
+    shipping: ShippingPayload
+) {
+    return (
+        shipping.service ||
+        shipping.service_name ||
+        null
+    );
+}
+
+function getMidtransBaseUrl() {
+    return process.env
+        .NEXT_PUBLIC_MIDTRANS_IS_PRODUCTION ===
+        "true"
+        ? "https://app.midtrans.com"
+        : "https://app.sandbox.midtrans.com";
+}
+
+function getEnabledPayments(
+    paymentMethod: PaymentMethod
+) {
+    switch (paymentMethod) {
+        case "BANK_TRANSFER":
+            return [
+                "bca_va",
+                "bni_va",
+                "bri_va",
+                "permata_va",
+            ];
+
+        case "E_WALLET":
+            return [
+                "gopay",
+                "shopeepay",
+            ];
+
+        case "QRIS":
+            return [
+                "qris",
+            ];
+
+        default:
+            return [];
+    }
+}
+
+function createOrderNumber() {
+    return `ORD-${Date.now()}-${Math.random()
+        .toString(36)
+        .slice(2, 8)
+        .toUpperCase()}`;
+}
+function getAppOrigin(request: NextRequest) {
+    const envUrl = process.env.NEXT_PUBLIC_APP_URL;
+
+    if (envUrl && /^https?:\/\//.test(envUrl)) {
+        return envUrl.replace(/\/+$/, "");
+    }
+
+    // Fallback: derive dari request headers kalau env var
+    // kosong / tidak ke-inline waktu build.
+    const forwardedProto =
+        request.headers.get("x-forwarded-proto") || "https";
+
+    const host =
+        request.headers.get("x-forwarded-host") ||
+        request.headers.get("host");
+
+    if (!host) {
+        console.error(
+            "NEXT_PUBLIC_APP_URL tidak ter-set dan host tidak terdeteksi dari headers."
+        );
+        return "";
+    }
+
+    return `${forwardedProto}://${host}`;
+}
+
+async function getCurrentUser() {
+    const session =
+        await auth();
+
+    if (!session?.user?.id) {
+        return null;
+    }
+
+    return session.user;
+}
+
+export async function POST(
+    request: NextRequest
+) {
     try {
-        /*
-         * ==========================================
-         * AUTH
-         * ==========================================
-         */
+        const user =
+            await getCurrentUser();
 
-        const session = await auth();
-
-        if (!session?.user?.id) {
-            return NextResponse.json(
-                {
-                    success: false,
-                    message: "Unauthorized.",
-                },
-                {
-                    status: 401,
-                }
+        if (!user) {
+            return jsonError(
+                "Anda harus login terlebih dahulu.",
+                401
             );
         }
 
-        const userId = session.user.id;
+        const serverKey =
+            process.env
+                .MIDTRANS_SERVER_KEY;
 
-        /*
-         * ==========================================
-         * BODY
-         * ==========================================
-         */
+        if (!serverKey) {
+            console.error(
+                "MIDTRANS_SERVER_KEY belum di-set."
+            );
 
-        const body = await req.json();
-
-        const {
-            productId,
-            variantId,
-            quantity,
-            addressId,
-            shipping,
-            paymentMethod,
-        } = body;
-
-        /*
-         * ==========================================
-         * VALIDATE PRODUCT
-         * ==========================================
-         */
-
-        const productIdNumber = Number(
-            productId
-        );
-
-        const variantIdNumber = Number(
-            variantId
-        );
-
-        const quantityNumber = Number(
-            quantity
-        );
-
-        if (
-            !Number.isInteger(
-                productIdNumber
-            ) ||
-            productIdNumber <= 0
-        ) {
-            return NextResponse.json(
-                {
-                    success: false,
-                    message:
-                        "Product tidak valid.",
-                },
-                { status: 400 }
+            return jsonError(
+                "Konfigurasi pembayaran belum lengkap.",
+                500
             );
         }
 
+        let body: Body;
+
+        try {
+            body =
+                await request.json();
+        } catch {
+            return jsonError(
+                "Body request tidak valid."
+            );
+        }
+
+        const productId =
+            Number(
+                body.productId
+            );
+
+        const variantId =
+            Number(
+                body.variantId
+            );
+
+        const quantity =
+            Number(
+                body.quantity
+            );
+
+        const addressId =
+            String(
+                body.addressId ||
+                ""
+            );
+
+        const paymentMethod =
+            body.paymentMethod;
+
+        const voucherCode =
+            normalizeVoucherCode(
+                body.voucherCode
+            );
+
         if (
             !Number.isInteger(
-                variantIdNumber
+                productId
             ) ||
-            variantIdNumber <= 0
+            productId <= 0
         ) {
-            return NextResponse.json(
-                {
-                    success: false,
-                    message:
-                        "Variant produk tidak valid.",
-                },
-                { status: 400 }
+            return jsonError(
+                "Product ID tidak valid."
             );
         }
 
         if (
             !Number.isInteger(
-                quantityNumber
+                variantId
             ) ||
-            quantityNumber <= 0
+            variantId <= 0
         ) {
-            return NextResponse.json(
-                {
-                    success: false,
-                    message:
-                        "Quantity tidak valid.",
-                },
-                { status: 400 }
+            return jsonError(
+                "Variant ID tidak valid."
             );
         }
 
-        /*
-         * ==========================================
-         * VALIDATE ADDRESS
-         * ==========================================
-         */
+        if (
+            !Number.isInteger(
+                quantity
+            ) ||
+            quantity <= 0 ||
+            quantity > 100
+        ) {
+            return jsonError(
+                "Quantity tidak valid."
+            );
+        }
 
         if (!addressId) {
-            return NextResponse.json(
-                {
-                    success: false,
-                    message:
-                        "Alamat pengiriman wajib dipilih.",
-                },
-                { status: 400 }
+            return jsonError(
+                "Alamat pengiriman wajib dipilih."
             );
         }
-
-        /*
-         * ==========================================
-         * VALIDATE SHIPPING
-         * ==========================================
-         */
-
-        if (!shipping) {
-            return NextResponse.json(
-                {
-                    success: false,
-                    message:
-                        "Layanan pengiriman wajib dipilih.",
-                },
-                { status: 400 }
-            );
-        }
-
-        /*
-         * ==========================================
-         * VALIDATE PAYMENT
-         * ==========================================
-         */
-
-        const allowedMethods = [
-            "BANK_TRANSFER",
-            "E_WALLET",
-            "QRIS",
-        ];
 
         if (
-            !allowedMethods.includes(
+            ![
+                "BANK_TRANSFER",
+                "E_WALLET",
+                "QRIS",
+            ].includes(
                 paymentMethod
             )
         ) {
-            return NextResponse.json(
-                {
-                    success: false,
-                    message:
-                        "Metode pembayaran Midtrans tidak valid.",
-                },
-                { status: 400 }
+            return jsonError(
+                "Metode pembayaran tidak valid."
             );
         }
-
-        /*
-         * ==========================================
-         * PRODUCT + VARIANT
-         * ==========================================
-         */
-
-        const variant =
-            await prisma.productVariant.findFirst(
-                {
-                    where: {
-                        id: variantIdNumber,
-                        productId:
-                            productIdNumber,
-                    },
-
-                    include: {
-                        product: true,
-                    },
-                }
-            );
-
-        if (!variant) {
-            return NextResponse.json(
-                {
-                    success: false,
-                    message:
-                        "Produk atau variant tidak ditemukan.",
-                },
-                { status: 404 }
-            );
-        }
-
-        /*
-         * ==========================================
-         * VALIDATE STOCK
-         * ==========================================
-         */
 
         if (
-            quantityNumber >
-            variant.stock
+            !body.shipping
         ) {
-            return NextResponse.json(
-                {
-                    success: false,
-                    message: `Stok ${variant.product.name} - ${variant.name} tidak mencukupi.`,
-                },
-                { status: 400 }
+            return jsonError(
+                "Pengiriman wajib dipilih."
             );
         }
 
-        /*
-         * ==========================================
-         * PRICE
-         * ==========================================
-         */
-
-        const price = Math.round(
-            Number(variant.price)
-        );
-
-        if (
-            !Number.isFinite(price) ||
-            price < 0
-        ) {
-            return NextResponse.json(
-                {
-                    success: false,
-                    message:
-                        "Harga produk tidak valid.",
-                },
-                { status: 400 }
-            );
-        }
-
-        const subtotal =
-            price * quantityNumber;
-
-        /*
-         * ==========================================
-         * ADDRESS
-         * ==========================================
-         */
-
-        const address =
-            await prisma.userAddress.findFirst(
-                {
-                    where: {
-                        id: addressId,
-                        userId,
-                    },
-                }
+        const shippingCost =
+            getShippingCost(
+                body.shipping
             );
 
-        if (!address) {
-            return NextResponse.json(
-                {
-                    success: false,
-                    message:
-                        "Alamat tidak ditemukan.",
-                },
-                { status: 404 }
-            );
-        }
-
-        /*
-         * ==========================================
-         * SHIPPING COST
-         * ==========================================
-         */
-
-        const shippingCost = Number(
-            shipping.cost ??
-            shipping.price ??
-            shipping.shipping_cost ??
-            0
-        );
-
-        if (
-            !Number.isFinite(
-                shippingCost
-            ) ||
-            shippingCost < 0
-        ) {
-            return NextResponse.json(
-                {
-                    success: false,
-                    message:
-                        "Biaya pengiriman tidak valid.",
-                },
-                { status: 400 }
-            );
-        }
-
-        const safeShippingCost = Math.round(
-            shippingCost
-        );
-
-        /*
-         * ==========================================
-         * TOTAL
-         * ==========================================
-         */
-
-        const grossAmount =
-            subtotal + safeShippingCost;
-
-        if (
-            !Number.isInteger(
-                grossAmount
-            ) ||
-            grossAmount <= 0
-        ) {
-            return NextResponse.json(
-                {
-                    success: false,
-                    message:
-                        "Total pembayaran tidak valid.",
-                },
-                { status: 400 }
-            );
-        }
-
-        /*
-         * ==========================================
-         * ITEM DETAILS
-         * ==========================================
-         */
-
-        const fullProductName = `${variant.product.name} - ${variant.name}`;
-
-        const itemDetails = [
-            {
-                id: `PRODUCT-${productIdNumber}-VARIANT-${variantIdNumber}`,
-                price,
-                quantity: quantityNumber,
-                name: fullProductName.substring(
-                    0,
-                    50
-                ),
-            },
-        ];
-
-        if (safeShippingCost > 0) {
-            itemDetails.push({
-                id: "SHIPPING",
-                price: safeShippingCost,
-                quantity: 1,
-                name: "Biaya Pengiriman",
-            });
-        }
-
-        const itemDetailsTotal =
-            itemDetails.reduce(
-                (total, item) =>
-                    total +
-                    item.price *
-                    item.quantity,
-                0
+        const shippingCourier =
+            getCourier(
+                body.shipping
             );
 
-        if (
-            itemDetailsTotal !==
-            grossAmount
-        ) {
-            console.error(
-                "BUY NOW MIDTRANS TOTAL MISMATCH:",
-                {
-                    subtotal,
-                    safeShippingCost,
-                    grossAmount,
-                    itemDetailsTotal,
-                }
+        const shippingService =
+            getService(
+                body.shipping
             );
 
-            return NextResponse.json(
-                {
-                    success: false,
-                    message:
-                        "Total pembayaran tidak sesuai.",
-                },
-                { status: 400 }
-            );
-        }
-
-        /*
-         * ==========================================
-         * ORDER NUMBER
-         * ==========================================
-         *
-         * Dipakai juga sebagai Midtrans order_id,
-         * supaya webhook bisa menemukan Order ini
-         * kembali lewat orderNumber.
-         */
-
-        const orderNumber = `PAY-BN-${Date.now()}-${Math.floor(
-            Math.random() * 10000
-        )
-            .toString()
-            .padStart(4, "0")}`;
-
-        /*
-         * ==========================================
-         * CREATE ORDER (STATUS: PENDING)
-         * ==========================================
-         *
-         * Stock dikurangi SEKARANG untuk mencegah
-         * overselling saat menunggu pembayaran.
-         *
-         * Kalau pembayaran gagal/expired, webhook
-         * akan mengembalikan stock ini.
-         */
-
-        const order = await prisma.$transaction(
-            async (tx) => {
-                const createdOrder =
-                    await tx.order.create({
-                        data: {
-                            userId,
-
-                            orderNumber,
-
-                            recipientName:
-                                address.recipientName,
-
-                            phone: address.phone,
-
-                            address:
-                                address.address,
-
-                            province:
-                                address.province,
-
-                            city: address.city,
-
-                            district:
-                                address.district,
-
-                            postalCode:
-                                address.postalCode,
-
-                            latitude:
-                                address.latitude,
-
-                            longitude:
-                                address.longitude,
-
-                            subtotal,
-
-                            shippingCost:
-                                safeShippingCost,
-
-                            total: grossAmount,
-
-                            status: "PENDING",
-
-                            paymentMethod,
-
-                            paymentStatus:
-                                "PENDING",
-
-                            paymentReference:
-                                orderNumber,
-
-                            shippingCourier:
-                                shipping.courier ??
-                                shipping.code ??
-                                null,
-
-                            shippingService:
-                                shipping.service ??
-                                shipping.service_name ??
-                                null,
-
-                            items: {
-                                create: [
-                                    {
-                                        productId:
-                                            variant.productId,
-
-                                        variantId:
-                                            variant.id,
-
-                                        productName:
-                                            variant
-                                                .product
-                                                .name,
-
-                                        variantName:
-                                            variant.name,
-
-                                        price,
-
-                                        quantity:
-                                            quantityNumber,
-
-                                        subtotal:
-                                            price *
-                                            quantityNumber,
-                                    },
-                                ],
-                            },
-                        },
-
-                        include: {
-                            items: true,
-                        },
-                    });
-
-                await tx.productVariant.update({
-                    where: {
-                        id: variant.id,
-                    },
-
-                    data: {
-                        stock: {
-                            decrement:
-                                quantityNumber,
-                        },
-                    },
-                });
-
-                await tx.product.update({
-                    where: {
-                        id: variant.productId,
-                    },
-
-                    data: {
-                        sold: {
-                            increment:
-                                quantityNumber,
-                        },
-                    },
-                });
-
-                return createdOrder;
-            },
-            {
-                timeout: 15000,   // 15 detik, dari default 5 detik
-                maxWait: 10000,   // waktu tunggu maksimal buat dapat slot transaksi
-            }
-        );
-
-        /*
-         * ==========================================
-         * MIDTRANS PARAMETER
-         * ==========================================
-         */
-
-        const parameter = {
-            transaction_details: {
-                order_id: orderNumber,
-                gross_amount: grossAmount,
-            },
-
-            item_details: itemDetails,
-
-            customer_details: {
-                first_name:
-                    address.recipientName.substring(
-                        0,
-                        50
-                    ),
-
-                phone: address.phone.substring(
-                    0,
-                    20
-                ),
-            },
-
-            callbacks: {
-                finish: `${process.env.NEXT_PUBLIC_APP_URL}/checkout/payment-finish?payment=${orderNumber}`,
-            },
-
-            custom_expiry: {
-                expiry_duration: 1,
-                unit: "hour",
-            },
-        };
-
-        console.log(
-            "========== BUY NOW MIDTRANS =========="
-        );
-
-        console.log(
-            "ORDER NUMBER:",
-            orderNumber
-        );
-
-        console.log(
-            "GROSS AMOUNT:",
-            grossAmount
-        );
-
-        /*
-         * ==========================================
-         * CREATE SNAP TRANSACTION
-         * ==========================================
-         */
-
-        let transaction;
-
-        try {
-            transaction =
-                await snap.createTransaction(
-                    parameter
-                );
-        } catch (midtransError) {
-            /*
-             * ==========================================
-             * ROLLBACK KALAU MIDTRANS GAGAL
-             * ==========================================
-             *
-             * Order sudah terlanjur dibuat + stock
-             * sudah dikurangi. Karena Snap gagal
-             * dibuat, batalkan order dan kembalikan
-             * stock supaya tidak "nyangkut".
-             */
-
-            console.error(
-                "MIDTRANS CREATE TRANSACTION GAGAL, ROLLBACK ORDER:",
-                midtransError
+        const enabledPayments =
+            getEnabledPayments(
+                paymentMethod
             );
 
+        /*
+         * ========================================================
+         * DATABASE TRANSACTION
+         * ========================================================
+         */
+
+        const checkout =
             await prisma.$transaction(
                 async (tx) => {
-                    await tx.order.update({
-                        where: {
-                            id: order.id,
-                        },
-
-                        data: {
-                            status: "CANCELLED",
-                            paymentStatus:
-                                "FAILED",
-                        },
-                    });
-
-                    await tx.productVariant.update(
-                        {
-                            where: {
-                                id: variant.id,
-                            },
-
-                            data: {
-                                stock: {
-                                    increment:
-                                        quantityNumber,
+                    const variant =
+                        await tx.productVariant.findUnique(
+                            {
+                                where: {
+                                    id:
+                                        variantId,
                                 },
-                            },
-                        }
-                    );
 
+                                include: {
+                                    product:
+                                        true,
+                                },
+                            }
+                        );
+
+                    if (!variant) {
+                        throw new Error(
+                            "VARIANT_NOT_FOUND"
+                        );
+                    }
+
+                    if (
+                        variant.productId !==
+                        productId
+                    ) {
+                        throw new Error(
+                            "VARIANT_PRODUCT_MISMATCH"
+                        );
+                    }
+
+                    /*
+                     * Reserve stock.
+                     */
+                    const stockUpdate =
+                        await tx.productVariant.updateMany(
+                            {
+                                where: {
+                                    id:
+                                        variantId,
+                                    stock: {
+                                        gte:
+                                            quantity,
+                                    },
+                                },
+
+                                data: {
+                                    stock: {
+                                        decrement:
+                                            quantity,
+                                    },
+                                },
+                            }
+                        );
+
+                    if (
+                        stockUpdate.count !==
+                        1
+                    ) {
+                        throw new Error(
+                            "OUT_OF_STOCK"
+                        );
+                    }
+
+                    const address =
+                        await tx.userAddress.findFirst(
+                            {
+                                where: {
+                                    id:
+                                        addressId,
+
+                                    userId:
+                                        user.id,
+                                },
+                            }
+                        );
+
+                    if (!address) {
+                        throw new Error(
+                            "ADDRESS_NOT_FOUND"
+                        );
+                    }
+
+                    if (
+                        !address.rajaOngkirDestinationId
+                    ) {
+                        throw new Error(
+                            "ADDRESS_DESTINATION_NOT_FOUND"
+                        );
+                    }
+
+                    /*
+                     * ================================================
+                     * HARGA DIBULATKAN DI AWAL
+                     * ================================================
+                     *
+                     * unitPrice dibulatkan sekali di sini dan
+                     * dipakai konsisten untuk subtotal, discount,
+                     * total, DAN item_details Midtrans.
+                     *
+                     * Ini mencegah "gross_amount tidak sama dengan
+                     * jumlah item_details" yang terjadi kalau
+                     * harga desimal dibulatkan terpisah-pisah di
+                     * beberapa tempat.
+                     */
+
+                    const unitPrice =
+                        Math.round(
+                            decimalToNumber(
+                                variant.price
+                            )
+                        );
+
+                    const subtotal =
+                        unitPrice *
+                        quantity;
+
+                    let discount = 0;
+
+                    let voucher:
+                        Voucher | null =
+                        null;
+
+                    /*
+                     * =================================================
+                     * VOUCHER
+                     * =================================================
+                     */
+
+                    if (
+                        voucherCode
+                    ) {
+                        voucher =
+                            await tx.voucher.findUnique(
+                                {
+                                    where: {
+                                        code:
+                                            voucherCode,
+                                    },
+                                }
+                            );
+
+                        if (
+                            !voucher
+                        ) {
+                            throw new Error(
+                                "VOUCHER_NOT_FOUND"
+                            );
+                        }
+
+                        const now =
+                            new Date();
+
+                        if (
+                            !voucher.isActive
+                        ) {
+                            throw new Error(
+                                "VOUCHER_INACTIVE"
+                            );
+                        }
+
+                        if (
+                            voucher.startDate &&
+                            now < voucher.startDate
+                        ) {
+                            throw new Error(
+                                "VOUCHER_NOT_STARTED"
+                            );
+                        }
+
+                        if (
+                            voucher.endDate &&
+                            now > voucher.endDate
+                        ) {
+                            throw new Error(
+                                "VOUCHER_EXPIRED"
+                            );
+                        }
+
+                        if (
+                            voucher.minPurchase &&
+                            subtotal <
+                            decimalToNumber(
+                                voucher.minPurchase
+                            )
+                        ) {
+                            throw new Error(
+                                "VOUCHER_MIN_PURCHASE"
+                            );
+                        }
+
+                        if (
+                            voucher.quota !==
+                            null &&
+                            voucher.usedCount >=
+                            voucher.quota
+                        ) {
+                            throw new Error(
+                                "VOUCHER_QUOTA"
+                            );
+                        }
+
+                        if (
+                            voucher.type ===
+                            "PERCENTAGE"
+                        ) {
+                            discount =
+                                Math.floor(
+                                    subtotal *
+                                    (decimalToNumber(
+                                        voucher.value
+                                    ) /
+                                        100)
+                                );
+
+                            if (
+                                voucher.maxDiscount
+                            ) {
+                                discount =
+                                    Math.min(
+                                        discount,
+                                        Math.round(
+                                            decimalToNumber(
+                                                voucher.maxDiscount
+                                            )
+                                        )
+                                    );
+                            }
+                        } else {
+                            discount =
+                                Math.round(
+                                    decimalToNumber(
+                                        voucher.value
+                                    )
+                                );
+                        }
+
+                        discount =
+                            Math.min(
+                                Math.max(
+                                    0,
+                                    discount
+                                ),
+                                subtotal
+                            );
+
+                        const voucherUpdate =
+                            await tx.voucher.updateMany(
+                                {
+                                    where: {
+                                        id:
+                                            voucher.id,
+
+                                        isActive:
+                                            true,
+
+                                        ...(voucher.quota !==
+                                            null
+                                            ? {
+                                                usedCount:
+                                                {
+                                                    lt:
+                                                        voucher.quota,
+                                                },
+                                            }
+                                            : {}),
+                                    },
+
+                                    data: {
+                                        usedCount:
+                                        {
+                                            increment:
+                                                1,
+                                        },
+                                    },
+                                }
+                            );
+
+                        if (
+                            voucherUpdate.count !==
+                            1
+                        ) {
+                            throw new Error(
+                                "VOUCHER_QUOTA"
+                            );
+                        }
+                    }
+
+                    /*
+                     * subtotal, discount, shippingCost semua
+                     * sudah bilangan bulat rupiah - total pasti
+                     * bulat juga, tidak ada sisa desimal yang
+                     * bisa bikin gross_amount meleset.
+                     */
+                    const total =
+                        Math.max(
+                            0,
+                            subtotal -
+                            discount +
+                            shippingCost
+                        );
+
+                    if (
+                        total <=
+                        0
+                    ) {
+                        throw new Error(
+                            "INVALID_TOTAL"
+                        );
+                    }
+
+                    const orderNumber =
+                        createOrderNumber();
+
+                    const order =
+                        await tx.order.create(
+                            {
+                                data: {
+                                    userId:
+                                        user.id,
+
+                                    orderNumber,
+
+                                    recipientName:
+                                        address.recipientName,
+
+                                    phone:
+                                        address.phone,
+
+                                    address:
+                                        address.address,
+
+                                    province:
+                                        address.province,
+
+                                    city:
+                                        address.city,
+
+                                    district:
+                                        address.district,
+
+                                    postalCode:
+                                        address.postalCode,
+
+                                    latitude:
+                                        address.latitude,
+
+                                    longitude:
+                                        address.longitude,
+
+                                    subtotal:
+                                        new Prisma.Decimal(
+                                            subtotal.toFixed(
+                                                2
+                                            )
+                                        ),
+
+                                    shippingCost:
+                                        new Prisma.Decimal(
+                                            shippingCost.toFixed(
+                                                2
+                                            )
+                                        ),
+
+                                    discount:
+                                        new Prisma.Decimal(
+                                            discount.toFixed(
+                                                2
+                                            )
+                                        ),
+
+                                    total:
+                                        new Prisma.Decimal(
+                                            total.toFixed(
+                                                2
+                                            )
+                                        ),
+
+                                    status:
+                                        "PENDING",
+
+                                    paymentMethod:
+                                        paymentMethod,
+
+                                    paymentStatus:
+                                        "PENDING",
+
+                                    shippingCourier,
+
+                                    shippingService,
+
+                                    voucherId:
+                                        voucher?.id ??
+                                        null,
+
+                                    voucherCode:
+                                        voucher?.code ??
+                                        null,
+
+                                    items: {
+                                        create: {
+                                            productId:
+                                                variant.productId,
+
+                                            variantId:
+                                                variant.id,
+
+                                            productName:
+                                                variant
+                                                    .product
+                                                    .name,
+
+                                            variantName:
+                                                variant.name,
+
+                                            price:
+                                                new Prisma.Decimal(
+                                                    unitPrice.toFixed(
+                                                        2
+                                                    )
+                                                ),
+
+                                            quantity,
+
+                                            subtotal:
+                                                new Prisma.Decimal(
+                                                    subtotal.toFixed(
+                                                        2
+                                                    )
+                                                ),
+                                        },
+                                    },
+                                },
+
+                                include: {
+                                    items:
+                                        true,
+                                },
+                            }
+                        );
+
+                    /*
+                     * Increment sold ketika order
+                     * berhasil dibuat/reserve stock.
+                     */
                     await tx.product.update({
                         where: {
-                            id: variant.productId,
+                            id:
+                                variant.productId,
                         },
 
                         data: {
                             sold: {
-                                decrement:
-                                    quantityNumber,
+                                increment:
+                                    quantity,
                             },
                         },
                     });
+
+                    return {
+                        order,
+                        product:
+                            variant.product,
+                        variant,
+                        address,
+                        unitPrice,
+                        subtotal,
+                        shippingCost,
+                        discount,
+                        total,
+                    };
                 },
                 {
-                    timeout: 15000,   // 15 detik, dari default 5 detik
-                    maxWait: 10000,   // waktu tunggu maksimal buat dapat slot transaksi
+                    isolationLevel:
+                        Prisma.TransactionIsolationLevel.Serializable,
                 }
             );
 
-            throw midtransError;
-        }
+        /*
+         * ========================================================
+         * MIDTRANS SNAP
+         * ========================================================
+         */
 
-        if (!transaction?.token) {
-            return NextResponse.json(
-                {
-                    success: false,
-                    message:
-                        "Token pembayaran Midtrans tidak ditemukan.",
-                },
-                { status: 500 }
+        const snapUrl =
+            `${getMidtransBaseUrl()}/snap/v1/transactions`;
+
+        const authHeader =
+            Buffer.from(
+                `${serverKey}:`
+            ).toString(
+                "base64"
+            );
+
+        const customerName =
+            checkout.address
+                .recipientName;
+
+        /*
+         * ================================================
+         * ITEM DETAILS
+         * ================================================
+         *
+         * Semua price di sini sudah bilangan bulat rupiah
+         * (unitPrice, shippingCost, discount), jadi jumlah
+         * item_details dijamin sama persis dengan gross_amount
+         * yang dihitung dari nilai yang sama - tidak dihitung
+         * ulang secara terpisah.
+         */
+
+        const itemDetails = [
+            {
+                id:
+                    `product-${checkout.variant.productId}-${checkout.variant.id}`,
+
+                price:
+                    checkout.unitPrice,
+
+                quantity:
+                    quantity,
+
+                name:
+                    truncateItemName(
+                        `${checkout.product.name} - ${checkout.variant.name}`
+                    ),
+            },
+        ];
+        const appOrigin = getAppOrigin(request);
+
+        if (!appOrigin) {
+            console.error(
+                "GAGAL MEMBANGUN FINISH URL: appOrigin kosong. Cek NEXT_PUBLIC_APP_URL di .env production."
             );
         }
 
         /*
-         * ==========================================
-         * RESPONSE
-         * ==========================================
+         * Tambahkan shipping sebagai item.
          */
+        if (
+            checkout.shippingCost >
+            0
+        ) {
+            itemDetails.push({
+                id:
+                    "SHIPPING",
+                price:
+                    checkout.shippingCost,
+                quantity:
+                    1,
+                name:
+                    truncateItemName(
+                        `${shippingCourier || "Shipping"} ${shippingService || ""}`.trim() ||
+                        "Shipping"
+                    ),
+            });
+        }
 
-        return NextResponse.json({
-            success: true,
+        /*
+         * Discount sebagai negative item.
+         */
+        if (
+            checkout.discount >
+            0
+        ) {
+            itemDetails.push({
+                id:
+                    "VOUCHER",
+                price:
+                    -checkout.discount,
+                quantity:
+                    1,
+                name:
+                    truncateItemName(
+                        checkout.order
+                            .voucherCode
+                            ? `Voucher ${checkout.order.voucherCode}`
+                            : "Discount"
+                    ),
+            });
+        }
 
-            message:
-                "Pembayaran Buy Now berhasil dibuat.",
+        /*
+         * gross_amount dihitung langsung dari item_details
+         * yang sama - dijamin sama persis, bukan dihitung
+         * ulang dari checkout.total secara terpisah.
+         */
+        const grossAmount =
+            itemDetails.reduce(
+                (
+                    sum,
+                    item
+                ) =>
+                    sum +
+                    item.price *
+                    item.quantity,
+                0
+            );
+        const finishUrl = `${appOrigin}/checkout/payment-finish?payment=${encodeURIComponent(
+            checkout.order.orderNumber
+        )}`;
+
+        const snapPayload = {
+            transaction_details: {
+                order_id:
+                    checkout.order
+                        .orderNumber,
+
+                gross_amount:
+                    grossAmount,
+            },
+
+            item_details:
+                itemDetails,
+
+            customer_details: {
+                first_name:
+                    customerName,
+
+                phone:
+                    checkout.address
+                        .phone,
+
+                shipping_address: {
+                    first_name:
+                        customerName,
+
+                    phone:
+                        checkout.address
+                            .phone,
+
+                    address:
+                        checkout.address
+                            .address,
+
+                    city:
+                        checkout.address
+                            .city ||
+                        "",
+
+                    postal_code:
+                        checkout.address
+                            .postalCode ||
+                        "",
+
+                    country_code:
+                        "IDN",
+                },
+            },
+
+            enabled_payments:
+                enabledPayments,
+
+            callbacks: {
+                finish:
+                    finishUrl,
+            },
+
+            custom_field1:
+                checkout.order
+                    .id.toString(),
+
+            custom_field2:
+                checkout.order
+                    .paymentMethod,
+
+            custom_field3:
+                checkout.order
+                    .voucherCode ||
+                "",
+        };
+
+        const snapResponse =
+            await fetch(
+                snapUrl,
+                {
+                    method: "POST",
+
+                    headers: {
+                        Accept:
+                            "application/json",
+
+                        "Content-Type":
+                            "application/json",
+
+                        Authorization:
+                            `Basic ${authHeader}`,
+                    },
+
+                    body:
+                        JSON.stringify(
+                            snapPayload
+                        ),
+
+                    cache:
+                        "no-store",
+                }
+            );
+
+        const snapText =
+            await snapResponse.text();
+
+        let snapResult: any =
+            null;
+
+        try {
+            snapResult =
+                JSON.parse(
+                    snapText
+                );
+        } catch {
+            console.error(
+                "MIDTRANS NON JSON RESPONSE:",
+                snapText
+            );
+        }
+
+        if (
+            !snapResponse.ok ||
+            !snapResult?.token
+        ) {
+            console.error(
+                "MIDTRANS CREATE TRANSACTION ERROR:",
+                {
+                    status:
+                        snapResponse.status,
+
+                    body:
+                        snapResult ||
+                        snapText,
+                }
+            );
+
+            /*
+             * Midtrans gagal membuat transaksi.
+             *
+             * Karena DB transaction sudah commit,
+             * kita harus release stock + voucher
+             * dan cancel/delete order.
+             */
+            await prisma.$transaction(
+                async (tx) => {
+                    const order =
+                        await tx.order.findUnique(
+                            {
+                                where: {
+                                    id:
+                                        checkout
+                                            .order
+                                            .id,
+                                },
+
+                                include: {
+                                    items:
+                                        true,
+                                },
+                            }
+                        );
+
+                    if (!order) {
+                        return;
+                    }
+
+                    for (const item of order.items) {
+                        /*
+                         * variantId/productId di OrderItem
+                         * sekarang nullable (SetNull ketika
+                         * produk dihapus). Untuk order yang
+                         * baru saja dibuat di transaction ini,
+                         * keduanya pasti masih ada - tapi TS
+                         * tetap butuh narrowing eksplisit.
+                         */
+                        if (
+                            item.variantId !==
+                            null
+                        ) {
+                            await tx.productVariant.update(
+                                {
+                                    where: {
+                                        id:
+                                            item.variantId,
+                                    },
+
+                                    data: {
+                                        stock: {
+                                            increment:
+                                                item.quantity,
+                                        },
+                                    },
+                                }
+                            );
+                        }
+
+                        if (
+                            item.productId !==
+                            null
+                        ) {
+                            await tx.product.update(
+                                {
+                                    where: {
+                                        id:
+                                            item.productId,
+                                    },
+
+                                    data: {
+                                        sold: {
+                                            decrement:
+                                                item.quantity,
+                                        },
+                                    },
+                                }
+                            );
+                        }
+                    }
+
+                    if (
+                        order.voucherId
+                    ) {
+                        await tx.voucher.updateMany(
+                            {
+                                where: {
+                                    id:
+                                        order.voucherId,
+
+                                    usedCount: {
+                                        gt:
+                                            0,
+                                    },
+                                },
+
+                                data: {
+                                    usedCount:
+                                    {
+                                        decrement:
+                                            1,
+                                    },
+                                },
+                            }
+                        );
+                    }
+
+                    await tx.order.update({
+                        where: {
+                            id:
+                                order.id,
+                        },
+
+                        data: {
+                            status:
+                                "CANCELLED",
+
+                            paymentStatus:
+                                "FAILED",
+                        },
+                    });
+                }
+            );
+
+            return jsonError(
+                snapResult?.error_messages?.join(
+                    ", "
+                ) ||
+                snapResult?.status_message ||
+                "Gagal membuat transaksi Midtrans.",
+                502
+            );
+        }
+
+        /*
+         * Simpan paymentReference.
+         *
+         * Untuk Snap token, kita pakai order number
+         * sebagai reference utama.
+         */
+        const paymentReference =
+            checkout.order
+                .orderNumber;
+
+        await prisma.order.update({
+            where: {
+                id:
+                    checkout.order.id,
+            },
 
             data: {
-                orderId: order.id,
-                orderNumber,
+                paymentReference,
+            },
+        });
 
-                token: transaction.token,
+        return jsonSuccess(
+            {
+                token:
+                    snapResult.token,
 
                 redirectUrl:
-                    transaction.redirect_url,
+                    snapResult.redirect_url ||
+                    null,
 
-                paymentReference: orderNumber,
+                paymentReference,
 
-                paymentMethod,
+                orderId:
+                    checkout.order.id,
+
+                orderNumber:
+                    checkout.order
+                        .orderNumber,
 
                 grossAmount,
 
-                productId: productIdNumber,
-                variantId: variantIdNumber,
-                quantity: quantityNumber,
+                paymentMethod,
             },
-        });
-    } catch (error: any) {
+            201
+        );
+    } catch (error) {
         console.error(
-            "========== BUY NOW MIDTRANS ERROR =========="
+            "POST /api/buy-now/midtrans ERROR:",
+            error
         );
 
-        console.error(
-            "MESSAGE:",
-            error?.message
-        );
+        const message =
+            error instanceof Error
+                ? error.message
+                : "";
 
-        console.error(
-            "API RESPONSE:",
-            error?.ApiResponse
-        );
+        switch (message) {
+            case "VARIANT_NOT_FOUND":
+                return jsonError(
+                    "Variant produk tidak ditemukan.",
+                    404
+                );
 
-        const midtransMessages =
-            error?.ApiResponse
-                ?.error_messages;
+            case "VARIANT_PRODUCT_MISMATCH":
+                return jsonError(
+                    "Variant tidak sesuai dengan produk.",
+                    400
+                );
 
-        const message = Array.isArray(
-            midtransMessages
-        )
-            ? midtransMessages.join(", ")
-            : error?.ApiResponse
-                ?.status_message ||
-            error?.message ||
-            "Gagal membuat pembayaran Midtrans.";
+            case "OUT_OF_STOCK":
+                return jsonError(
+                    "Stock produk tidak mencukupi.",
+                    409
+                );
 
-        return NextResponse.json(
-            {
-                success: false,
-                message,
-            },
-            { status: 500 }
-        );
+            case "ADDRESS_NOT_FOUND":
+                return jsonError(
+                    "Alamat tidak ditemukan.",
+                    404
+                );
+
+            case "ADDRESS_DESTINATION_NOT_FOUND":
+                return jsonError(
+                    "Destination RajaOngkir alamat belum tersedia.",
+                    400
+                );
+
+            case "VOUCHER_NOT_FOUND":
+                return jsonError(
+                    "Voucher tidak ditemukan.",
+                    400
+                );
+
+            case "VOUCHER_INACTIVE":
+                return jsonError(
+                    "Voucher sedang tidak aktif.",
+                    400
+                );
+
+            case "VOUCHER_NOT_STARTED":
+                return jsonError(
+                    "Voucher belum dapat digunakan.",
+                    400
+                );
+
+            case "VOUCHER_EXPIRED":
+                return jsonError(
+                    "Voucher sudah expired.",
+                    400
+                );
+
+            case "VOUCHER_MIN_PURCHASE":
+                return jsonError(
+                    "Minimal pembelian voucher belum terpenuhi.",
+                    400
+                );
+
+            case "VOUCHER_QUOTA":
+                return jsonError(
+                    "Kuota voucher sudah habis.",
+                    400
+                );
+
+            case "INVALID_TOTAL":
+                return jsonError(
+                    "Total pembayaran tidak valid.",
+                    400
+                );
+
+            default:
+                return jsonError(
+                    "Gagal membuat pembayaran Midtrans.",
+                    500
+                );
+        }
     }
 }

@@ -167,7 +167,7 @@ export default function OrdersPage() {
     }
 
     return (
-        <main className="min-h-screen bg-gray-50">
+        <main className="min-h-screen mb-20 bg-gray-50">
             <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6">
                 <div>
                     <h1 className="text-2xl font-bold text-gray-900">

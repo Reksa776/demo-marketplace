@@ -18,7 +18,7 @@ export default function DeleteProductButton({
 
     async function handleDelete() {
         const confirmed = window.confirm(
-            `Hapus produk "${productName}"?\n\nSemua variant produk ini juga akan dihapus.`
+            `Hapus produk "${productName}"?\n\nJika produk ini punya history pesanan, produk akan diarsipkan (disembunyikan dari katalog) alih-alih dihapus permanen.`
         );
 
         if (!confirmed) {

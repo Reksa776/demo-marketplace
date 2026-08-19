@@ -649,9 +649,6 @@ export async function DELETE(
                 where: {
                     id: productId,
                 },
-                include: {
-                    variants: true,
-                },
             });
 
         if (!product) {
@@ -668,12 +665,12 @@ export async function DELETE(
         }
 
         /*
-         * Hapus product.
-         *
-         * ProductVariant akan ikut terhapus
-         * karena relation:
-         *
-         * onDelete: Cascade
+         * Product dihapus, ProductVariant ikut
+         * cascade delete. OrderItem.productId dan
+         * variantId di-set NULL otomatis (onDelete:
+         * SetNull), tapi productName/variantName/
+         * price/subtotal di OrderItem tetap utuh
+         * karena itu snapshot, bukan relasi baca-langsung.
          */
 
         await prisma.product.delete({

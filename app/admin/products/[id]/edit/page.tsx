@@ -32,7 +32,6 @@ type Product = {
 
 export default function EditProductPage() {
     const params = useParams();
-
     const router = useRouter();
 
     const id = params.id as string;
@@ -80,7 +79,7 @@ export default function EditProductPage() {
             if (!response.ok) {
                 throw new Error(
                     data.message ||
-                    "Gagal mengambil produk."
+                        "Gagal mengambil produk."
                 );
             }
 
@@ -147,9 +146,9 @@ export default function EditProductPage() {
                 (variant, variantIndex) =>
                     variantIndex === index
                         ? {
-                            ...variant,
-                            [field]: value,
-                        }
+                              ...variant,
+                              [field]: value,
+                          }
                         : variant
             )
         );
@@ -236,12 +235,13 @@ export default function EditProductPage() {
             if (!response.ok) {
                 throw new Error(
                     data.message ||
-                    "Gagal memperbarui produk."
+                        "Gagal memperbarui produk."
                 );
             }
 
             alert(
-                "Produk berhasil diperbarui."
+                data.message ||
+                    "Produk berhasil diperbarui."
             );
 
             router.push(
@@ -267,9 +267,19 @@ export default function EditProductPage() {
 
     if (loading) {
         return (
-            <main className="min-h-screen bg-gray-50 px-4 py-10">
-                <div className="mx-auto max-w-4xl text-center text-sm text-gray-500">
-                    Memuat produk...
+            <main className="min-h-screen bg-[#f7f7f8] px-4 py-8 sm:px-6">
+                <div className="mx-auto max-w-4xl">
+                    <div className="h-5 w-20 animate-pulse rounded bg-gray-200" />
+
+                    <div className="mt-5 h-7 w-40 animate-pulse rounded bg-gray-200" />
+
+                    <div className="mt-2 h-4 w-64 animate-pulse rounded bg-gray-100" />
+
+                    <div className="mt-7 space-y-4">
+                        <div className="h-72 animate-pulse rounded-xl border border-gray-200 bg-white" />
+
+                        <div className="h-64 animate-pulse rounded-xl border border-gray-200 bg-white" />
+                    </div>
                 </div>
             </main>
         );
@@ -277,18 +287,21 @@ export default function EditProductPage() {
 
     if (error && !form.name) {
         return (
-            <main className="min-h-screen bg-gray-50 px-4 py-10">
+            <main className="min-h-screen bg-[#f7f7f8] px-4 py-8 sm:px-6">
                 <div className="mx-auto max-w-4xl">
-                    <div className="rounded-2xl border border-red-100 bg-red-50 p-6 text-sm text-red-600">
+                    <div className="border-l-4 border-red-500 bg-red-50 px-4 py-3 text-sm text-red-700">
                         {error}
                     </div>
 
                     <Link
                         href="/admin/products"
-                        className="mt-5 inline-flex items-center gap-2 text-sm font-semibold text-gray-700"
+                        className="mt-5 inline-flex items-center gap-2 text-sm font-medium text-gray-600 hover:text-gray-900"
                     >
-                        <FiArrowLeft />
-                        Kembali
+                        <FiArrowLeft
+                            size={16}
+                        />
+
+                        Kembali ke Produk
                     </Link>
                 </div>
             </main>
@@ -296,54 +309,74 @@ export default function EditProductPage() {
     }
 
     return (
-        <main className="min-h-screen bg-gray-50 px-4 py-6 sm:px-6 lg:px-8">
+        <main className="min-h-screen bg-[#f7f7f8] px-4 py-7 sm:px-6 lg:px-8">
             <div className="mx-auto max-w-4xl">
+
                 {/* HEADER */}
 
-                <div className="mb-6 flex items-center gap-4">
+                <div className="mb-7">
                     <Link
                         href="/admin/products"
-                        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-600 hover:bg-gray-50"
+                        className="inline-flex items-center gap-2 text-sm text-gray-500 transition hover:text-gray-900"
                     >
                         <FiArrowLeft
-                            size={20}
+                            size={16}
                         />
+
+                        Produk
                     </Link>
 
-                    <div>
-                        <h1 className="text-2xl font-bold text-gray-900">
+                    <div className="mt-4">
+                        <h1 className="text-[22px] font-semibold tracking-tight text-gray-900 sm:text-2xl">
                             Edit Produk
                         </h1>
 
                         <p className="mt-1 text-sm text-gray-500">
-                            Perbarui informasi
-                            produk dan variant.
+                            Perbarui informasi produk
+                            dan variant yang tersedia.
                         </p>
                     </div>
                 </div>
 
                 <form
                     onSubmit={handleSubmit}
-                    className="space-y-5"
+                    className="space-y-4"
                 >
                     {/* ERROR */}
 
                     {error && (
-                        <div className="rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-600">
-                            {error}
+                        <div className="flex items-start gap-3 border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                            <span className="mt-0.5 font-semibold">
+                                !
+                            </span>
+
+                            <span>
+                                {error}
+                            </span>
                         </div>
                     )}
 
                     {/* PRODUCT INFO */}
 
-                    <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm sm:p-6">
-                        <h2 className="font-semibold text-gray-900">
-                            Informasi Produk
-                        </h2>
+                    <section className="border border-gray-200 bg-white">
+                        <div className="border-b border-gray-100 px-5 py-4 sm:px-6">
+                            <h2 className="text-sm font-semibold text-gray-900">
+                                Informasi Produk
+                            </h2>
 
-                        <div className="mt-5 grid gap-5">
+                            <p className="mt-1 text-xs text-gray-500">
+                                Informasi utama yang
+                                digunakan pada halaman
+                                produk.
+                            </p>
+                        </div>
+
+                        <div className="space-y-5 p-5 sm:p-6">
+
+                            {/* NAME */}
+
                             <div>
-                                <label className="mb-1.5 block text-sm font-medium text-gray-700">
+                                <label className="mb-1.5 block text-xs font-semibold text-gray-600">
                                     Nama Produk
                                 </label>
 
@@ -362,61 +395,76 @@ export default function EditProductPage() {
                                         )
                                     }
                                     required
-                                    className="h-11 w-full rounded-xl border border-gray-300 px-3 text-sm outline-none focus:border-rose-500"
+                                    className="h-10 w-full border border-gray-300 bg-white px-3 text-sm text-gray-900 outline-none transition placeholder:text-gray-400 focus:border-gray-900"
                                 />
                             </div>
 
-                            <div>
-                                <label className="mb-1.5 block text-sm font-medium text-gray-700">
-                                    Slug
-                                </label>
+                            {/* SLUG + CATEGORY */}
 
-                                <input
-                                    value={
-                                        form.slug
-                                    }
-                                    onChange={(e) =>
-                                        setForm(
-                                            {
-                                                ...form,
-                                                slug: e
-                                                    .target
-                                                    .value,
-                                            }
-                                        )
-                                    }
-                                    required
-                                    className="h-11 w-full rounded-xl border border-gray-300 px-3 text-sm outline-none focus:border-rose-500"
-                                />
-                            </div>
+                            <div className="grid gap-5 sm:grid-cols-2">
+                                <div>
+                                    <label className="mb-1.5 block text-xs font-semibold text-gray-600">
+                                        Slug
+                                    </label>
 
-                            <div>
-                                <label className="mb-1.5 block text-sm font-medium text-gray-700">
-                                    Kategori
-                                </label>
-
-                                <input
-                                    value={
-                                        form.category
-                                    }
-                                    onChange={(e) =>
-                                        setForm(
-                                            {
-                                                ...form,
-                                                category:
-                                                    e
+                                    <input
+                                        value={
+                                            form.slug
+                                        }
+                                        onChange={(
+                                            e
+                                        ) =>
+                                            setForm(
+                                                {
+                                                    ...form,
+                                                    slug: e
                                                         .target
                                                         .value,
-                                            }
-                                        )
-                                    }
-                                    required
-                                    className="h-11 w-full rounded-xl border border-gray-300 px-3 text-sm outline-none focus:border-rose-500"
-                                />
+                                                }
+                                            )
+                                        }
+                                        required
+                                        className="h-10 w-full border border-gray-300 bg-white px-3 text-sm text-gray-900 outline-none transition focus:border-gray-900"
+                                    />
+
+                                    <p className="mt-1.5 text-[11px] text-gray-400">
+                                        Digunakan pada
+                                        URL produk.
+                                    </p>
+                                </div>
+
+                                <div>
+                                    <label className="mb-1.5 block text-xs font-semibold text-gray-600">
+                                        Kategori
+                                    </label>
+
+                                    <input
+                                        value={
+                                            form.category
+                                        }
+                                        onChange={(
+                                            e
+                                        ) =>
+                                            setForm(
+                                                {
+                                                    ...form,
+                                                    category:
+                                                        e
+                                                            .target
+                                                            .value,
+                                                }
+                                            )
+                                        }
+                                        required
+                                        className="h-10 w-full border border-gray-300 bg-white px-3 text-sm text-gray-900 outline-none transition focus:border-gray-900"
+                                    />
+                                </div>
                             </div>
 
+                            {/* IMAGE */}
+
                             <div>
-                                <label className="mb-1.5 block text-sm font-medium text-gray-700">
+                                <label className="mb-1.5 block text-xs font-semibold text-gray-600">
                                     URL / Path Image
                                 </label>
 
@@ -435,12 +483,14 @@ export default function EditProductPage() {
                                         )
                                     }
                                     placeholder="/uploads/products/..."
-                                    className="h-11 w-full rounded-xl border border-gray-300 px-3 text-sm outline-none focus:border-rose-500"
+                                    className="h-10 w-full border border-gray-300 bg-white px-3 text-sm text-gray-900 outline-none transition placeholder:text-gray-400 focus:border-gray-900"
                                 />
                             </div>
 
+                            {/* DESCRIPTION */}
+
                             <div>
-                                <label className="mb-1.5 block text-sm font-medium text-gray-700">
+                                <label className="mb-1.5 block text-xs font-semibold text-gray-600">
                                     Deskripsi
                                 </label>
 
@@ -460,11 +510,13 @@ export default function EditProductPage() {
                                         )
                                     }
                                     rows={7}
-                                    className="w-full rounded-xl border border-gray-300 p-3 text-sm outline-none focus:border-rose-500"
+                                    className="w-full resize-y border border-gray-300 bg-white px-3 py-2.5 text-sm leading-6 text-gray-900 outline-none transition focus:border-gray-900"
                                 />
                             </div>
 
-                            <label className="flex cursor-pointer items-center gap-3">
+                            {/* BESTSELLER */}
+
+                            <label className="flex cursor-pointer items-start gap-3 border border-gray-200 px-4 py-3.5 transition hover:bg-gray-50">
                                 <input
                                     type="checkbox"
                                     checked={
@@ -481,31 +533,37 @@ export default function EditProductPage() {
                                             }
                                         )
                                     }
-                                    className="h-4 w-4 rounded border-gray-300 text-rose-600"
+                                    className="mt-0.5 h-4 w-4 rounded border-gray-300 text-rose-600 focus:ring-rose-500"
                                 />
 
-                                <span className="text-sm font-medium text-gray-700">
-                                    Tandai sebagai
-                                    Bestseller
-                                </span>
+                                <div>
+                                    <p className="text-sm font-medium text-gray-800">
+                                        Tandai sebagai
+                                        Bestseller
+                                    </p>
+
+                                    <p className="mt-0.5 text-xs text-gray-500">
+                                        Produk akan
+                                        ditampilkan sebagai
+                                        produk terlaris.
+                                    </p>
+                                </div>
                             </label>
                         </div>
                     </section>
 
                     {/* VARIANTS */}
 
-                    <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm sm:p-6">
-                        <div className="flex items-center justify-between gap-3">
+                    <section className="border border-gray-200 bg-white">
+                        <div className="flex flex-col gap-3 border-b border-gray-100 px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
                             <div>
-                                <h2 className="font-semibold text-gray-900">
+                                <h2 className="text-sm font-semibold text-gray-900">
                                     Variant
                                 </h2>
 
                                 <p className="mt-1 text-xs text-gray-500">
-                                    Berat digunakan
-                                    untuk
-                                    perhitungan
-                                    pengiriman.
+                                    Berat digunakan untuk
+                                    perhitungan pengiriman.
                                 </p>
                             </div>
 
@@ -514,174 +572,201 @@ export default function EditProductPage() {
                                 onClick={
                                     addVariant
                                 }
-                                className="flex h-10 items-center gap-2 rounded-xl bg-gray-900 px-4 text-sm font-semibold text-white hover:bg-gray-800"
+                                className="inline-flex h-9 items-center justify-center gap-2 self-start border border-gray-300 bg-white px-3 text-xs font-semibold text-gray-700 transition hover:border-gray-400 hover:bg-gray-50 sm:self-auto"
                             >
                                 <FiPlus
-                                    size={16}
+                                    size={15}
                                 />
 
-                                Variant
+                                Tambah Variant
                             </button>
                         </div>
 
-                        <div className="mt-5 space-y-4">
-                            {variants.map(
-                                (
-                                    variant,
-                                    index
-                                ) => (
-                                    <div
-                                        key={
-                                            variant.id ??
-                                            `new-${index}`
-                                        }
-                                        className="rounded-2xl border border-gray-200 bg-gray-50 p-4"
-                                    >
-                                        <div className="mb-4 flex items-center justify-between">
-                                            <p className="text-sm font-semibold text-gray-800">
-                                                Variant{" "}
-                                                {index +
-                                                    1}
-                                            </p>
+                        <div className="p-5 sm:p-6">
+                            <div className="space-y-3">
+                                {variants.map(
+                                    (
+                                        variant,
+                                        index
+                                    ) => (
+                                        <div
+                                            key={
+                                                variant.id ??
+                                                `new-${index}`
+                                            }
+                                            className="border border-gray-200"
+                                        >
+                                            <div className="flex items-center justify-between border-b border-gray-100 bg-gray-50/60 px-4 py-3">
+                                                <div className="flex items-center gap-2">
+                                                    <span className="text-xs font-semibold text-gray-900">
+                                                        Variant{" "}
+                                                        {index +
+                                                            1}
+                                                    </span>
 
-                                            <button
-                                                type="button"
-                                                onClick={() =>
-                                                    removeVariant(
-                                                        index
-                                                    )
-                                                }
-                                                className="flex h-8 w-8 items-center justify-center rounded-lg text-red-500 hover:bg-red-50"
-                                            >
-                                                <FiTrash2
-                                                    size={
-                                                        16
+                                                    {variant.id && (
+                                                        <span className="text-[10px] text-gray-400">
+                                                            ID #
+                                                            {
+                                                                variant.id
+                                                            }
+                                                        </span>
+                                                    )}
+                                                </div>
+
+                                                <button
+                                                    type="button"
+                                                    onClick={() =>
+                                                        removeVariant(
+                                                            index
+                                                        )
                                                     }
-                                                />
-                                            </button>
+                                                    className="inline-flex h-7 w-7 items-center justify-center text-gray-400 transition hover:bg-red-50 hover:text-red-600"
+                                                    title="Hapus variant"
+                                                >
+                                                    <FiTrash2
+                                                        size={
+                                                            15
+                                                        }
+                                                    />
+                                                </button>
+                                            </div>
+
+                                            <div className="grid gap-4 p-4 sm:grid-cols-2 lg:grid-cols-4">
+                                                {/* NAME */}
+
+                                                <div>
+                                                    <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+                                                        Nama
+                                                    </label>
+
+                                                    <input
+                                                        value={
+                                                            variant.name
+                                                        }
+                                                        onChange={(
+                                                            e
+                                                        ) =>
+                                                            updateVariant(
+                                                                index,
+                                                                "name",
+                                                                e
+                                                                    .target
+                                                                    .value
+                                                            )
+                                                        }
+                                                        required
+                                                        className="h-10 w-full border border-gray-300 bg-white px-3 text-sm outline-none transition focus:border-gray-900"
+                                                    />
+                                                </div>
+
+                                                {/* PRICE */}
+
+                                                <div>
+                                                    <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+                                                        Harga
+                                                    </label>
+
+                                                    <input
+                                                        type="number"
+                                                        min="1"
+                                                        max="9999999999"
+                                                        value={
+                                                            variant.price
+                                                        }
+                                                        onChange={(
+                                                            e
+                                                        ) =>
+                                                            updateVariant(
+                                                                index,
+                                                                "price",
+                                                                e
+                                                                    .target
+                                                                    .value
+                                                            )
+                                                        }
+                                                        required
+                                                        className="h-10 w-full border border-gray-300 bg-white px-3 text-sm outline-none transition focus:border-gray-900"
+                                                    />
+                                                </div>
+
+                                                {/* STOCK */}
+
+                                                <div>
+                                                    <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+                                                        Stok
+                                                    </label>
+
+                                                    <input
+                                                        type="number"
+                                                        min="0"
+                                                        value={
+                                                            variant.stock
+                                                        }
+                                                        onChange={(
+                                                            e
+                                                        ) =>
+                                                            updateVariant(
+                                                                index,
+                                                                "stock",
+                                                                e
+                                                                    .target
+                                                                    .value
+                                                            )
+                                                        }
+                                                        required
+                                                        className="h-10 w-full border border-gray-300 bg-white px-3 text-sm outline-none transition focus:border-gray-900"
+                                                    />
+                                                </div>
+
+                                                {/* WEIGHT */}
+
+                                                <div>
+                                                    <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+                                                        Berat
+                                                    </label>
+
+                                                    <div className="relative">
+                                                        <input
+                                                            type="number"
+                                                            min="1"
+                                                            value={
+                                                                variant.weight
+                                                            }
+                                                            onChange={(
+                                                                e
+                                                            ) =>
+                                                                updateVariant(
+                                                                    index,
+                                                                    "weight",
+                                                                    e
+                                                                        .target
+                                                                        .value
+                                                                )
+                                                            }
+                                                            required
+                                                            className="h-10 w-full border border-gray-300 bg-white px-3 pr-14 text-sm outline-none transition focus:border-gray-900"
+                                                        />
+
+                                                        <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[11px] text-gray-400">
+                                                            gram
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                            </div>
                                         </div>
-
-                                        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                                            <div>
-                                                <label className="mb-1.5 block text-xs font-medium text-gray-600">
-                                                    Nama
-                                                </label>
-
-                                                <input
-                                                    value={
-                                                        variant.name
-                                                    }
-                                                    onChange={(
-                                                        e
-                                                    ) =>
-                                                        updateVariant(
-                                                            index,
-                                                            "name",
-                                                            e
-                                                                .target
-                                                                .value
-                                                        )
-                                                    }
-                                                    required
-                                                    className="h-10 w-full rounded-xl border border-gray-300 bg-white px-3 text-sm outline-none focus:border-rose-500"
-                                                />
-                                            </div>
-
-                                            <div>
-                                                <label className="mb-1.5 block text-xs font-medium text-gray-600">
-                                                    Harga
-                                                </label>
-
-                                                <input
-                                                    type="number"
-                                                    min="1"
-                                                    max="9999999999"
-                                                    value={
-                                                        variant.price
-                                                    }
-                                                    onChange={(
-                                                        e
-                                                    ) =>
-                                                        updateVariant(
-                                                            index,
-                                                            "price",
-                                                            e
-                                                                .target
-                                                                .value
-                                                        )
-                                                    }
-                                                    required
-                                                    className="h-10 w-full rounded-xl border border-gray-300 bg-white px-3 text-sm outline-none focus:border-rose-500"
-                                                />
-                                            </div>
-
-                                            <div>
-                                                <label className="mb-1.5 block text-xs font-medium text-gray-600">
-                                                    Stok
-                                                </label>
-
-                                                <input
-                                                    type="number"
-                                                    min="0"
-                                                    value={
-                                                        variant.stock
-                                                    }
-                                                    onChange={(
-                                                        e
-                                                    ) =>
-                                                        updateVariant(
-                                                            index,
-                                                            "stock",
-                                                            e
-                                                                .target
-                                                                .value
-                                                        )
-                                                    }
-                                                    required
-                                                    className="h-10 w-full rounded-xl border border-gray-300 bg-white px-3 text-sm outline-none focus:border-rose-500"
-                                                />
-                                            </div>
-
-                                            <div>
-                                                <label className="mb-1.5 block text-xs font-medium text-gray-600">
-                                                    Berat
-                                                    (gram)
-                                                </label>
-
-                                                <input
-                                                    type="number"
-                                                    min="1"
-                                                    value={
-                                                        variant.weight
-                                                    }
-                                                    onChange={(
-                                                        e
-                                                    ) =>
-                                                        updateVariant(
-                                                            index,
-                                                            "weight",
-                                                            e
-                                                                .target
-                                                                .value
-                                                        )
-                                                    }
-                                                    required
-                                                    className="h-10 w-full rounded-xl border border-gray-300 bg-white px-3 text-sm outline-none focus:border-rose-500"
-                                                />
-                                            </div>
-                                        </div>
-                                    </div>
-                                )
-                            )}
+                                    )
+                                )}
+                            </div>
                         </div>
                     </section>
 
                     {/* ACTION */}
 
-                    <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+                    <div className="flex flex-col-reverse gap-2 border-t border-gray-200 pt-5 sm:flex-row sm:justify-end">
                         <Link
                             href="/admin/products"
-                            className="flex h-11 items-center justify-center rounded-xl border border-gray-300 bg-white px-5 text-sm font-semibold text-gray-700 hover:bg-gray-50"
+                            className="flex h-10 items-center justify-center border border-gray-300 bg-white px-5 text-sm font-medium text-gray-700 transition hover:bg-gray-50"
                         >
                             Batal
                         </Link>
@@ -689,10 +774,10 @@ export default function EditProductPage() {
                         <button
                             type="submit"
                             disabled={saving}
-                            className="flex h-11 items-center justify-center gap-2 rounded-xl bg-rose-600 px-6 text-sm font-semibold text-white hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-50"
+                            className="flex h-10 items-center justify-center gap-2 bg-gray-900 px-5 text-sm font-semibold text-white transition hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
                         >
                             <FiSave
-                                size={17}
+                                size={16}
                             />
 
                             {saving
