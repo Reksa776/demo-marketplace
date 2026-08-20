@@ -213,6 +213,9 @@ export async function PUT(
                     address:
                         body.address?.trim() ||
                         "",
+                    tiktokPixelId:
+                        body.tiktokPixelId?.trim() ||
+                        null,
 
                     provinceId,
 
@@ -288,6 +291,9 @@ export async function PUT(
                     address:
                         body.address?.trim() ||
                         "",
+                    tiktokPixelId:
+                        body.tiktokPixelId?.trim() ||
+                        null,
 
                     provinceId,
 

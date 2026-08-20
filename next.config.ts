@@ -5,7 +5,7 @@ const nextConfig: NextConfig = {
         "192.168.2.49",
         "202.73.25.122",
         "demosolusisejalan.my.id",
-        "94cb-2401-e320-506-9110-9-faed-bae9-244b.ngrok-free.app",
+        "pmc-constitutional-manager-articles.trycloudflare.com",
     ],
     images: {
         remotePatterns: [
@@ -15,6 +15,24 @@ const nextConfig: NextConfig = {
             },
         ],
     },
+    /**
+     * Server-only external packages.
+     *
+     * These packages are NOT bundled by Turbopack/
+     * webpack on the server side. They are resolved
+     * at runtime from node_modules.
+     *
+     * Baileys must be externalized because:
+     * 1. It pulls in jimp (image processing) which
+     *    Turbopack cannot resolve
+     * 2. It has native/optional dependencies that
+     *    should not be bundled
+     * 3. We only use text messaging — no media deps
+     *    needed at bundle time
+     */
+    serverExternalPackages: [
+        "@whiskeysockets/baileys",
+    ],
 };
 
 export default nextConfig;

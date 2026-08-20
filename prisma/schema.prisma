@@ -26,6 +26,7 @@ model User {
   orders        Order[]
   sessions      Session[]
   addresses     UserAddress[]
+  notifications  Notification[]
 }
 
 model Account {
@@ -198,6 +199,7 @@ model Order {
   trackingUrl      String?
   user             User                @relation(fields: [userId], references: [id], onDelete: Cascade)
   items            OrderItem[]
+  notifications    Notification[]
 
   @@index([userId])
   @@index([status])
@@ -232,6 +234,10 @@ model StoreSetting {
   email                   String?
   phone                   String?
   address                 String   @db.Text
+
+  // TikTok Pixel
+  tiktokPixelId           String?
+
   province                String?
   city                    String?
   district                String?
@@ -349,6 +355,7 @@ model Voucher {
   @@index([isActive])
 }
 
+
 enum Voucher_type {
   PERCENTAGE
   FIXED
@@ -384,4 +391,39 @@ enum Order_paymentMethod {
   BANK_TRANSFER
   E_WALLET
   QRIS
+}
+
+enum Notification_status {
+  QUEUED
+  PROCESSING
+  SENT
+  FAILED
+}
+
+model Notification {
+  id                Int                  @id @default(autoincrement())
+  orderId           Int?
+  userId            String?
+  channel           String
+  notificationType  String
+  recipient         String
+  idempotencyKey    String               @unique
+  providerMessageId String?
+  payload           String?              @db.Text
+  status            Notification_status  @default(QUEUED)
+  errorCode         String?
+  errorMessage      String?              @db.Text
+  retryCount        Int                  @default(0)
+  maxRetries        Int                  @default(3)
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+
+  order Order? @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  user  User?  @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([orderId])
+  @@index([userId])
+  @@index([status])
+  @@index([channel])
+  @@index([notificationType])
 }

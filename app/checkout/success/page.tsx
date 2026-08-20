@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import PurchaseTracker from "@/components/analytics/PurchaseTracker";
 
 export default async function CheckoutSuccessPage({
     searchParams,
@@ -103,6 +104,17 @@ export default async function CheckoutSuccessPage({
 
     return (
         <main className="min-h-screen bg-gray-50 px-4 py-10">
+            <PurchaseTracker
+                orderId={order.orderNumber}
+                total={Number(order.total)}
+                contents={order.items.map((item) => ({
+                    content_id: String(item.productId ?? item.id),
+                    content_type: "product",
+                    content_name: item.productName,
+                    quantity: item.quantity,
+                    price: Number(item.price),
+                }))}
+            />
             <div className="mx-auto max-w-3xl">
                 <div className="rounded-2xl bg-white p-6 shadow-sm md:p-8">
                     {/* SUCCESS */}

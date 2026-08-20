@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import Image from "next/image";
 import { useEffect, useState } from "react";
 import {
     FiArrowLeft,
@@ -57,7 +56,7 @@ export default function CartPage() {
             if (!response.ok) {
                 toast.error(
                     data.message ??
-                        "Gagal mengambil keranjang."
+                    "Gagal mengambil keranjang."
                 );
 
                 return;
@@ -114,7 +113,7 @@ export default function CartPage() {
             if (!response.ok) {
                 toast.error(
                     data.message ??
-                        "Gagal memperbarui keranjang."
+                    "Gagal memperbarui keranjang."
                 );
 
                 return;
@@ -152,7 +151,7 @@ export default function CartPage() {
             if (!response.ok) {
                 toast.error(
                     data.message ??
-                        "Gagal menghapus produk."
+                    "Gagal menghapus produk."
                 );
 
                 return;
@@ -203,7 +202,7 @@ export default function CartPage() {
             return (
                 total +
                 Number(item.variant.price) *
-                    item.quantity
+                item.quantity
             );
         },
         0
@@ -290,23 +289,15 @@ export default function CartPage() {
                                         {/* IMAGE */}
                                         <div className="relative h-24 w-24 shrink-0 overflow-hidden rounded-xl bg-gray-100">
                                             {image ? (
-                                                <Image
+                                                <img
                                                     src={image}
-                                                    alt={
-                                                        item.product
-                                                            .name
-                                                    }
-                                                    fill
-                                                    className="object-cover"
-                                                    sizes="96px"
+                                                    alt={item.product.name}
+                                                    className="h-full w-full object-cover"
+                                                    loading="lazy"
                                                 />
                                             ) : (
                                                 <div className="flex h-full items-center justify-center text-gray-400">
-                                                    <FiShoppingBag
-                                                        size={
-                                                            28
-                                                        }
-                                                    />
+                                                    <FiShoppingBag size={28} />
                                                 </div>
                                             )}
                                         </div>
@@ -372,15 +363,15 @@ export default function CartPage() {
                                                         type="button"
                                                         disabled={
                                                             item.quantity <=
-                                                                1 ||
+                                                            1 ||
                                                             updatingId ===
-                                                                item.id
+                                                            item.id
                                                         }
                                                         onClick={() =>
                                                             updateQuantity(
                                                                 item,
                                                                 item.quantity -
-                                                                    1
+                                                                1
                                                             )
                                                         }
                                                         className="flex h-9 w-9 items-center justify-center text-gray-600 transition hover:bg-gray-50 disabled:opacity-30"
@@ -402,16 +393,16 @@ export default function CartPage() {
                                                         type="button"
                                                         disabled={
                                                             item.quantity >=
-                                                                item.variant
-                                                                    .stock ||
+                                                            item.variant
+                                                                .stock ||
                                                             updatingId ===
-                                                                item.id
+                                                            item.id
                                                         }
                                                         onClick={() =>
                                                             updateQuantity(
                                                                 item,
                                                                 item.quantity +
-                                                                    1
+                                                                1
                                                             )
                                                         }
                                                         className="flex h-9 w-9 items-center justify-center text-gray-600 transition hover:bg-gray-50 disabled:opacity-30"

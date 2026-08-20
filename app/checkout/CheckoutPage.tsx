@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import toast from "react-hot-toast";
+import { trackTikTokEvent } from "@/lib/analytics/tiktok";
 
 type Address = {
     id: string;
@@ -257,6 +258,33 @@ export default function CheckoutPage() {
             emptyAddressForm
         );
 
+
+    /*
+     * ==========================================
+     * TIKTOK PIXEL - INITIATE CHECKOUT
+     * ==========================================
+     *
+     * Fire when checkout data is loaded
+     * (items available).
+     */
+    useEffect(() => {
+        if (!data || data.items.length === 0) {
+            return;
+        }
+
+        trackTikTokEvent("InitiateCheckout", {
+            value: data.subtotal,
+            currency: "IDR",
+            contents: data.items.map((item) => ({
+                content_id: String(item.productId),
+                content_type: "product",
+                content_name: item.productName,
+                quantity: item.quantity,
+                price: item.price,
+            })),
+            num_items: data.items.length,
+        });
+    }, [data]);
 
     /*
      * ==========================================
@@ -1413,6 +1441,26 @@ export default function CheckoutPage() {
             return;
         }
 
+        /*
+         * ==========================================
+         * TIKTOK PIXEL - ADD PAYMENT INFO
+         * ==========================================
+         *
+         * Fire when user submits order.
+         */
+        trackTikTokEvent("AddPaymentInfo", {
+            value: grandTotal,
+            currency: "IDR",
+            payment_method: paymentMethod,
+            contents: data?.items.map((item) => ({
+                content_id: String(item.productId),
+                content_type: "product",
+                content_name: item.productName,
+                quantity: item.quantity,
+                price: item.price,
+            })) ?? [],
+        });
+
         try {
             setCreatingOrder(true);
 
@@ -1737,6 +1785,91 @@ export default function CheckoutPage() {
                 <div className="grid gap-6 lg:grid-cols-[1fr_380px]">
 
                     <div className="space-y-6">
+                        {/* ================================= */}
+                        {/* PRODUCTS */}
+                        {/* ================================= */}
+
+                        <section className="rounded-3xl border border-gray-200 bg-white p-6">
+
+                            <h2 className="text-lg font-bold">
+                                Produk
+                            </h2>
+
+                            <div className="mt-5 divide-y">
+
+                                {data.items.map(
+                                    (item) => (
+                                        <div
+                                            key={
+                                                item.id
+                                            }
+                                            className="flex gap-4 py-4 first:pt-0 last:pb-0"
+                                        >
+
+                                            <div className="h-20 w-20 shrink-0 overflow-hidden rounded-xl bg-gray-100">
+
+                                                {item.image && (
+                                                    <img
+                                                        src={
+                                                            item.image
+                                                        }
+                                                        alt={
+                                                            item.productName
+                                                        }
+                                                        className="h-full w-full object-cover"
+                                                    />
+                                                )}
+
+                                            </div>
+
+                                            <div className="min-w-0 flex-1">
+
+                                                <h3 className="font-semibold">
+                                                    {
+                                                        item.productName
+                                                    }
+                                                </h3>
+
+                                                <p className="mt-1 text-sm text-gray-500">
+                                                    {
+                                                        item.variantName
+                                                    }
+                                                </p>
+
+                                                <p className="mt-2 text-sm">
+                                                    {
+                                                        item.quantity
+                                                    }{" "}
+                                                    × Rp{" "}
+                                                    {item.price.toLocaleString(
+                                                        "id-ID"
+                                                    )}
+                                                </p>
+
+                                                <p className="mt-1 text-xs text-gray-400">
+                                                    Berat:{" "}
+                                                    {item.weight.toLocaleString(
+                                                        "id-ID"
+                                                    )}{" "}
+                                                    gram
+                                                </p>
+
+                                            </div>
+
+                                            <div className="font-semibold">
+                                                Rp{" "}
+                                                {item.subtotal.toLocaleString(
+                                                    "id-ID"
+                                                )}
+                                            </div>
+
+                                        </div>
+                                    )
+                                )}
+
+                            </div>
+
+                        </section>
 
                         {/* ================================= */}
                         {/* ADDRESS */}
@@ -2312,109 +2445,8 @@ export default function CheckoutPage() {
                                 </div>
                             )}
 
+
                         </section>
-                        <div className="space-y-3">
-                            <h3 className="text-lg font-semibold">
-                                Metode Pembayaran
-                            </h3>
-
-                            {/* COD */}
-                            <label className="flex cursor-pointer items-center gap-3 rounded-lg border p-4">
-                                <input
-                                    type="radio"
-                                    name="paymentMethod"
-                                    value="COD"
-                                    checked={paymentMethod === "COD"}
-                                    onChange={() => setPaymentMethod("COD")}
-                                />
-
-                                <div>
-                                    <div className="font-medium">
-                                        COD
-                                    </div>
-
-                                    <div className="text-sm text-gray-500">
-                                        Bayar ketika pesanan diterima
-                                    </div>
-                                </div>
-                            </label>
-
-                            {/* BANK TRANSFER */}
-                            <label className="flex cursor-pointer items-center gap-3 rounded-lg border p-4">
-                                <input
-                                    type="radio"
-                                    name="paymentMethod"
-                                    value="BANK_TRANSFER"
-                                    checked={
-                                        paymentMethod === "BANK_TRANSFER"
-                                    }
-                                    onChange={() =>
-                                        setPaymentMethod("BANK_TRANSFER")
-                                    }
-                                />
-
-                                <div>
-                                    <div className="font-medium">
-                                        Bank Transfer
-                                    </div>
-
-                                    <div className="text-sm text-gray-500">
-                                        Pembayaran melalui Midtrans
-                                    </div>
-                                </div>
-                            </label>
-
-                            {/* E-WALLET */}
-                            <label className="flex cursor-pointer items-center gap-3 rounded-lg border p-4">
-                                <input
-                                    type="radio"
-                                    name="paymentMethod"
-                                    value="E_WALLET"
-                                    checked={
-                                        paymentMethod === "E_WALLET"
-                                    }
-                                    onChange={() =>
-                                        setPaymentMethod("E_WALLET")
-                                    }
-                                />
-
-                                <div>
-                                    <div className="font-medium">
-                                        E-Wallet
-                                    </div>
-
-                                    <div className="text-sm text-gray-500">
-                                        GoPay / ShopeePay melalui Midtrans
-                                    </div>
-                                </div>
-                            </label>
-
-                            {/* QRIS */}
-                            <label className="flex cursor-pointer items-center gap-3 rounded-lg border p-4">
-                                <input
-                                    type="radio"
-                                    name="paymentMethod"
-                                    value="QRIS"
-                                    checked={
-                                        paymentMethod === "QRIS"
-                                    }
-                                    onChange={() =>
-                                        setPaymentMethod("QRIS")
-                                    }
-                                />
-
-                                <div>
-                                    <div className="font-medium">
-                                        QRIS
-                                    </div>
-
-                                    <div className="text-sm text-gray-500">
-                                        Bayar menggunakan QRIS melalui Midtrans
-                                    </div>
-                                </div>
-                            </label>
-                        </div>
-
                         {/* ================================= */}
                         {/* SHIPPING */}
                         {/* ================================= */}
@@ -2566,92 +2598,111 @@ export default function CheckoutPage() {
                                 )}
 
                         </section>
+                        <div className="space-y-3">
+                            <h3 className="text-lg font-semibold">
+                                Metode Pembayaran
+                            </h3>
 
-                        {/* ================================= */}
-                        {/* PRODUCTS */}
-                        {/* ================================= */}
+                            {/* COD */}
+                            <label className="flex cursor-pointer items-center gap-3 rounded-lg border p-4">
+                                <input
+                                    type="radio"
+                                    name="paymentMethod"
+                                    value="COD"
+                                    checked={paymentMethod === "COD"}
+                                    onChange={() => setPaymentMethod("COD")}
+                                />
 
-                        <section className="rounded-3xl border border-gray-200 bg-white p-6">
+                                <div>
+                                    <div className="font-medium">
+                                        COD
+                                    </div>
 
-                            <h2 className="text-lg font-bold">
-                                Produk
-                            </h2>
+                                    <div className="text-sm text-gray-500">
+                                        Bayar ketika pesanan diterima
+                                    </div>
+                                </div>
+                            </label>
 
-                            <div className="mt-5 divide-y">
+                            {/* BANK TRANSFER */}
+                            <label className="flex cursor-pointer items-center gap-3 rounded-lg border p-4">
+                                <input
+                                    type="radio"
+                                    name="paymentMethod"
+                                    value="BANK_TRANSFER"
+                                    checked={
+                                        paymentMethod === "BANK_TRANSFER"
+                                    }
+                                    onChange={() =>
+                                        setPaymentMethod("BANK_TRANSFER")
+                                    }
+                                />
 
-                                {data.items.map(
-                                    (item) => (
-                                        <div
-                                            key={
-                                                item.id
-                                            }
-                                            className="flex gap-4 py-4 first:pt-0 last:pb-0"
-                                        >
+                                <div>
+                                    <div className="font-medium">
+                                        Bank Transfer
+                                    </div>
 
-                                            <div className="h-20 w-20 shrink-0 overflow-hidden rounded-xl bg-gray-100">
+                                    <div className="text-sm text-gray-500">
+                                        Pembayaran melalui Midtrans
+                                    </div>
+                                </div>
+                            </label>
 
-                                                {item.image && (
-                                                    <img
-                                                        src={
-                                                            item.image
-                                                        }
-                                                        alt={
-                                                            item.productName
-                                                        }
-                                                        className="h-full w-full object-cover"
-                                                    />
-                                                )}
+                            {/* E-WALLET */}
+                            <label className="flex cursor-pointer items-center gap-3 rounded-lg border p-4">
+                                <input
+                                    type="radio"
+                                    name="paymentMethod"
+                                    value="E_WALLET"
+                                    checked={
+                                        paymentMethod === "E_WALLET"
+                                    }
+                                    onChange={() =>
+                                        setPaymentMethod("E_WALLET")
+                                    }
+                                />
 
-                                            </div>
+                                <div>
+                                    <div className="font-medium">
+                                        E-Wallet
+                                    </div>
 
-                                            <div className="min-w-0 flex-1">
+                                    <div className="text-sm text-gray-500">
+                                        GoPay / ShopeePay melalui Midtrans
+                                    </div>
+                                </div>
+                            </label>
 
-                                                <h3 className="font-semibold">
-                                                    {
-                                                        item.productName
-                                                    }
-                                                </h3>
+                            {/* QRIS */}
+                            <label className="flex cursor-pointer items-center gap-3 rounded-lg border p-4">
+                                <input
+                                    type="radio"
+                                    name="paymentMethod"
+                                    value="QRIS"
+                                    checked={
+                                        paymentMethod === "QRIS"
+                                    }
+                                    onChange={() =>
+                                        setPaymentMethod("QRIS")
+                                    }
+                                />
 
-                                                <p className="mt-1 text-sm text-gray-500">
-                                                    {
-                                                        item.variantName
-                                                    }
-                                                </p>
+                                <div>
+                                    <div className="font-medium">
+                                        QRIS
+                                    </div>
 
-                                                <p className="mt-2 text-sm">
-                                                    {
-                                                        item.quantity
-                                                    }{" "}
-                                                    × Rp{" "}
-                                                    {item.price.toLocaleString(
-                                                        "id-ID"
-                                                    )}
-                                                </p>
+                                    <div className="text-sm text-gray-500">
+                                        Bayar menggunakan QRIS melalui Midtrans
+                                    </div>
+                                </div>
+                            </label>
+                        </div>
 
-                                                <p className="mt-1 text-xs text-gray-400">
-                                                    Berat:{" "}
-                                                    {item.weight.toLocaleString(
-                                                        "id-ID"
-                                                    )}{" "}
-                                                    gram
-                                                </p>
 
-                                            </div>
 
-                                            <div className="font-semibold">
-                                                Rp{" "}
-                                                {item.subtotal.toLocaleString(
-                                                    "id-ID"
-                                                )}
-                                            </div>
 
-                                        </div>
-                                    )
-                                )}
-
-                            </div>
-
-                        </section>
 
                     </div>
 

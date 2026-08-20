@@ -66,7 +66,7 @@ export default async function ProductDetailPage({
         bestseller: product.bestseller,
 
         variants: product.variants.map(
-            (variant) => ({
+            (variant: { id: any; name: any; price: any; stock: any; image: any; }) => ({
                 id: variant.id,
                 name: variant.name,
                 price: Number(

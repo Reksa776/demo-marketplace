@@ -2,6 +2,7 @@ import "./globals.css";
 
 import { Toaster } from "react-hot-toast";
 import AuthProvider from "@/components/providers/AuthProvider";
+import AnalyticsProvider from "@/components/analytics/AnalyticsProvider";
 import Script from "next/script";
 
 export default function RootLayout({
@@ -14,6 +15,7 @@ export default function RootLayout({
       <body>
 
         <AuthProvider>
+          <AnalyticsProvider />
 
           {children}
 
@@ -34,7 +36,7 @@ export default function RootLayout({
             ? "https://app.midtrans.com/snap/snap.js"
             : "https://app.sandbox.midtrans.com/snap/snap.js"
         }
-        data-client-key={ 
+        data-client-key={
           process.env.NEXT_PUBLIC_MIDTRANS_CLIENT_KEY
         }
         strategy="afterInteractive"

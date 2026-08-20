@@ -20,6 +20,8 @@ type StoreForm = {
     logo: string;
     address: string;
 
+    tiktokPixelId: string;
+
     provinceId: number | null;
     province: string;
 
@@ -47,6 +49,8 @@ const initialForm: StoreForm = {
     email: "",
     logo: "",
     address: "",
+
+    tiktokPixelId: "",
 
     provinceId: null,
     province: "",
@@ -372,6 +376,8 @@ export default function AdminSettingsForm() {
 
                 address:
                     data.data.address ?? "",
+                tiktokPixelId:
+                    data.data.tiktokPixelId ?? "",
 
                 provinceId:
                     data.data.provinceId ?? null,
@@ -971,6 +977,49 @@ export default function AdminSettingsForm() {
                                     placeholder="email@toko.com"
                                 />
                             </div>
+                        </div>
+                    </section>
+
+                    {/* =====================
+    TRACKING & PIXEL
+====================== */}
+
+                    <section className="rounded-3xl border border-gray-200 bg-white p-6 shadow-sm">
+                        <h2 className="text-lg font-bold text-gray-900">
+                            Tracking & Pixel
+                        </h2>
+
+                        <p className="mt-1 text-sm text-gray-500">
+                            Masukkan TikTok Pixel ID untuk melacak
+                            aktivitas pengunjung dan pembelian dari
+                            TikTok Ads.
+                        </p>
+
+                        <div className="mt-5">
+                            <label className="text-sm font-medium text-gray-700">
+                                TikTok Pixel ID
+                            </label>
+
+                            <input
+                                type="text"
+                                value={form.tiktokPixelId}
+                                onChange={(e) =>
+                                    updateField(
+                                        "tiktokPixelId",
+                                        e.target.value.trim()
+                                    )
+                                }
+                                className="mt-2 w-full rounded-xl border border-gray-300 px-4 py-3 font-mono text-sm outline-none transition focus:border-rose-500"
+                                placeholder="Contoh: DA2N6IBC77U575JEFETG"
+                            />
+
+                            <p className="mt-2 text-xs text-gray-500">
+                                Contoh Pixel ID:
+                                {" "}
+                                <span className="font-mono">
+                                    DA2N6IBC77U575JEFETG
+                                </span>
+                            </p>
                         </div>
                     </section>
 

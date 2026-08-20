@@ -443,6 +443,8 @@ export async function PATCH(
             trackingUrl = null;
         }
 
+        const previousStatus = order.status;
+
         const updatedOrder =
             await prisma.order.update({
                 where: {
@@ -462,6 +464,33 @@ export async function PATCH(
                     trackingUrl,
                 },
             });
+
+        /*
+         * ==========================================
+         * NOTIFICATION TRIGGER
+         * ==========================================
+         *
+         * Fire-and-forget.
+         * Notification error tidak boleh
+         * mempengaruhi response ke admin.
+         */
+        if (previousStatus !== status) {
+            const { onOrderStatusChanged } =
+                await import(
+                    "@/lib/notification/order-status-handler"
+                );
+
+            onOrderStatusChanged(
+                orderId,
+                previousStatus,
+                status
+            ).catch((err) =>
+                console.error(
+                    "NOTIFICATION TRIGGER ERROR:",
+                    err
+                )
+            );
+        }
 
         return NextResponse.json({
             success: true,

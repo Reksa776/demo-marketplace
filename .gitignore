@@ -4,3 +4,6 @@ node_modules/
 .env.local
 .env.production
 npm-debug.log*
+
+# WhatsApp auth state
+data/whatsapp-auth/

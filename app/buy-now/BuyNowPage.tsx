@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import toast from "react-hot-toast";
+import { trackTikTokEvent } from "@/lib/analytics/tiktok";
 
 /*
  * =========================================================
@@ -1462,6 +1463,33 @@ export default function BuyNowPage({
 
     /*
      * =====================================================
+     * TIKTOK PIXEL - INITIATE CHECKOUT
+     * =====================================================
+     *
+     * Fire when buy-now data is loaded
+     * (product + variant available).
+     */
+    useEffect(() => {
+        if (!data) {
+            return;
+        }
+
+        trackTikTokEvent("InitiateCheckout", {
+            value: data.subtotal,
+            currency: "IDR",
+            contents: [{
+                content_id: String(data.product.id),
+                content_type: "product",
+                content_name: data.product.name,
+                quantity: data.quantity,
+                price: data.variant.price,
+            }],
+            num_items: 1,
+        });
+    }, [data]);
+
+    /*
+     * =====================================================
      * SAVE ADDRESS
      * =====================================================
      */
@@ -2573,6 +2601,26 @@ export default function BuyNowPage({
         ) {
             return;
         }
+
+        /*
+         * =====================================================
+         * TIKTOK PIXEL - ADD PAYMENT INFO
+         * =====================================================
+         *
+         * Fire when user submits buy-now order.
+         */
+        trackTikTokEvent("AddPaymentInfo", {
+            value: grandTotal,
+            currency: "IDR",
+            payment_method: paymentMethod,
+            contents: [{
+                content_id: String(data.product.id),
+                content_type: "product",
+                content_name: data.product.name,
+                quantity: data.quantity,
+                price: data.variant.price,
+            }],
+        });
 
         if (
             paymentMethod ===

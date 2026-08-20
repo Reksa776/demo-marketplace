@@ -14,6 +14,7 @@ import {
     FiX,
     FiFileText,
     FiTag,
+    FiMessageCircle,
 } from "react-icons/fi";
 import { useState } from "react";
 
@@ -47,6 +48,11 @@ const menuItems = [
         label: "Pengguna",
         href: "/admin/users",
         icon: FiUsers,
+    },
+    {
+        label: "WhatsApp",
+        href: "/admin/whatsapp",
+        icon: FiMessageCircle,
     },
     {
         label: "Pengaturan",

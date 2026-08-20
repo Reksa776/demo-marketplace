@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
+import { trackTikTokEvent } from "@/lib/analytics/tiktok";
 
 type OrderStatus = {
     id: number;
@@ -148,17 +149,35 @@ export default function PaymentFinishContent() {
                 </div>
             </main>
         );
-    }
-
-    const isPaid =
+    }    const isPaid =
         order?.paymentStatus === "PAID";
 
     const isFailed =
-        order?.paymentStatus === "FAILED" ||
-        order?.paymentStatus === "EXPIRED";
+        order?.paymentStatus === "FAILED" || order?.paymentStatus === "EXPIRED";
 
-    const isPending =
-        !isPaid && !isFailed;
+    const isPending = !isPaid && !isFailed;
+
+    /*
+     * ==========================================
+     * TIKTOK PIXEL - COMPLETE PAYMENT
+     * ==========================================
+     *
+     * Fire when payment is confirmed as PAID.
+     * Only fires once when isPaid first becomes
+     * true (tracked via order.id dependency).
+     */
+    useEffect(() => {
+        if (!isPaid || !order) {
+            return;
+        }
+
+        trackTikTokEvent("CompletePayment", {
+            content_id: order.orderNumber,
+            value: order.total,
+            currency: "IDR",
+            contents: [],
+        });
+    }, [isPaid, order]);
 
     return (
         <main className="min-h-screen bg-gray-50 px-4 py-8">

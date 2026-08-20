@@ -1,8 +1,8 @@
 "use client";
 
-import Image from "next/image";
 import Link from "next/link";
-import { useState } from "react";
+import { trackTikTokEvent } from "@/lib/analytics/tiktok";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import toast from "react-hot-toast";
 import {
@@ -63,6 +63,73 @@ export default function ProductDetail({
         useState(false);
 
     /*
+|--------------------------------------------------------------------------
+| TIKTOK PIXEL - VIEW CONTENT
+|--------------------------------------------------------------------------
+*/
+
+    const viewContentFiredRef = useRef(false);
+
+    useEffect(() => {
+        /*
+         * Reset guard ketika product berubah.
+         */
+        viewContentFiredRef.current = false;
+
+        const trackViewContent = () => {
+            /*
+             * Guard supaya tidak fire dua kali.
+             * Terjadi kalau window.ttq sudah ada
+             * DAN tiktok-pixel-ready juga ter-dispatch.
+             */
+            if (viewContentFiredRef.current) {
+                return;
+            }
+
+            viewContentFiredRef.current = true;
+
+            trackTikTokEvent("ViewContent", {
+                content_id: String(product.id),
+                content_type: "product",
+                content_name: product.name,
+                value: selectedVariant?.price ?? 0,
+                currency: "IDR",
+            });
+        };
+
+        /*
+         * Kalau Pixel sudah tersedia,
+         * langsung kirim.
+         */
+        if (window.ttq) {
+            trackViewContent();
+            return;
+        }
+
+        /*
+         * Kalau belum tersedia,
+         * tunggu TikTokPixel selesai
+         * membuat window.ttq.
+         */
+        window.addEventListener(
+            "tiktok-pixel-ready",
+            trackViewContent,
+            { once: true }
+        );
+
+        return () => {
+            window.removeEventListener(
+                "tiktok-pixel-ready",
+                trackViewContent
+            );
+        };
+
+        // ViewContent hanya sekali
+        // ketika product berubah.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [product.id]);
+
+    /*
     |--------------------------------------------------------------------------
     | HARGA
     |--------------------------------------------------------------------------
@@ -79,6 +146,11 @@ export default function ProductDetail({
 
     const stock =
         selectedVariant?.stock ?? 0;
+
+
+
+
+
 
     /*
     |--------------------------------------------------------------------------
@@ -252,6 +324,20 @@ export default function ProductDetail({
 
                 return;
             }
+            /*
+|--------------------------------------------------------------------------
+| TIKTOK PIXEL - ADD TO CART
+|--------------------------------------------------------------------------
+*/
+
+            trackTikTokEvent("AddToCart", {
+                content_id: String(product.id),
+                content_type: "product",
+                content_name: product.name,
+                quantity,
+                value: selectedVariant.price * quantity,
+                currency: "IDR",
+            });
 
             /*
              * Berhasil.
@@ -336,17 +422,10 @@ export default function ProductDetail({
                         <div className="relative aspect-square overflow-hidden rounded-3xl bg-white">
 
                             {product.image ? (
-                                <Image
-                                    src={
-                                        product.image
-                                    }
-                                    alt={
-                                        product.name
-                                    }
-                                    fill
-                                    priority
-                                    className="object-contain p-6 sm:p-10"
-                                    sizes="(max-width: 1024px) 100vw, 50vw"
+                                <img
+                                    src={product.image}
+                                    alt={product.name}
+                                    className="w-full h-full object-cover"
                                 />
                             ) : (
                                 <div className="flex h-full items-center justify-center text-sm text-gray-400">

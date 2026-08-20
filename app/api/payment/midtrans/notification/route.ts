@@ -450,6 +450,33 @@ export async function POST(
                 }
             });
 
+            /*
+             * ==========================================
+             * NOTIFICATION TRIGGER
+             * ==========================================
+             *
+             * Fire-and-forget.
+             * Notification error tidak boleh
+             * mempengaruhi webhook response.
+             */
+            if (existingOrder.status !== "PAID") {
+                const { onOrderStatusChanged } =
+                    await import(
+                        "@/lib/notification/order-status-handler"
+                    );
+
+                onOrderStatusChanged(
+                    existingOrder.id,
+                    existingOrder.status,
+                    "PAID"
+                ).catch((err) =>
+                    console.error(
+                        "NOTIFICATION TRIGGER ERROR:",
+                        err
+                    )
+                );
+            }
+
             return json({
                 success: true,
                 message: "Payment settlement processed.",
@@ -563,6 +590,27 @@ export async function POST(
                 }
             );
 
+            /*
+             * NOTIFICATION TRIGGER
+             */
+            if (existingOrder.status !== "CANCELLED") {
+                const { onOrderStatusChanged } =
+                    await import(
+                        "@/lib/notification/order-status-handler"
+                    );
+
+                onOrderStatusChanged(
+                    existingOrder.id,
+                    existingOrder.status,
+                    "CANCELLED"
+                ).catch((err) =>
+                    console.error(
+                        "NOTIFICATION TRIGGER ERROR:",
+                        err
+                    )
+                );
+            }
+
             return json({
                 success:
                     true,
@@ -634,6 +682,27 @@ export async function POST(
                     });
                 }
             );
+
+            /*
+             * NOTIFICATION TRIGGER
+             */
+            if (existingOrder.status !== "CANCELLED") {
+                const { onOrderStatusChanged } =
+                    await import(
+                        "@/lib/notification/order-status-handler"
+                    );
+
+                onOrderStatusChanged(
+                    existingOrder.id,
+                    existingOrder.status,
+                    "CANCELLED"
+                ).catch((err) =>
+                    console.error(
+                        "NOTIFICATION TRIGGER ERROR:",
+                        err
+                    )
+                );
+            }
 
             return json({
                 success:
