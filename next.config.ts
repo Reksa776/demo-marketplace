@@ -3,6 +3,7 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
     allowedDevOrigins: [
         "192.168.2.49",
+        "103.93.132.21",
         "202.73.25.122",
         "demosolusisejalan.my.id",
         "wine-keeping-massachusetts-settled.trycloudflare.com",
