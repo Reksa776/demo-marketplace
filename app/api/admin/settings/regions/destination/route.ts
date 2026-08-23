@@ -17,6 +17,15 @@ export async function GET(
             );
         }
 
+        if ((session.user as any).role !== "ADMIN") {
+            return NextResponse.json(
+                {
+                    message: "Forbidden",
+                },
+                { status: 403 }
+            );
+        }
+
         const { searchParams } =
             new URL(request.url);
 

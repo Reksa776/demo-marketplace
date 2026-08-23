@@ -2,6 +2,7 @@ import { notFound, redirect } from "next/navigation";
 
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { resolveBatchPrices } from "@/lib/marketing/batch-pricing";
 
 import ProductDetail from "@/components/products/ProductDetail";
 import BottomNavbar from "@/components/products/BottomNavbar";
@@ -19,10 +20,7 @@ export default async function ProductDetailPage({
 
     const { slug } = await params;
 
-    /*
-     * Guest tidak boleh melihat detail produk.
-     * Kembalikan ke products dan tampilkan dialog login.
-     */
+    // Guest redirect
     if (!session?.user) {
         redirect(
             `/products?guestProduct=${encodeURIComponent(
@@ -32,9 +30,10 @@ export default async function ProductDetailPage({
     }
 
     const product =
-        await prisma.product.findUnique({
+        await prisma.product.findFirst({
             where: {
                 slug,
+                isArchived: false,
             },
 
             include: {
@@ -50,10 +49,32 @@ export default async function ProductDetailPage({
         notFound();
     }
 
-    /*
-     * Prisma Decimal -> number
-     * supaya aman dikirim ke Client Component.
-     */
+    // ==========================================
+    // BATCH MARKETING PRICING
+    // ==========================================
+
+    const pricingResults =
+        await resolveBatchPrices(
+            product.variants.map((v) => ({
+                productId: product.id,
+                variantId: v.id,
+                originalPrice: Number(v.price),
+                quantity: 1,
+                category: product.category,
+            }))
+        );
+
+    const pricingMap = new Map(
+        pricingResults.map((r) => [
+            r.variantId,
+            r,
+        ])
+    );
+
+    // ==========================================
+    // SERIALIZE WITH MARKETING PRICES
+    // ==========================================
+
     const serializedProduct = {
         id: product.id,
         name: product.name,
@@ -66,15 +87,51 @@ export default async function ProductDetailPage({
         bestseller: product.bestseller,
 
         variants: product.variants.map(
-            (variant: { id: any; name: any; price: any; stock: any; image: any; }) => ({
-                id: variant.id,
-                name: variant.name,
-                price: Number(
+            (variant) => {
+                const pricing =
+                    pricingMap.get(variant.id);
+
+                const rawPrice = Number(
                     variant.price
-                ),
-                stock: variant.stock,
-                image: variant.image,
-            })
+                );
+
+                return {
+                    id: variant.id,
+                    name: variant.name,
+                    price: rawPrice,
+                    effectivePrice:
+                        pricing
+                            ?.effectivePrice ??
+                        rawPrice,
+                    originalPrice:
+                        pricing
+                            ?.originalPrice ??
+                        rawPrice,
+                    discount:
+                        pricing
+                            ?.discountAmount ??
+                        0,
+                    hasDiscount:
+                        (pricing
+                            ?.discountAmount ??
+                            0) > 0,
+                    priceSource:
+                        pricing
+                            ?.source ??
+                        "ORIGINAL",
+                    flashSaleName:
+                        pricing
+                            ?.flashSaleName ??
+                        null,
+                    flashSaleEndAt:
+                        pricing
+                            ?.flashSaleEndAt
+                            ?.toISOString() ??
+                        null,
+                    stock: variant.stock,
+                    image: variant.image,
+                };
+            }
         ),
     };
 

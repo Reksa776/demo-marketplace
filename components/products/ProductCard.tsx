@@ -12,6 +12,10 @@ type ProductVariant = {
     id: number;
     name: string;
     price: string | number;
+    effectivePrice?: number;
+    hasDiscount?: boolean;
+    discount?: number;
+    priceSource?: string;
     stock: number;
     image: string | null;
 };
@@ -33,6 +37,35 @@ type Props = {
     product: Product;
 };
 
+/**
+ * Format number as Rupiah currency.
+ */
+function formatRupiah(value: number): string {
+    return `Rp ${value.toLocaleString("id-ID")}`;
+}
+
+/**
+ * Calculate discount percentage from original and final price.
+ * Returns a whole number percentage (e.g. 20 for 20%).
+ * Returns 0 if no discount or invalid input.
+ */
+function calculateDiscountPercent(
+    originalPrice: number,
+    finalPrice: number
+): number {
+    if (
+        originalPrice <= 0 ||
+        finalPrice <= 0 ||
+        finalPrice >= originalPrice
+    ) {
+        return 0;
+    }
+
+    return Math.round(
+        ((originalPrice - finalPrice) / originalPrice) * 100
+    );
+}
+
 export default function ProductCard({
     product,
 }: Props) {
@@ -49,9 +82,18 @@ export default function ProductCard({
         : [];
 
     /*
-     * Ambil semua harga variant.
+     * Ambil semua harga variant (marketing-aware).
      */
     const prices = variants
+        .map((variant) =>
+            Number(variant.effectivePrice ?? variant.price)
+        )
+        .filter(
+            (price) =>
+                Number.isFinite(price)
+        );
+
+    const originalPrices = variants
         .map((variant) =>
             Number(variant.price)
         )
@@ -59,6 +101,10 @@ export default function ProductCard({
             (price) =>
                 Number.isFinite(price)
         );
+
+    const hasAnyDiscount = variants.some(
+        (v) => v.hasDiscount
+    );
 
     const lowestPrice =
         prices.length > 0
@@ -70,8 +116,44 @@ export default function ProductCard({
             ? Math.max(...prices)
             : 0;
 
+    const lowestOriginalPrice =
+        originalPrices.length > 0
+            ? Math.min(...originalPrices)
+            : 0;
+
+    const highestOriginalPrice =
+        originalPrices.length > 0
+            ? Math.max(...originalPrices)
+            : 0;
+
     const hasPriceRange =
         lowestPrice !== highestPrice;
+
+    /*
+     * Discount percentage — calculated from
+     * lowest original vs lowest effective price.
+     * This gives the best visible discount.
+     */
+    const discountPercent =
+        calculateDiscountPercent(
+            lowestOriginalPrice,
+            lowestPrice
+        );
+
+    /*
+     * Determine if we should show the marketing
+     * price layout (strikethrough + badge).
+     *
+     * For single-variant products:
+     *   Show marketing layout if hasAnyDiscount.
+     *
+     * For multi-variant products:
+     *   Show marketing layout if the lowest price
+     *   differs from the lowest original price.
+     */
+    const showMarketingLayout =
+        hasAnyDiscount ||
+        lowestPrice < lowestOriginalPrice;
 
     return (
         <Link
@@ -98,6 +180,13 @@ export default function ProductCard({
                         Terlaris
                     </span>
                 )}
+
+                {showMarketingLayout &&
+                    discountPercent > 0 && (
+                        <span className="absolute right-3 top-3 rounded-full bg-red-500 px-2 py-0.5 text-[10px] font-bold text-white shadow-sm">
+                            -{discountPercent}%
+                        </span>
+                    )}
             </div>
 
             {/* CONTENT */}
@@ -128,57 +217,116 @@ export default function ProductCard({
                 </div>
 
                 {/* PRICE */}
-                <div className="mt-4 flex items-end justify-between gap-3">
-                    <div>
-                        {prices.length === 0 ? (
-                            <p className="text-sm font-medium text-gray-400">
-                                Harga belum tersedia
-                            </p>
-                        ) : hasPriceRange ? (
-                            <p className="text-sm font-semibold text-gray-900">
-                                Rp{" "}
-                                {lowestPrice.toLocaleString(
-                                    "id-ID"
-                                )}
+                <div className="mt-4">
+                    {prices.length === 0 ? (
+                        <p className="text-sm font-medium text-gray-400">
+                            Harga belum tersedia
+                        </p>
+                    ) : showMarketingLayout ? (
+                        /*
+                         * MARKETING PRICE LAYOUT
+                         *
+                         * Original price (strikethrough)
+                         * + Effective price (rose, main)
+                         * + Variant count
+                         */
+                        <div>
+                            {hasPriceRange ? (
+                                <div>
+                                    <p className="text-[11px] text-gray-400 line-through">
+                                        {formatRupiah(
+                                            lowestOriginalPrice
+                                        )}
+                                        {lowestOriginalPrice !==
+                                            highestOriginalPrice && (
+                                            <>
+                                                <span className="mx-0.5">
+                                                    -
+                                                </span>
+                                                {formatRupiah(
+                                                    highestOriginalPrice
+                                                )}
+                                            </>
+                                        )}
+                                    </p>
+                                    <p className="mt-0.5 text-base font-semibold text-rose-600">
+                                        {formatRupiah(
+                                            lowestPrice
+                                        )}
+                                        <span className="mx-0.5 text-sm text-gray-400">
+                                            -
+                                        </span>
+                                        {formatRupiah(
+                                            highestPrice
+                                        )}
+                                    </p>
+                                </div>
+                            ) : (
+                                <div>
+                                    {lowestOriginalPrice >
+                                        lowestPrice && (
+                                        <p className="text-[11px] text-gray-400 line-through">
+                                            {formatRupiah(
+                                                lowestOriginalPrice
+                                            )}
+                                        </p>
+                                    )}
+                                    <p className="text-base font-semibold text-rose-600">
+                                        {formatRupiah(
+                                            lowestPrice
+                                        )}
+                                    </p>
+                                </div>
+                            )}
 
-                                <span className="mx-1 text-gray-400">
-                                    -
-                                </span>
+                            {variants.length >
+                                0 && (
+                                <p className="mt-1 text-[11px] text-gray-400">
+                                    {
+                                        variants.length
+                                    }{" "}
+                                    varian
+                                </p>
+                            )}
+                        </div>
+                    ) : hasPriceRange ? (
+                        /*
+                         * NO DISCOUNT — PRICE RANGE
+                         */
+                        <p className="text-sm font-semibold text-gray-900">
+                            {formatRupiah(
+                                lowestPrice
+                            )}
 
-                                Rp{" "}
-                                {highestPrice.toLocaleString(
-                                    "id-ID"
-                                )}
-                            </p>
-                        ) : (
-                            <p className="text-base font-semibold text-gray-900">
-                                Rp{" "}
-                                {lowestPrice.toLocaleString(
-                                    "id-ID"
-                                )}
-                            </p>
-                        )}
+                            <span className="mx-1 text-gray-400">
+                                -
+                            </span>
 
-                        {variants.length > 0 && (
+                            {formatRupiah(
+                                highestPrice
+                            )}
+                        </p>
+                    ) : (
+                        /*
+                         * NO DISCOUNT — SINGLE PRICE
+                         */
+                        <p className="text-base font-semibold text-gray-900">
+                            {formatRupiah(
+                                lowestPrice
+                            )}
+                        </p>
+                    )}
+
+                    {!showMarketingLayout &&
+                        variants.length >
+                            0 && (
                             <p className="mt-1 text-[11px] text-gray-400">
-                                {variants.length}{" "}
+                                {
+                                    variants.length
+                                }{" "}
                                 varian
                             </p>
                         )}
-                    </div>
-
-                    {/* ADD BUTTON
-                    <button
-                        type="button"
-                        onClick={(event) => {
-                            event.preventDefault();
-                            event.stopPropagation();
-                        }}
-                        aria-label={`Tambah ${product.name} ke keranjang`}
-                        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gray-900 text-white transition hover:bg-gray-800"
-                    >
-                        <FiPlus size={14} />
-                    </button> */}
                 </div>
             </div>
         </Link>

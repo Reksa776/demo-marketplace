@@ -186,6 +186,99 @@ export async function PATCH(
             );
         }
 
+        /* ==========================================
+         * CAMPAIGN ASSIGNMENT
+         * ==========================================
+         *
+         * campaignId — optional:
+         *   null      → unlink from campaign
+         *   number    → link to campaign (must be active)
+         */
+        if (body.campaignId !== undefined) {
+            if (body.campaignId === null || body.campaignId === "") {
+                data.campaignId = null;
+            } else {
+                const campaignId = Number(body.campaignId);
+                if (!Number.isInteger(campaignId) || campaignId <= 0) {
+                    return NextResponse.json(
+                        {
+                            success: false,
+                            message: "ID kampanye tidak valid.",
+                        },
+                        { status: 400 }
+                    );
+                }
+
+                const campaign = await prisma.campaign.findUnique({
+                    where: { id: campaignId },
+                    select: { id: true, status: true, startAt: true, endAt: true },
+                });
+
+                if (!campaign) {
+                    return NextResponse.json(
+                        {
+                            success: false,
+                            message: "Kampanye tidak ditemukan.",
+                        },
+                        { status: 404 }
+                    );
+                }
+
+                // Prevent linking to non-active campaigns
+                const now = new Date();
+                const isActive =
+                    campaign.status === "ACTIVE" &&
+                    now >= campaign.startAt &&
+                    now <= campaign.endAt;
+
+                if (!isActive) {
+                    return NextResponse.json(
+                        {
+                            success: false,
+                            message:
+                                "Hanya bisa mengaitkan voucher dengan kampanye yang sedang aktif.",
+                        },
+                        { status: 400 }
+                    );
+                }
+
+                data.campaignId = campaignId;
+            }
+        }
+
+        /* ==========================================
+         * PREVENT DEACTIVATION OF CAMPAIGN VOUCHER
+         * ==========================================
+         *
+         * If voucher is linked to an active campaign,
+         * it cannot be deactivated via PATCH.
+         */
+        if (data.isActive === false && existing.campaignId) {
+            const linkedCampaign = await prisma.campaign.findUnique({
+                where: { id: existing.campaignId },
+                select: { status: true, startAt: true, endAt: true },
+            });
+
+            if (linkedCampaign) {
+                const now = new Date();
+                const campaignActive =
+                    linkedCampaign.status === "ACTIVE" &&
+                    now >= linkedCampaign.startAt &&
+                    now <= linkedCampaign.endAt;
+
+                if (campaignActive) {
+                    return NextResponse.json(
+                        {
+                            success: false,
+                            message:
+                                "Voucher ini terkait kampanye aktif dan tidak bisa dinonaktifkan saat ini.",
+                        },
+                        { status: 400 }
+                    );
+                }
+            }
+        }
+
         const voucher = await prisma.voucher.update({
             where: { id },
             data,
@@ -265,6 +358,36 @@ export async function DELETE(
                 },
                 { status: 400 }
             );
+        }
+
+        /*
+         * Prevent deletion of vouchers linked to
+         * active campaigns (data integrity).
+         */
+        if (existing.campaignId) {
+            const linkedCampaign = await prisma.campaign.findUnique({
+                where: { id: existing.campaignId },
+                select: { status: true, startAt: true, endAt: true },
+            });
+
+            if (linkedCampaign) {
+                const now = new Date();
+                const campaignActive =
+                    linkedCampaign.status === "ACTIVE" &&
+                    now >= linkedCampaign.startAt &&
+                    now <= linkedCampaign.endAt;
+
+                if (campaignActive) {
+                    return NextResponse.json(
+                        {
+                            success: false,
+                            message:
+                                "Voucher ini terkait kampanye aktif dan tidak bisa dihapus. Nonaktifkan kampanye terlebih dahulu.",
+                        },
+                        { status: 400 }
+                    );
+                }
+            }
         }
 
         await prisma.voucher.delete({

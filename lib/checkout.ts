@@ -1,8 +1,26 @@
+import crypto from "crypto";
+
 import { prisma } from "@/lib/prisma";
 import {
     incrementVoucherUsage,
-    validateAndCalculateVoucher,
+    incrementVoucherUserUsage,
+    validateAndCalculateVoucherEnhanced,
+    type VoucherValidationItem,
 } from "@/lib/voucher";
+import {
+    recordFlashSalePurchase,
+    hasReachedFlashSaleLimit,
+} from "./marketing/flash-sale";
+import {
+    resolveBatchPrices,
+    resolveOrderCampaignId,
+} from "./marketing/batch-pricing";
+import {
+    calculateShippingDiscount,
+} from "./marketing/shipping-discount";
+import {
+    calculateDomesticCost,
+} from "./rajaongkir-shipping";
 
 export type CheckoutMode =
     | "CART"
@@ -103,6 +121,142 @@ export function getShippingCost(
 
 /*
  * ==========================================
+ * SERVER-SIDE SHIPPING COST VERIFICATION
+ * ==========================================
+ *
+ * Verifies shipping cost against RajaOngkir
+ * API using server-authoritative data:
+ * - origin from StoreSetting.rajaOngkirDestinationId
+ * - destination from UserAddress.rajaOngkirDestinationId
+ * - weight from ProductVariant.weight × quantity
+ *
+ * Client-provided shipping.cost is IGNORED.
+ * Server determines the correct cost.
+ */
+export async function verifyShippingCost({
+    origin,
+    destination,
+    totalWeight,
+    courier,
+    service,
+}: {
+    origin: number;
+    destination: number;
+    totalWeight: number;
+    courier: string;
+    service: string;
+}): Promise<number> {
+    if (
+        !Number.isInteger(origin) ||
+        origin <= 0
+    ) {
+        throw new Error(
+            "Origin pengiriman tidak valid."
+        );
+    }
+
+    if (
+        !Number.isInteger(destination) ||
+        destination <= 0
+    ) {
+        throw new Error(
+            "Destination pengiriman tidak valid."
+        );
+    }
+
+    if (
+        !Number.isFinite(totalWeight) ||
+        totalWeight <= 0
+    ) {
+        throw new Error(
+            "Berat paket tidak valid."
+        );
+    }
+
+    if (
+        !courier ||
+        typeof courier !== "string"
+    ) {
+        throw new Error(
+            "Kurir tidak valid."
+        );
+    }
+
+    if (
+        !service ||
+        typeof service !== "string"
+    ) {
+        throw new Error(
+            "Layanan pengiriman tidak valid."
+        );
+    }
+
+    try {
+        const result =
+            await calculateDomesticCost({
+                origin,
+                destination,
+                weight: Math.ceil(totalWeight),
+                courier: courier.toLowerCase(),
+            });
+
+        const shippingOptions =
+            Array.isArray(result)
+                ? result
+                : [];
+
+        const matchedOption =
+            shippingOptions.find(
+                (opt: any) =>
+                    String(opt.code ?? "")
+                        .toLowerCase() ===
+                        courier.toLowerCase() &&
+                    String(opt.service ?? "")
+                        .toUpperCase() ===
+                        service.toUpperCase()
+            );
+
+        if (
+            !matchedOption
+        ) {
+            throw new Error(
+                `Layanan ${courier.toUpperCase()} ${service} tidak tersedia untuk pengiriman ini. Silakan pilih ulang layanan pengiriman.`
+            );
+        }
+
+        const verifiedCost =
+            Number(matchedOption.cost);
+
+        if (
+            !Number.isFinite(verifiedCost) ||
+            verifiedCost < 0
+        ) {
+            throw new Error(
+                "Biaya pengiriman dari provider tidak valid."
+            );
+        }
+
+        return Math.round(verifiedCost);
+    } catch (error: any) {
+        if (
+            error.message?.includes(
+                "tidak tersedia"
+            ) ||
+            error.message?.includes(
+                "tidak valid"
+            )
+        ) {
+            throw error;
+        }
+
+        throw new Error(
+            "Gagal memverifikasi biaya pengiriman. Silakan coba lagi."
+        );
+    }
+}
+
+/*
+ * ==========================================
  * MIDTRANS ENABLED PAYMENTS
  * ==========================================
  */
@@ -153,11 +307,17 @@ function makeOrderNumber(
                 ? "PAY-BN"
                 : "PAY-CART";
 
-    return `${prefix}-${Date.now()}-${Math.floor(
-        Math.random() * 10000
-    )
-        .toString()
-        .padStart(4, "0")}`;
+    /*
+     * Use crypto.randomUUID() for uniqueness.
+     * First 8 hex chars = 4.2B possibilities per millisecond.
+     * Format: {prefix}-{timestamp}-{8-char hex}
+     */
+    const uniqueSuffix = crypto
+        .randomUUID()
+        .replace(/-/g, "")
+        .substring(0, 8);
+
+    return `${prefix}-${Date.now()}-${uniqueSuffix}`;
 }
 
 /*
@@ -179,6 +339,52 @@ function parsePositiveInteger(
     }
 
     return number;
+}
+
+/*
+ * ==========================================
+ * BATCH MARKETING PRICING
+ * ==========================================
+ *
+ * Resolves marketing prices for checkout items
+ * using batch queries instead of per-item queries.
+ *
+ * Pricing priority (Phase 3 rules):
+ * 1. FLASH_SALE — highest, overrides all
+ * 2. PRODUCT_DISCOUNT — per-product/variant
+ * 3. CAMPAIGN_DISCOUNT — campaign-wide
+ * 4. ORIGINAL — raw variant.price
+ *
+ * Fixes E4: Pricing N+1 from Phase 4 audit.
+ * Instead of N*4 queries, uses 4 batch queries
+ * regardless of item count.
+ */
+async function resolveBatchMarketingPricing(
+    items: CheckoutItem[]
+) {
+    if (items.length === 0) return;
+
+    const results = await resolveBatchPrices(
+        items.map((i) => ({
+            productId: i.productId,
+            variantId: i.variantId,
+            originalPrice: i.price,
+            quantity: i.quantity,
+        }))
+    );
+
+    for (let idx = 0; idx < items.length; idx++) {
+        const item = items[idx];
+        const pricing = results[idx];
+        if (!pricing) continue;
+
+        item.price = pricing.effectivePrice;
+        item.subtotal = pricing.effectivePrice * item.quantity;
+
+        if (pricing.flashSaleId) {
+            (item as any).flashSaleId = pricing.flashSaleId;
+        }
+    }
 }
 
 /*
@@ -332,11 +538,14 @@ export async function cleanupPendingCheckoutOrders(
 
             select: {
                 id: true,
+                orderNumber: true,
             },
 
             orderBy: {
                 createdAt: "asc",
             },
+
+            take: 10,
         });
 
     for (const order of pendingOrders) {
@@ -349,8 +558,7 @@ export async function cleanupPendingCheckoutOrders(
             );
         } catch (error) {
             console.error(
-                "CLEANUP PENDING ORDER ERROR:",
-                order.id,
+                `CLEANUP PENDING ORDER FAILED: orderNumber=${order.orderNumber} orderId=${order.id}`,
                 error
             );
         }
@@ -362,6 +570,24 @@ export async function cleanupPendingCheckoutOrders(
  * CREATE CHECKOUT ORDER
  * ==========================================
  */
+
+/*
+ * ==========================================
+ * STRUCTURED LOGGING (OBSERVABILITY)
+ * ==========================================
+ *
+ * Logs checkout events for debugging.
+ * Never logs secrets, tokens, or payment credentials.
+ */
+function logCheckoutEvent(
+    event: string,
+    data: Record<string, unknown>
+) {
+    console.log(
+        `[CHECKOUT] ${event}`,
+        JSON.stringify(data)
+    );
+}
 
 export async function createCheckoutOrder(
     input: CreateCheckoutInput
@@ -400,15 +626,24 @@ export async function createCheckoutOrder(
         );
     }
 
-    const shippingCost =
+    // ==========================================
+    // SHIPPING INPUT VALIDATION
+    // ==========================================
+    //
+    // Basic format check.
+    // Actual cost is determined server-side via
+    // RajaOngkir verification below.
+
+    const clientShippingCost =
         getShippingCost(
             input.shipping
         );
 
     if (
         !Number.isFinite(
-            shippingCost
-        )
+            clientShippingCost
+        ) ||
+        clientShippingCost < 0
     ) {
         throw new Error(
             "Biaya pengiriman tidak valid."
@@ -419,6 +654,9 @@ export async function createCheckoutOrder(
      * ==========================================
      * ADDRESS
      * ==========================================
+     *
+     * Server queries address from DB.
+     * Client-provided address fields are ignored.
      */
 
     const address =
@@ -444,6 +682,14 @@ export async function createCheckoutOrder(
             404;
 
         throw error;
+    }
+
+    if (
+        !address.rajaOngkirDestinationId
+    ) {
+        throw new Error(
+            "Alamat tidak memiliki data wilayah pengiriman."
+        );
     }
 
     /*
@@ -506,6 +752,127 @@ export async function createCheckoutOrder(
             );
         }
     }
+
+    /*
+     * ==========================================
+     * SERVER-SIDE SHIPPING VERIFICATION
+     * ==========================================
+     *
+     * Determine shipping cost from RajaOngkir
+     * using server-authoritative data:
+     * - origin: StoreSetting.rajaOngkirDestinationId
+     * - destination: UserAddress.rajaOngkirDestinationId
+     * - weight: ProductVariant.weight × quantity
+     * - courier/service: from client (user's choice)
+     *
+     * Client-provided shipping.cost is IGNORED.
+     */
+
+    const storeSetting =
+        await prisma.storeSetting.findUnique({
+            where: { id: 1 },
+            select: {
+                rajaOngkirDestinationId: true,
+            },
+        });
+
+    if (
+        !storeSetting?.rajaOngkirDestinationId
+    ) {
+        throw new Error(
+            "Pengaturan toko belum dikonfigurasi."
+        );
+    }
+
+    let totalWeight = 0;
+
+    if (
+        mode === "BUY_NOW"
+    ) {
+        const variant =
+            await prisma.productVariant.findUnique({
+                where: {
+                    id: variantIdNumber!,
+                },
+                select: {
+                    weight: true,
+                },
+            });
+
+        if (!variant) {
+            throw new Error(
+                "Produk tidak ditemukan."
+            );
+        }
+
+        totalWeight =
+            Math.round(Number(variant.weight)) *
+            quantityNumber!;
+    } else {
+        const cartItems =
+            await prisma.cartItem.findMany({
+                where: {
+                    cart: {
+                        userId: input.userId,
+                    },
+                },
+                select: {
+                    quantity: true,
+                    variant: {
+                        select: {
+                            weight: true,
+                        },
+                    },
+                },
+            });
+
+        if (
+            cartItems.length === 0
+        ) {
+            throw new Error(
+                "Keranjang kosong."
+            );
+        }
+
+        totalWeight = cartItems.reduce(
+            (sum, item) =>
+                sum +
+                Math.round(
+                    Number(item.variant.weight)
+                ) *
+                Number(item.quantity),
+            0
+        );
+    }
+
+    if (
+        totalWeight <= 0
+    ) {
+        throw new Error(
+            "Total berat paket tidak valid."
+        );
+    }
+
+    const courier =
+        input.shipping.courier ??
+        input.shipping.code ??
+        "";
+
+    const service =
+        input.shipping.service ??
+        input.shipping.service_name ??
+        "";
+
+    const verifiedShippingCost =
+        await verifyShippingCost({
+            origin:
+                storeSetting.rajaOngkirDestinationId,
+            destination:
+                address.rajaOngkirDestinationId,
+            totalWeight,
+            courier,
+            service,
+        });
 
     /*
      * ==========================================
@@ -761,6 +1128,37 @@ export async function createCheckoutOrder(
 
             /*
              * ==========================================
+             * MARKETING PRICING (BATCH)
+             * ==========================================
+             *
+             * Resolve marketing-adjusted prices for
+             * all items using batch queries (fixes E4).
+             *
+             * Priority:
+             * Flash Sale > Product Discount > Campaign > Original
+             */
+            await resolveBatchMarketingPricing(
+                checkoutItems
+            );
+
+            /*
+             * ==========================================
+             * CAMPAIGN CONTEXT FOR VOUCHER
+             * ==========================================
+             *
+             * Resolve which campaign applies to this
+             * order. Needed for campaign-specific voucher
+             * validation — vouchers with a campaignId
+             * must be applied within the matching campaign.
+             */
+            const orderCampaignId = await resolveOrderCampaignId(
+                checkoutItems.map((i) => ({
+                    productId: i.productId,
+                }))
+            );
+
+            /*
+             * ==========================================
              * SUBTOTAL
              * ==========================================
              */
@@ -805,10 +1203,42 @@ export async function createCheckoutOrder(
                     "string" &&
                 input.voucherCode.trim()
             ) {
+                /*
+                 * ==========================================
+                 * BUILD VOUCHER VALIDATION ITEMS
+                 * ==========================================
+                 *
+                 * Fetch product categories for enhanced
+                 * voucher validation (product/category
+                 * restrictions, per-user limits).
+                 */
+                const productIds = [...new Set(
+                    checkoutItems.map((i) => i.productId)
+                )];
+                const products = await tx.product.findMany({
+                    where: { id: { in: productIds } },
+                    select: { id: true, category: true },
+                });
+                const categoryMap = new Map(
+                    products.map((p) => [p.id, p.category])
+                );
+
+                const voucherItems: VoucherValidationItem[] =
+                    checkoutItems.map((i) => ({
+                        productId: i.productId,
+                        variantId: i.variantId,
+                        quantity: i.quantity,
+                        price: i.price,
+                        category: categoryMap.get(i.productId) ?? null,
+                    }));
+
                 const voucherResult =
-                    await validateAndCalculateVoucher(
+                    await validateAndCalculateVoucherEnhanced(
                         input.voucherCode,
                         subtotal,
+                        voucherItems,
+                        input.userId,
+                        orderCampaignId,
                         tx
                     );
 
@@ -838,10 +1268,83 @@ export async function createCheckoutOrder(
                     );
 
                 if (!voucherUsed) {
+                    logCheckoutEvent(
+                        "VOUCHER_QUOTA_EXHAUSTED",
+                        {
+                            voucherId,
+                        }
+                    );
                     throw new Error(
                         "Kuota voucher baru saja habis. Silakan gunakan kode voucher lain."
                     );
                 }
+
+                /*
+                 * ==========================================
+                 * VOUCHER PER-USER USAGE LIMIT
+                 * ==========================================
+                 *
+                 * Record per-user usage after successful
+                 * global quota increment. Uses atomic upsert.
+                 *
+                 * BUG FIX (P2-1): After increment, validate the
+                 * returned count against maxUsagePerUser. This
+                 * catches the race condition where two concurrent
+                 * transactions both read stale usageCount.
+                 */
+                const newUsageCount = await incrementVoucherUserUsage(
+                    tx,
+                    voucherId,
+                    input.userId
+                );
+
+                // Post-increment validation: fetch limit and check
+                const voucherRecord = await tx.voucher.findUnique({
+                    where: { id: voucherId },
+                    select: { maxUsagePerUser: true },
+                });
+
+                if (
+                    voucherRecord?.maxUsagePerUser &&
+                    newUsageCount > voucherRecord.maxUsagePerUser
+                ) {
+                    throw new Error(
+                        `Anda sudah mencapai batas penggunaan voucher ini (${voucherRecord.maxUsagePerUser}x).`
+                    );
+                }
+            }
+
+            /*
+             * ==========================================
+             * SHIPPING DISCOUNT
+             * ==========================================
+             */
+
+            let finalShippingCost = verifiedShippingCost;
+            let shippingDiscountAmount = 0;
+            let shippingDiscountName: string | null = null;
+
+            try {
+                const shippingDiscountResult =
+                    await calculateShippingDiscount(
+                        verifiedShippingCost,
+                        subtotal,
+                        typeof input.voucherCode === "string"
+                            ? input.voucherCode
+                            : null
+                    );
+
+                if (shippingDiscountResult) {
+                    finalShippingCost =
+                        shippingDiscountResult.finalShippingCost;
+                    shippingDiscountAmount =
+                        shippingDiscountResult.discountAmount;
+                    shippingDiscountName =
+                        shippingDiscountResult.name;
+                }
+            } catch {
+                // Shipping discount failure is non-fatal —
+                // continue with original shipping cost
             }
 
             /*
@@ -853,7 +1356,7 @@ export async function createCheckoutOrder(
             const grossAmount =
                 subtotal -
                 discount +
-                shippingCost;
+                finalShippingCost;
 
             if (
                 !Number.isInteger(
@@ -875,7 +1378,7 @@ export async function createCheckoutOrder(
             const itemDetails =
                 createMidtransItemDetails(
                     checkoutItems,
-                    shippingCost,
+                    finalShippingCost,
                     discount,
                     voucherId,
                     appliedVoucherCode
@@ -889,6 +1392,63 @@ export async function createCheckoutOrder(
                     itemDetails,
                     grossAmount
                 );
+            }
+
+            /*
+             * ==========================================
+             * FLASH SALE STOCK RESERVATION
+             * ==========================================
+             *
+             * Reserve flash sale stock atomically
+             * BEFORE order creation. If insufficient,
+             * transaction rolls back cleanly.
+             */
+            for (const item of
+                checkoutItems) {
+                const fsId = (item as any)
+                    .flashSaleId as
+                    number | undefined;
+                if (fsId) {
+                    const affectedRows =
+                        await tx
+                            .$executeRaw`
+                            UPDATE FlashSale
+                            SET saleStock = saleStock - ${item.quantity},
+                                soldCount = soldCount + ${item.quantity}
+                            WHERE id = ${fsId}
+                              AND isActive = true
+                              AND saleStock >= ${item.quantity}
+                        `;
+                    if (affectedRows === 0) {
+                        logCheckoutEvent(
+                            "FLASH_SALE_STOCK_INSUFFICIENT",
+                            {
+                                flashSaleId: fsId,
+                                variantId: item.variantId,
+                                requested: item.quantity,
+                            }
+                        );
+                        throw new Error(
+                            `Stok flash sale ${item.productName} - ${item.variantName} tidak mencukupi. Silakan checkout ulang.`
+                        );
+                    }
+
+                    /*
+                     * ==========================================
+                     * FLASH SALE PER-USER PURCHASE LIMIT
+                     * ==========================================
+                     *
+                     * Record purchase and enforce per-user limit.
+                     * This runs AFTER successful stock reservation.
+                     * If limit exceeded, transaction rolls back.
+                     */
+                    await recordFlashSalePurchase(
+                        tx,
+                        fsId,
+                        input.userId,
+                        item.quantity
+                    );
+                }
             }
 
             /*
@@ -936,7 +1496,8 @@ export async function createCheckoutOrder(
 
                         subtotal,
 
-                        shippingCost,
+                        shippingCost:
+                            finalShippingCost,
 
                         total:
                             grossAmount,
@@ -1014,18 +1575,24 @@ export async function createCheckoutOrder(
                     include: {
                         items: true,
                     },
-                });
-
-            /*
+                });            /*
              * ==========================================
              * RESERVE STOCK
              * ==========================================
+             *
+             * Skip items that used flash sale —
+             * flash sale stock was already reserved
+             * atomically above.
              */
 
             for (
                 const item of
                     checkoutItems
             ) {
+                if ((item as any).flashSaleId) {
+                    continue;
+                }
+
                 const stockUpdate =
                     await tx.productVariant.updateMany(
                         {
@@ -1052,6 +1619,15 @@ export async function createCheckoutOrder(
                     stockUpdate.count !==
                     1
                 ) {
+                    logCheckoutEvent(
+                        "STOCK_INSUFFICIENT",
+                        {
+                            variantId:
+                                item.variantId,
+                            requested:
+                                item.quantity,
+                        }
+                    );
                     throw new Error(
                         `Stok ${item.productName} - ${item.variantName} sudah berubah. Silakan checkout ulang.`
                     );
@@ -1066,7 +1642,7 @@ export async function createCheckoutOrder(
                     data: {
                         sold: {
                             increment:
-                                item.quantity,
+                            item.quantity,
                         },
                     },
                 });
@@ -1115,7 +1691,8 @@ export async function createCheckoutOrder(
 
                 subtotal,
 
-                shippingCost,
+                shippingCost:
+                    finalShippingCost,
 
                 discount,
 
@@ -1158,34 +1735,43 @@ export async function rollbackCheckoutOrder(
         options?.restoreCart ?? true;
 
     return prisma.$transaction(
-        async (tx) => {
-            const order =
-                await tx.order.findUnique(
-                    {
-                        where: {
-                            id: orderId,
-                        },
+        async (tx) => {            /*
+             * ==========================================
+             * ATOMIC CAS: CANCEL ORDER (BUG #1/#4 FIX)
+             * ==========================================
+             *
+             * Transition PENDING/PROCESSING -> CANCELLED
+             * atomically. Only one concurrent caller will
+             * see affectedRows === 1.
+             *
+             * If already CANCELLED/PAID/SHIPPED/COMPLETED,
+             * affectedRows === 0 -> skip all restores.
+             */
+            const affectedRows =
+                await tx.$executeRaw`
+                UPDATE \`Order\`
+                SET status = 'CANCELLED',
+                    paymentStatus = 'FAILED'
+                WHERE id = ${orderId}
+                  AND status IN ('PENDING', 'PROCESSING')
+            `;
 
-                        include: {
-                            items: true,
-                        },
-                    }
-                );
-
-            if (!order) {
+            if (affectedRows === 0) {
                 return;
             }
 
-            /*
-             * Jangan rollback dua kali.
-             */
+            const order =
+                await tx.order.findUnique({
+                    where: {
+                        id: orderId,
+                    },
 
-            if (
-                order.paymentStatus ===
-                    "FAILED" &&
-                order.status ===
-                    "CANCELLED"
-            ) {
+                    include: {
+                        items: true,
+                    },
+                });
+
+            if (!order) {
                 return;
             }
 
@@ -1319,6 +1905,19 @@ export async function rollbackCheckoutOrder(
              * ==========================================
              * RESTORE STOCK + SOLD
              * ==========================================
+             *
+             * Flash-sale items: restore flash-sale
+             * stock (saleStock / soldCount). Skip
+             * regular ProductVariant.stock because
+             * flash-sale items never reserved it.
+             *
+             * Regular items: restore ProductVariant
+             * stock and Product.sold as before.
+             *
+             * We identify flash-sale items by checking
+             * if a FlashSale record exists for the
+             * variantId (unique constraint on variantId).
+             * OrderItem has no flashSaleId field.
              */
 
             for (
@@ -1343,35 +1942,88 @@ export async function rollbackCheckoutOrder(
                     );
                 }
 
-                await tx.productVariant.update(
-                    {
+                /*
+                 * Check if this variant has a flash sale.
+                 * FlashSale has @@unique([variantId]) so
+                 * at most one record per variant.
+                 */
+                const flashSale =
+                    await tx.flashSale.findFirst({
                         where: {
-                            id:
+                            variantId:
                                 item.variantId,
                         },
+                    });
 
-                        data: {
-                            stock: {
-                                increment:
-                                    item.quantity,
+                if (flashSale) {
+                    /*
+                     * FLASH SALE ITEM:
+                     * Restore flash-sale stock atomically.
+                     * Do NOT touch regular ProductVariant.stock.
+                     *
+                     * BUG #3 FIX: Use conditional update to prevent
+                     * negative soldCount and saleStock inflation.
+                     */
+                    await tx.$executeRaw`
+                        UPDATE FlashSale
+                        SET saleStock = saleStock + ${item.quantity},
+                            soldCount = soldCount - ${item.quantity}
+                        WHERE id = ${flashSale.id}
+                          AND soldCount >= ${item.quantity}
+                    `;
+
+                    /*
+                     * FLASH SALE PURCHASE CLEANUP (BUG T1-1 FIX):
+                     * Delete FlashSalePurchase record so the user
+                     * can re-attempt if they want to.
+                     * Without this, the user is permanently blocked
+                     * from buying this flash sale (purchaseLimit
+                     * already consumed).
+                     */
+                    await tx.flashSalePurchase.deleteMany({
+                        where: {
+                            flashSaleId: flashSale.id,
+                            userId: order.userId,
+                        },
+                    });
+                } else {
+                    /*
+                     * REGULAR ITEM or FLASH SALE DELETED:
+                     * Restore regular stock.
+                     *
+                     * If the flash sale was deleted before
+                     * rollback, the item falls through to
+                     * regular stock restoration. This is
+                     * acceptable because deleteFlashSale
+                     * now rejects deletion when pending
+                     * orders exist (defense-in-depth).
+                     */
+                    await tx.productVariant.update(
+                        {
+                            where: {
+                                id:
+                                    item.variantId,
                             },
-                        },
-                    }
-                );
 
-                await tx.product.update({
-                    where: {
-                        id:
-                            item.productId,
-                    },
+                            data: {
+                                stock: {
+                                    increment:
+                                        item.quantity,
+                                },
+                            },
+                        }
+                    );
+                }
 
-                    data: {
-                        sold: {
-                            decrement:
-                                item.quantity,
-                        },
-                    },
-                });
+                /*
+                 * Restore sold count for both types.
+                 * BUG #3 FIX: Use GREATEST to prevent negative sold.
+                 */
+                await tx.$executeRaw`
+                    UPDATE Product
+                    SET sold = GREATEST(0, sold - ${item.quantity})
+                    WHERE id = ${item.productId}
+                `;
             }
 
             /*
@@ -1384,6 +2036,9 @@ export async function rollbackCheckoutOrder(
                 typeof order.voucherId ===
                 "number"
             ) {
+                /*
+                 * Restore global usedCount
+                 */
                 await tx.voucher.updateMany(
                     {
                         where: {
@@ -1402,6 +2057,35 @@ export async function rollbackCheckoutOrder(
                         },
                     }
                 );
+
+                /*
+                 * Restore per-user usage count
+                 */
+                const userUsage =
+                    await tx.voucherUserUsage.findUnique({
+                        where: {
+                            voucherId_userId: {
+                                voucherId: order.voucherId,
+                                userId: order.userId,
+                            },
+                        },
+                    });
+
+                if (
+                    userUsage &&
+                    userUsage.usageCount > 0
+                ) {
+                    await tx.voucherUserUsage.update({
+                        where: {
+                            id: userUsage.id,
+                        },
+                        data: {
+                            usageCount: {
+                                decrement: 1,
+                            },
+                        },
+                    });
+                }
             }
 
             /*

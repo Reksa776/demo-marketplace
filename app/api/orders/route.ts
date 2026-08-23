@@ -11,6 +11,8 @@ import {
     getShippingCost,
 } from "@/lib/checkout";
 
+import { rateLimiters } from "@/lib/rate-limit";
+
 /*
  * ==========================================
  * POST /api/orders
@@ -60,6 +62,25 @@ export async function POST(
 
         const userId =
             session.user.id;
+
+        /*
+         * ==========================================
+         * RATE LIMIT
+         * ==========================================
+         */
+
+        const rateLimit =
+            rateLimiters.orderCreation(userId);
+
+        if (!rateLimit.allowed) {
+            return NextResponse.json(
+                {
+                    success: false,
+                    message: "Terlalu banyak permintaan. Coba lagi nanti.",
+                },
+                { status: 429 }
+            );
+        }
 
         /*
          * ==========================================
@@ -229,11 +250,12 @@ export async function POST(
         );
     } catch (error: any) {
         console.error(
-            "========== CREATE COD ORDER ERROR =========="
-        );
-
-        console.error(
-            error
+            JSON.stringify({
+                event: "CHECKOUT_FAILURE",
+                checkoutType: "CART_COD",
+                message: error?.message ?? "Unknown error",
+                timestamp: new Date().toISOString(),
+            })
         );
 
         const status =

@@ -222,6 +222,9 @@ export default function CheckoutPage() {
     const [loadingShipping, setLoadingShipping] =
         useState(false);
 
+    const [shippingDiscount, setShippingDiscount] = useState(0);
+    const [shippingDiscountName, setShippingDiscountName] = useState<string | null>(null);
+
     /*
      * REGION
      */
@@ -1407,6 +1410,62 @@ export default function CheckoutPage() {
     ]);
 
     /*
+     * ==========================================
+     * SHIPPING DISCOUNT PREVIEW
+     * ==========================================
+     *
+     * Fetch shipping discount preview when shipping is selected.
+     */
+    useEffect(() => {
+        if (!selectedShipping || !data) {
+            setShippingDiscount(0);
+            setShippingDiscountName(null);
+            return;
+        }
+
+        const shippingCost = Number(
+            selectedShipping.cost ??
+            selectedShipping.price ??
+            selectedShipping.shipping_cost ??
+            0
+        );
+
+        if (!Number.isFinite(shippingCost) || shippingCost <= 0) {
+            setShippingDiscount(0);
+            setShippingDiscountName(null);
+            return;
+        }
+
+        async function fetchShippingDiscount() {
+            try {
+                const response = await fetch("/api/shipping/discount-preview", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        shippingCost,
+                        subtotal: data!.subtotal,
+                        code: appliedVoucherCode || null,
+                    }),
+                    cache: "no-store",
+                });
+                const result = await response.json();
+                if (result.success && result.data?.hasDiscount) {
+                    setShippingDiscount(result.data.discountAmount || 0);
+                    setShippingDiscountName(result.data.name || null);
+                } else {
+                    setShippingDiscount(0);
+                    setShippingDiscountName(null);
+                }
+            } catch {
+                setShippingDiscount(0);
+                setShippingDiscountName(null);
+            }
+        }
+
+        fetchShippingDiscount();
+    }, [selectedShipping, data, appliedVoucherCode]);
+
+    /*
  /*
  * ==========================================
  * CREATE ORDER / CREATE PAYMENT
@@ -1417,6 +1476,10 @@ export default function CheckoutPage() {
         useState(false);
 
     async function createOrder() {
+        if (creatingOrder) {
+            return;
+        }
+
         if (snapProcessingRef.current) {
             return;
         }
@@ -1750,11 +1813,12 @@ export default function CheckoutPage() {
             )
             : 0;
 
+    const finalShippingCost = Math.max(0, shippingCost - shippingDiscount);
     const grandTotal = Math.max(
         0,
         data.subtotal -
         voucherDiscount +
-        shippingCost
+        finalShippingCost
     );
 
     /*
@@ -2806,6 +2870,17 @@ export default function CheckoutPage() {
                                 </span>
 
                             </div>
+
+                            {shippingDiscount > 0 && (
+                                <div className="flex items-center justify-between text-emerald-600">
+                                    <span className="text-sm">
+                                        Diskon Ongkir{shippingDiscountName ? ` (${shippingDiscountName})` : ""}
+                                    </span>
+                                    <span className="font-semibold">
+                                        - Rp {shippingDiscount.toLocaleString("id-ID")}
+                                    </span>
+                                </div>
+                            )}
                             <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
                                 <div className="text-sm font-semibold">
                                     Kode Voucher
@@ -2899,16 +2974,19 @@ export default function CheckoutPage() {
                             type="button"
                             onClick={createOrder}
                             disabled={
+                                creatingOrder ||
                                 !address ||
                                 !selectedShipping
                             }
                             className="mt-6 w-full rounded-xl bg-rose-600 px-5 py-3 font-semibold text-white transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:bg-gray-300"
                         >
-                            {!address
-                                ? "Pilih Alamat"
-                                : !selectedShipping
-                                    ? "Pilih Pengiriman"
-                                    : "Buat Pesanan"}
+                            {creatingOrder
+                                ? "Memproses..."
+                                : !address
+                                    ? "Pilih Alamat"
+                                    : !selectedShipping
+                                        ? "Pilih Pengiriman"
+                                        : "Buat Pesanan"}
                         </button>
 
                     </aside>

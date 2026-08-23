@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { validateAndCalculateVoucher } from "@/lib/voucher";
+import { validateAndCalculateVoucherEnhanced, type VoucherValidationItem } from "@/lib/voucher";
+import { rateLimiters, getClientIp } from "@/lib/rate-limit";
 
 /*
  * ==========================================
@@ -19,6 +20,16 @@ import { validateAndCalculateVoucher } from "@/lib/voucher";
  */
 export async function POST(request: Request) {
     try {
+        // Rate limiting
+        const clientIp = getClientIp(request);
+        const rateLimit = rateLimiters.voucherValidation(clientIp);
+        if (!rateLimit.allowed) {
+            return NextResponse.json(
+                { success: false, message: "Terlalu banyak permintaan. Coba lagi nanti." },
+                { status: 429 }
+            );
+        }
+
         const session = await auth();
 
         if (!session?.user?.id) {
@@ -57,9 +68,16 @@ export async function POST(request: Request) {
             );
         }
 
-        const result = await validateAndCalculateVoucher(
+        // Build minimal items array for eligibility check
+        // (items parameter is optional for preview — eligibility still checked)
+        const items: VoucherValidationItem[] = Array.isArray(body.items) ? body.items : [];
+
+        const result = await validateAndCalculateVoucherEnhanced(
             code,
             parsedSubtotal,
+            items,
+            session.user.id,
+            null, // campaignId — preview doesn't know this
             prisma
         );
 

@@ -1,6 +1,88 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { resolveBatchPrices } from "@/lib/marketing/batch-pricing";
+
+/**
+ * ==========================================
+ * SHARED CART FORMATTER
+ * ==========================================
+ *
+ * Formats cart items with marketing prices.
+ * Used by GET, PATCH, and DELETE to ensure
+ * consistent response structure.
+ *
+ * Returns flat items matching the CartItem type
+ * used by CartPage.tsx.
+ */
+async function formatCartResponse(
+    cartData: {
+        id: number | null;
+        userId: string;
+        items: Array<{
+            id: number;
+            productId: number;
+            variantId: number;
+            quantity: number;
+            product: { id: number; name: string; slug: string; image: string | null; category: string | null };
+            variant: { id: number; name: string; price: any; stock: number; image: string | null; weight: number };
+        }>;
+    } | null
+) {
+    if (!cartData) {
+        return { cart: null };
+    }
+
+    const cartItems = cartData.items;
+
+    const pricingResults = await resolveBatchPrices(
+        cartItems.map((item) => ({
+            productId: item.productId,
+            variantId: item.variantId,
+            originalPrice: Number(item.variant.price),
+            quantity: Number(item.quantity),
+            category: item.product.category,
+        }))
+    );
+
+    const pricingMap = new Map(
+        pricingResults.map((r) => [r.variantId, r])
+    );
+
+    const formattedItems = cartItems.map((item) => {
+        const pricing = pricingMap.get(item.variantId);
+        const rawPrice = Number(item.variant.price);
+        const effectivePrice = pricing?.effectivePrice ?? rawPrice;
+
+        return {
+            id: item.id,
+            productId: item.productId,
+            variantId: item.variantId,
+            productName: item.product.name,
+            productSlug: item.product.slug,
+            variantName: item.variant.name,
+            image: item.variant.image || item.product.image || null,
+            price: effectivePrice,
+            originalPrice: pricing?.originalPrice ?? rawPrice,
+            discount: pricing?.discountAmount ?? 0,
+            hasDiscount: (pricing?.discountAmount ?? 0) > 0,
+            priceSource: pricing?.source ?? "ORIGINAL",
+            flashSaleName: pricing?.flashSaleName ?? null,
+            bulkDiscountName: pricing?.bulkDiscountName ?? null,
+            quantity: Number(item.quantity),
+            stock: item.variant.stock,
+            weight: Number(item.variant.weight),
+        };
+    });
+
+    return {
+        cart: {
+            id: cartData.id,
+            userId: cartData.userId,
+            items: formattedItems,
+        },
+    };
+}
 
 export async function GET() {
     try {
@@ -34,13 +116,12 @@ export async function GET() {
             },
         });
 
-        return NextResponse.json({
-            cart: cart ?? {
-                id: null,
-                userId: session.user.id,
-                items: [],
-            },
-        });
+        // ==========================================
+        // FORMAT WITH MARKETING PRICES
+        // ==========================================
+        const result = await formatCartResponse(cart);
+
+        return NextResponse.json(result);
     } catch (error) {
         console.error("GET CART ERROR:", error);
 
@@ -208,30 +289,16 @@ export async function POST(
                 );
             }
 
-            const updatedItem =
-                await prisma.cartItem.update({
-                    where: {
-                        id: existingItem.id,
-                    },
+            await prisma.cartItem.update({
+                where: {
+                    id: existingItem.id,
+                },
 
-                    data: {
-                        quantity: newQuantity,
-                    },
-
-                    include: {
-                        product: true,
-                        variant: true,
-                    },
-                });
-
-            return NextResponse.json({
-                message:
-                    "Keranjang berhasil diperbarui.",
-                item: updatedItem,
+                data: {
+                    quantity: newQuantity,
+                },
             });
-        }
-
-        const item =
+        } else {
             await prisma.cartItem.create({
                 data: {
                     cartId: cart.id,
@@ -239,21 +306,32 @@ export async function POST(
                     variantId: variant.id,
                     quantity,
                 },
-
-                include: {
-                    product: true,
-                    variant: true,
-                },
             });
+        }
+
+        // Return formatted cart with marketing prices
+        const updatedCart = await prisma.cart.findUnique({
+            where: { userId: session.user.id },
+            include: {
+                items: {
+                    include: { product: true, variant: true },
+                    orderBy: { createdAt: "desc" },
+                },
+            },
+        });
+
+        const result = await formatCartResponse(updatedCart);
 
         return NextResponse.json(
             {
                 message:
-                    "Produk berhasil ditambahkan ke keranjang.",
-                item,
+                    existingItem
+                        ? "Keranjang berhasil diperbarui."
+                        : "Produk berhasil ditambahkan ke keranjang.",
+                ...result,
             },
             {
-                status: 201,
+                status: existingItem ? 200 : 201,
             }
         );
     } catch (error) {
@@ -283,8 +361,7 @@ export async function PATCH(
         if (!session?.user?.id) {
             return NextResponse.json(
                 {
-                    message:
-                        "Silakan login terlebih dahulu.",
+                    message: "Silakan login terlebih dahulu.",
                 },
                 {
                     status: 401,
@@ -362,11 +439,11 @@ export async function PATCH(
             },
         });
 
+        // Return formatted cart with marketing prices
         const cart =
             await prisma.cart.findUnique({
                 where: {
-                    userId:
-                        session.user.id,
+                    userId: session.user.id,
                 },
                 include: {
                     items: {
@@ -378,10 +455,12 @@ export async function PATCH(
                 },
             });
 
+        const result = await formatCartResponse(cart);
+
         return NextResponse.json({
             message:
                 "Keranjang berhasil diperbarui.",
-            cart,
+            ...result,
         });
     } catch (error) {
         console.error(
@@ -464,11 +543,11 @@ export async function DELETE(
             },
         });
 
+        // Return formatted cart with marketing prices
         const cart =
             await prisma.cart.findUnique({
                 where: {
-                    userId:
-                        session.user.id,
+                    userId: session.user.id,
                 },
                 include: {
                     items: {
@@ -480,10 +559,12 @@ export async function DELETE(
                 },
             });
 
+        const result = await formatCartResponse(cart);
+
         return NextResponse.json({
             message:
                 "Produk berhasil dihapus.",
-            cart,
+            ...result,
         });
     } catch (error) {
         console.error(

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 
 type Period = "7d" | "30d" | "90d" | "1y";
@@ -42,6 +43,33 @@ function toNumber(value: unknown) {
 
 export async function GET(request: NextRequest) {
     try {
+        /*
+         * ==========================================
+         * AUTH CHECK
+         * ==========================================
+         */
+        const session = await auth();
+
+        if (!session?.user?.id) {
+            return NextResponse.json(
+                {
+                    success: false,
+                    message: "Silakan login terlebih dahulu.",
+                },
+                { status: 401 }
+            );
+        }
+
+        if (session.user.role !== "ADMIN") {
+            return NextResponse.json(
+                {
+                    success: false,
+                    message: "Akses ditolak.",
+                },
+                { status: 403 }
+            );
+        }
+
         const { searchParams } = new URL(request.url);
 
         const rawPeriod = searchParams.get("period") ?? "7d";

@@ -500,6 +500,55 @@ export async function GET(request: Request) {
 
         /*
          * ==========================================
+         * FLASH SALES & CAMPAIGNS SUMMARY
+         * ==========================================
+         */
+
+        const [activeFlashSales, activeCampaigns] = await Promise.all([
+            prisma.flashSale.findMany({
+                where: {
+                    isActive: true,
+                    startAt: { lte: now },
+                    endAt: { gte: now },
+                    saleStock: { gt: 0 },
+                },
+                select: {
+                    id: true,
+                    name: true,
+                    saleStock: true,
+                    soldCount: true,
+                    endAt: true,
+                },
+                orderBy: { endAt: "asc" },
+                take: 10,
+            }),
+            prisma.campaign.findMany({
+                where: {
+                    status: "ACTIVE",
+                    startAt: { lte: now },
+                    endAt: { gte: now },
+                },
+                select: {
+                    id: true,
+                    name: true,
+                    type: true,
+                    endAt: true,
+                },
+                orderBy: { endAt: "asc" },
+                take: 10,
+            }),
+        ]);
+
+        const pendingOrders = await prisma.order.count({
+            where: { status: "PENDING" },
+        });
+
+        const failedPayments = await prisma.order.count({
+            where: { paymentStatus: "FAILED" },
+        });
+
+        /*
+         * ==========================================
          * RESPONSE
          * ==========================================
          */
@@ -532,7 +581,19 @@ export async function GET(request: Request) {
                     paidSubtotal,
 
                     paidShipping,
+
+                    pendingOrders,
+
+                    failedPayments,
+
+                    activeFlashSalesCount: activeFlashSales.length,
+
+                    activeCampaignsCount: activeCampaigns.length,
                 },
+
+                activeFlashSales,
+
+                activeCampaigns,
 
                 dailySales,
 

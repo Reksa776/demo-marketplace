@@ -197,6 +197,85 @@ export default function AdminPage() {
                     />
                 </div>
 
+                {/* FLASH SALES & CAMPAIGNS */}
+                <div className="mt-6 grid gap-6 xl:grid-cols-2">
+                    {/* Active Flash Sales */}
+                    <div className="rounded-2xl border border-gray-200 bg-white p-5">
+                        <div className="flex items-center justify-between">
+                            <h3 className="text-sm font-semibold text-gray-900">Flash Sale Aktif</h3>
+                            <span className="rounded-full bg-rose-100 px-2.5 py-0.5 text-xs font-semibold text-rose-700">
+                                {data.summary?.activeFlashSalesCount ?? 0}
+                            </span>
+                        </div>
+                        {data.activeFlashSales && data.activeFlashSales.length > 0 ? (
+                            <div className="mt-4 space-y-3">
+                                {data.activeFlashSales.slice(0, 5).map((fs: any) => (
+                                    <div key={fs.id} className="flex items-center justify-between">
+                                        <div className="min-w-0 flex-1">
+                                            <p className="truncate text-sm font-medium text-gray-900">{fs.name}</p>
+                                            <p className="text-xs text-gray-500">{fs.soldCount}/{fs.saleStock} terjual</p>
+                                        </div>
+                                        <div className="ml-3 h-1.5 w-16 overflow-hidden rounded-full bg-gray-100">
+                                            <div
+                                                className="h-full rounded-full bg-rose-500"
+                                                style={{ width: `${Math.min(100, (fs.soldCount / fs.saleStock) * 100)}%` }}
+                                            />
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        ) : (
+                            <p className="mt-4 text-sm text-gray-400">Tidak ada flash sale aktif</p>
+                        )}
+                    </div>
+
+                    {/* Active Campaigns */}
+                    <div className="rounded-2xl border border-gray-200 bg-white p-5">
+                        <div className="flex items-center justify-between">
+                            <h3 className="text-sm font-semibold text-gray-900">Kampanye Aktif</h3>
+                            <span className="rounded-full bg-blue-100 px-2.5 py-0.5 text-xs font-semibold text-blue-700">
+                                {data.summary?.activeCampaignsCount ?? 0}
+                            </span>
+                        </div>
+                        {data.activeCampaigns && data.activeCampaigns.length > 0 ? (
+                            <div className="mt-4 space-y-3">
+                                {data.activeCampaigns.slice(0, 5).map((c: any) => (
+                                    <div key={c.id} className="flex items-center justify-between">
+                                        <div className="min-w-0 flex-1">
+                                            <p className="truncate text-sm font-medium text-gray-900">{c.name}</p>
+                                            <p className="text-xs text-gray-500">{c.type}</p>
+                                        </div>
+                                        <span className="ml-3 text-xs text-gray-400">
+                                            s/d {new Date(c.endAt).toLocaleDateString("id-ID", { day: "2-digit", month: "short" })}
+                                        </span>
+                                    </div>
+                                ))}
+                            </div>
+                        ) : (
+                            <p className="mt-4 text-sm text-gray-400">Tidak ada kampanye aktif</p>
+                        )}
+                    </div>
+                </div>
+
+                {/* OPERATIONAL SUMMARY */}
+                <div className="mt-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
+                    <div className="rounded-xl border border-gray-200 bg-white px-4 py-4">
+                        <p className="text-xs font-medium text-gray-500">Menunggu Diproses</p>
+                        <p className="mt-2 text-xl font-semibold text-amber-600">{data.summary?.pendingOrders ?? 0}</p>
+                    </div>
+                    <div className="rounded-xl border border-gray-200 bg-white px-4 py-4">
+                        <p className="text-xs font-medium text-gray-500">Pembayaran Gagal</p>
+                        <p className="mt-2 text-xl font-semibold text-red-600">{data.summary?.failedPayments ?? 0}</p>
+                    </div>
+                    <div className="rounded-xl border border-gray-200 bg-white px-4 py-4">
+                        <p className="text-xs font-medium text-gray-500">Flash Sale Aktif</p>
+                        <p className="mt-2 text-xl font-semibold text-rose-600">{data.summary?.activeFlashSalesCount ?? 0}</p>
+                    </div>
+                    <div className="rounded-xl border border-gray-200 bg-white px-4 py-4">
+                        <p className="text-xs font-medium text-gray-500">Kampanye Aktif</p>
+                        <p className="mt-2 text-xl font-semibold text-blue-600">{data.summary?.activeCampaignsCount ?? 0}</p>
+                    </div>
+                </div>
 
             </div>
         </div>

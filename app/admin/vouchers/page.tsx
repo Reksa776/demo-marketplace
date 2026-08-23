@@ -169,19 +169,26 @@ export default function AdminVouchersPage() {
     const [search, setSearch] =
         useState("");
 
+    const [page, setPage] = useState(1);
+    const [pagination, setPagination] = useState({ page: 1, limit: 50, total: 0, totalPages: 0 });
+
     const [error, setError] =
         useState("");
 
     const [success, setSuccess] =
         useState("");
 
-    async function loadVouchers() {
+    async function loadVouchers(pageNum: number = 1) {
         try {
             setLoading(true);
             setError("");
 
+            const params = new URLSearchParams();
+            params.set("page", String(pageNum));
+            params.set("limit", "50");
+
             const response = await fetch(
-                "/api/admin/vouchers",
+                `/api/admin/vouchers?${params.toString()}`,
                 {
                     method: "GET",
                     cache: "no-store",
@@ -203,11 +210,11 @@ export default function AdminVouchersPage() {
                 );
             }
 
-            setVouchers(
-                Array.isArray(result.data)
-                    ? result.data
-                    : []
-            );
+            const items = result.data?.items ?? (Array.isArray(result.data) ? result.data : []);
+            const pag = result.data?.pagination;
+
+            setVouchers(items);
+            if (pag) setPagination(pag);
         } catch (err) {
             console.error(
                 "LOAD VOUCHERS ERROR:",
@@ -225,7 +232,7 @@ export default function AdminVouchersPage() {
     }
 
     useEffect(() => {
-        loadVouchers();
+        loadVouchers(1);
     }, []);
 
     function openCreateModal() {
@@ -530,7 +537,7 @@ export default function AdminVouchersPage() {
                     : "Voucher berhasil dibuat."
             );
 
-            await loadVouchers();
+            await loadVouchers(page);
 
             window.setTimeout(() => {
                 closeModal();
@@ -603,7 +610,7 @@ export default function AdminVouchersPage() {
                 "Voucher berhasil dihapus."
             );
 
-            await loadVouchers();
+            await loadVouchers(page);
         } catch (err) {
             console.error(
                 "DELETE VOUCHER ERROR:",
@@ -658,7 +665,7 @@ export default function AdminVouchersPage() {
                 );
             }
 
-            await loadVouchers();
+            await loadVouchers(page);
         } catch (err) {
             console.error(
                 "TOGGLE VOUCHER ERROR:",
@@ -1167,6 +1174,32 @@ export default function AdminVouchersPage() {
                                     )}
                                 </tbody>
                             </table>
+                        </div>
+                    )}
+
+                    {pagination.totalPages > 1 && (
+                        <div className="flex items-center justify-between border-t border-gray-100 px-5 py-3">
+                            <p className="text-xs text-gray-500">
+                                Halaman {pagination.page} dari {pagination.totalPages} ({pagination.total} voucher)
+                            </p>
+                            <div className="flex gap-2">
+                                <button
+                                    type="button"
+                                    disabled={page <= 1}
+                                    onClick={() => { const p = page - 1; setPage(p); loadVouchers(p); }}
+                                    className="rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
+                                >
+                                    Sebelumnya
+                                </button>
+                                <button
+                                    type="button"
+                                    disabled={page >= pagination.totalPages}
+                                    onClick={() => { const p = page + 1; setPage(p); loadVouchers(p); }}
+                                    className="rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
+                                >
+                                    Selanjutnya
+                                </button>
+                            </div>
                         </div>
                     )}
                 </section>

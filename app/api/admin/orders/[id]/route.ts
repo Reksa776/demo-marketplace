@@ -443,6 +443,34 @@ export async function PATCH(
             trackingUrl = null;
         }
 
+        /*
+         * STATUS TRANSITION GUARD (T1-2 FIX):
+         * Prevent invalid backward transitions.
+         * Once PAID/COMPLETED/SHIPPED, cannot revert to PENDING.
+         * Once CANCELLED, cannot change.
+         */
+        const validTransitions: Record<string, string[]> = {
+            PENDING:     ["PAID", "PROCESSING", "CANCELLED"],
+            PAID:        ["PROCESSING", "SHIPPED", "COMPLETED", "CANCELLED"],
+            PROCESSING:  ["SHIPPED", "COMPLETED", "CANCELLED"],
+            SHIPPED:     ["COMPLETED"],
+            COMPLETED:   [],
+            CANCELLED:   [],
+        };
+
+        const allowed = validTransitions[order.status];
+
+        if (!allowed || !allowed.includes(status)) {
+            return NextResponse.json(
+                {
+                    success: false,
+                    message:
+                        `Transisi dari ${order.status} ke ${status} tidak diperbolehkan.`,
+                },
+                { status: 400 }
+            );
+        }
+
         const previousStatus = order.status;
 
         const updatedOrder =

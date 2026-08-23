@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
-import type { Voucher } from "@prisma/client";
 import {
-    incrementVoucherUsage,
-    validateAndCalculateVoucher,
-} from "@/lib/voucher";
+    createCheckoutOrder,
+} from "@/lib/checkout";
+import { resolveBatchPrices } from "@/lib/marketing/batch-pricing";
 
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/auth";
+import { rateLimiters } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
 
@@ -288,10 +288,28 @@ export async function GET(
             );
         }
 
-        const price =
+        // ==========================================
+        // MARKETING PRICING
+        // ==========================================
+
+        const rawPrice =
             decimalToNumber(
                 variant.price
             );
+
+        const [pricing] =
+            await resolveBatchPrices([
+                {
+                    productId,
+                    variantId,
+                    originalPrice: rawPrice,
+                    quantity,
+                    category: product.category,
+                },
+            ]);
+
+        const price =
+            pricing?.effectivePrice ?? rawPrice;
 
         const subtotal =
             price * quantity;
@@ -324,6 +342,18 @@ export async function GET(
                 name: variant.name,
                 image: variant.image,
                 price,
+                originalPrice:
+                    pricing?.originalPrice ?? rawPrice,
+                discount:
+                    pricing?.discountAmount ?? 0,
+                hasDiscount:
+                    (pricing?.discountAmount ?? 0) > 0,
+                priceSource:
+                    pricing?.source ?? "ORIGINAL",
+                flashSaleName:
+                    pricing?.flashSaleName ?? null,
+                flashSaleEndAt:
+                    pricing?.flashSaleEndAt?.toISOString() ?? null,
                 weight:
                     variant.weight,
                 stock:
@@ -422,6 +452,15 @@ export async function POST(
             return jsonError(
                 "Anda harus login terlebih dahulu.",
                 401
+            );
+        }
+
+        // Rate limiting for order creation
+        const rateLimit = rateLimiters.orderCreation(user.id!);
+        if (!rateLimit.allowed) {
+            return jsonError(
+                "Terlalu banyak permintaan. Coba lagi nanti.",
+                429
             );
         }
 
@@ -524,321 +563,22 @@ export async function POST(
         const shippingService =
             getShippingService(
                 body.shipping
-            );
-
-        /*
-         * =====================================================
-         * TRANSACTION
-         * =====================================================
-         *
-         * Semua validasi penting dilakukan lagi di server.
-         */
-        const result =
-            await prisma.$transaction(
-                async (tx) => {
-                    const variant =
-                        await tx.productVariant.findUnique(
-                            {
-                                where: {
-                                    id: variantId,
-                                },
-                                include: {
-                                    product: true,
-                                },
-                            }
-                        );
-
-                    if (!variant) {
-                        throw new Error(
-                            "VARIANT_NOT_FOUND"
-                        );
-                    }
-
-                    if (
-                        variant.productId !==
-                        productId
-                    ) {
-                        throw new Error(
-                            "VARIANT_PRODUCT_MISMATCH"
-                        );
-                    }
-
-                    /*
-                     * Lock-like validation:
-                     *
-                     * updateMany dengan kondisi
-                     * stock >= quantity.
-                     *
-                     * Ini lebih aman daripada:
-                     *
-                     * find -> cek stock -> update
-                     *
-                     * karena dua request concurrent
-                     * bisa lolos bersamaan.
-                     */
-                    const stockUpdate =
-                        await tx.productVariant.updateMany(
-                            {
-                                where: {
-                                    id: variantId,
-                                    stock: {
-                                        gte:
-                                            quantity,
-                                    },
-                                },
-                                data: {
-                                    stock: {
-                                        decrement:
-                                            quantity,
-                                    },
-                                },
-                            }
-                        );
-
-                    if (
-                        stockUpdate.count !==
-                        1
-                    ) {
-                        throw new Error(
-                            "OUT_OF_STOCK"
-                        );
-                    }
-
-                    const address =
-                        await tx.userAddress.findFirst(
-                            {
-                                where: {
-                                    id:
-                                        addressId,
-                                    userId:
-                                        user.id,
-                                },
-                            }
-                        );
-
-                    if (!address) {
-                        throw new Error(
-                            "ADDRESS_NOT_FOUND"
-                        );
-                    }
-
-                    if (
-                        !address.rajaOngkirDestinationId
-                    ) {
-                        throw new Error(
-                            "ADDRESS_DESTINATION_NOT_FOUND"
-                        );
-                    }
-
-                    const price =
-                        decimalToNumber(
-                            variant.price
-                        );
-
-                    const subtotal =
-                        price * quantity;
-
-                    /*
-                     * =================================================
-                     * VOUCHER
-                     * =================================================
-                     */
-
-                    let discount = 0;
-                    let voucherId: number | null = null;
-                    let appliedVoucherCode: string | null = null;
-
-                    if (voucherCode) {
-                        const voucherResult = await validateAndCalculateVoucher(
-                            voucherCode,
-                            subtotal,
-                            tx
-                        );
-
-                        if (!voucherResult.valid) {
-                            throw new Error(voucherResult.message);
-                        }
-
-                        voucherId = voucherResult.voucher.id;
-                        appliedVoucherCode = voucherResult.voucher.code;
-                        discount = voucherResult.discount;
-
-                        const voucherUsed = await incrementVoucherUsage(tx, voucherId);
-
-                        if (!voucherUsed) {
-                            throw new Error("Kuota voucher baru saja habis. Silakan gunakan kode voucher lain.");
-                        }
-                    }
-
-                    const total =
-                        Math.max(
-                            0,
-                            subtotal -
-                            discount +
-                            shippingCost
-                        );
-
-                    const orderNumber =
-                        `ORD-${Date.now()}-${Math.random()
-                            .toString(36)
-                            .slice(2, 8)
-                            .toUpperCase()}`;
-
-                    const order =
-                        await tx.order.create(
-                            {
-                                data: {
-                                    userId:
-                                        user.id,
-
-                                    orderNumber,
-
-                                    recipientName:
-                                        address.recipientName,
-
-                                    phone:
-                                        address.phone,
-
-                                    address:
-                                        address.address,
-
-                                    province:
-                                        address.province,
-
-                                    city:
-                                        address.city,
-
-                                    district:
-                                        address.district,
-
-                                    postalCode:
-                                        address.postalCode,
-
-                                    subtotal:
-                                        new Prisma.Decimal(
-                                            subtotal.toFixed(
-                                                2
-                                            )
-                                        ),
-
-                                    shippingCost:
-                                        new Prisma.Decimal(
-                                            shippingCost.toFixed(
-                                                2
-                                            )
-                                        ),
-
-                                    discount:
-                                        new Prisma.Decimal(
-                                            discount.toFixed(
-                                                2
-                                            )
-                                        ),
-
-                                    total:
-                                        new Prisma.Decimal(
-                                            total.toFixed(
-                                                2
-                                            )
-                                        ),
-
-                                    status:
-                                        "PENDING",
-
-                                    paymentMethod:
-                                        "COD",
-
-                                    paymentStatus:
-                                        "UNPAID",
-
-                                    shippingCourier,
-
-                                    shippingService,
-
-                                    voucherId:
-                                        voucherId,
-
-                                    voucherCode:
-                                        appliedVoucherCode,
-
-                                    latitude:
-                                        address.latitude,
-
-                                    longitude:
-                                        address.longitude,
-
-                                    items: {
-                                        create: {
-                                            productId:
-                                                variant.productId,
-
-                                            variantId:
-                                                variant.id,
-
-                                            productName:
-                                                variant
-                                                    .product
-                                                    .name,
-
-                                            variantName:
-                                                variant.name,
-
-                                            price:
-                                                variant.price,
-
-                                            quantity,
-
-                                            subtotal:
-                                                new Prisma.Decimal(
-                                                    subtotal.toFixed(
-                                                        2
-                                                    )
-                                                ),
-                                        },
-                                    },
-                                },
-
-                                include: {
-                                    items: true,
-                                },
-                            }
-                        );
-
-                    /*
-                     * sold hanya bertambah ketika order
-                     * benar-benar dibuat.
-                     */
-                    await tx.product.update({
-                        where: {
-                            id:
-                                variant.productId,
-                        },
-                        data: {
-                            sold: {
-                                increment:
-                                    quantity,
-                            },
-                        },
-                    });
-
-                    return {
-                        order,
-                        subtotal,
-                        shippingCost,
-                        discount,
-                        total,
-                    };
-                },
-                {
-                    isolationLevel:
-                        Prisma.TransactionIsolationLevel.Serializable,
-                }
-            );
+            );        const result =
+            await createCheckoutOrder({
+                userId: user.id,
+                mode: "BUY_NOW",
+                addressId,
+                shipping: body.shipping,
+                paymentMethod: "COD",
+                voucherCode: voucherCode ?? undefined,
+                productId,
+                variantId,
+                quantity,
+            });
 
         return jsonSuccess(
             {
-                id:
-                    result.order.id,
+                id: result.order.id,
 
                 orderNumber:
                     result.order.orderNumber,
@@ -852,24 +592,21 @@ export async function POST(
                 paymentMethod:
                     result.order.paymentMethod,
 
-                subtotal:
-                    result.subtotal,
-
-                shippingCost:
-                    result.shippingCost,
-
-                discount:
-                    result.discount,
-
-                total:
-                    result.total,
+                subtotal: result.subtotal,
+                shippingCost: result.shippingCost,
+                discount: result.discount,
+                total: result.grossAmount,
             },
             201
         );
     } catch (error) {
         console.error(
-            "POST /api/buy-now ERROR:",
-            error
+            JSON.stringify({
+                event: "CHECKOUT_FAILURE",
+                checkoutType: "BUY_NOW_COD",
+                message: error instanceof Error ? error.message : "Unknown error",
+                timestamp: new Date().toISOString(),
+            })
         );
 
         const message =

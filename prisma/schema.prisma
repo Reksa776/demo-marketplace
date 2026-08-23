@@ -8,25 +8,34 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// ==========================================
+// EXISTING MODELS (UNCHANGED except relations)
+// ==========================================
+
 model User {
-  id            String        @id @default(cuid())
+  id            String         @id @default(cuid())
   name          String?
-  email         String?       @unique
-  phone         String?       @unique
+  email         String?        @unique
+  phone         String?        @unique
   password      String?
   image         String?
-  role          Role          @default(CUSTOMER)
-  referralCode  String?       @unique
+  role          Role           @default(CUSTOMER)
+  referralCode  String?        @unique
   referredBy    String?
   emailVerified DateTime?
-  createdAt     DateTime      @default(now())
-  updatedAt     DateTime      @updatedAt
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
   accounts      Account[]
   cart          Cart?
   orders        Order[]
   sessions      Session[]
   addresses     UserAddress[]
-  notifications  Notification[]
+  notifications Notification[]
+
+  // Marketing & Affiliate relations
+  affiliateProfile   AffiliateProfile?
+  flashSalePurchases FlashSalePurchase[]
+  voucherUsages      VoucherUserUsage[]
 }
 
 model Account {
@@ -83,6 +92,14 @@ model Product {
   orderItems  OrderItem[]
   variants    ProductVariant[]
 
+  // Marketing relations
+  discounts        ProductDiscount[]
+  flashSales       FlashSale[]
+  bulkDiscounts    BulkDiscount[]
+  campaignProducts CampaignProduct[]
+  voucherProducts  VoucherProduct[]
+  affiliateClicks  AffiliateClick[]
+
   @@index([isArchived])
 }
 
@@ -99,6 +116,11 @@ model ProductVariant {
   cartItems  CartItem[]
   orderItems OrderItem[]
   product    Product     @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  // Marketing relations
+  discounts      ProductDiscount[]
+  flashSales     FlashSale[]
+  bulkDiscounts  BulkDiscount[]
 
   @@index([productId])
 }
@@ -201,6 +223,9 @@ model Order {
   items            OrderItem[]
   notifications    Notification[]
 
+  // Affiliate relation (optional)
+  affiliateConversion AffiliateConversion?
+
   @@index([userId])
   @@index([status])
   @@index([paymentStatus])
@@ -228,15 +253,15 @@ model OrderItem {
 }
 
 model StoreSetting {
-  id                      Int      @id @default(1)
-  storeName               String
-  logo                    String?  @db.Text
-  email                   String?
-  phone                   String?
-  address                 String   @db.Text
+  id        Int     @id @default(1)
+  storeName String
+  logo      String? @db.Text
+  email     String?
+  phone     String?
+  address   String  @db.Text
 
   // TikTok Pixel
-  tiktokPixelId           String?
+  tiktokPixelId String?
 
   province                String?
   city                    String?
@@ -352,13 +377,31 @@ model Voucher {
 
   orders Order[]
 
+  // Marketing & Voucher extension relations
+  campaignId           Int?
+  campaign             Campaign?          @relation(fields: [campaignId], references: [id])
+  maxUsagePerUser      Int?
+  eligibility          VoucherEligibility @default(ALL)
+  productRestrictions  VoucherProduct[]
+  categoryRestrictions VoucherCategory[]
+  userUsages           VoucherUserUsage[]
+
   @@index([isActive])
 }
 
+// ==========================================
+// EXISTING ENUMS (UNCHANGED)
+// ==========================================
 
 enum Voucher_type {
   PERCENTAGE
   FIXED
+}
+
+enum VoucherEligibility {
+  ALL
+  NEW_USER
+  RETURNING_USER
 }
 
 enum Role {
@@ -401,22 +444,22 @@ enum Notification_status {
 }
 
 model Notification {
-  id                Int                  @id @default(autoincrement())
+  id                Int                 @id @default(autoincrement())
   orderId           Int?
   userId            String?
   channel           String
   notificationType  String
   recipient         String
-  idempotencyKey    String               @unique
+  idempotencyKey    String              @unique
   providerMessageId String?
-  payload           String?              @db.Text
-  status            Notification_status  @default(QUEUED)
+  payload           String?             @db.Text
+  status            Notification_status @default(QUEUED)
   errorCode         String?
-  errorMessage      String?              @db.Text
-  retryCount        Int                  @default(0)
-  maxRetries        Int                  @default(3)
-  createdAt         DateTime             @default(now())
-  updatedAt         DateTime             @updatedAt
+  errorMessage      String?             @db.Text
+  retryCount        Int                 @default(0)
+  maxRetries        Int                 @default(3)
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
 
   order Order? @relation(fields: [orderId], references: [id], onDelete: SetNull)
   user  User?  @relation(fields: [userId], references: [id], onDelete: SetNull)
@@ -426,4 +469,510 @@ model Notification {
   @@index([status])
   @@index([channel])
   @@index([notificationType])
+}
+
+// ==========================================
+// MARKETING CORE — NEW MODELS
+// ==========================================
+
+// ------------------------------------------
+// 2.1 CAMPAIGN
+// ------------------------------------------
+
+model Campaign {
+  id          Int     @id @default(autoincrement())
+  name        String
+  slug        String  @unique
+  description String? @db.Text
+  bannerUrl   String? @db.Text
+  code        String? @unique
+
+  type   CampaignType   @default(GENERAL)
+  status CampaignStatus @default(DRAFT)
+
+  startAt DateTime
+  endAt   DateTime
+
+  // Campaign-wide discount configuration
+  discountType  Voucher_type?
+  discountValue Decimal?      @db.Decimal(12, 2)
+  maxDiscount   Decimal?      @db.Decimal(12, 2)
+
+  priority Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  products   CampaignProduct[]
+  categories CampaignCategory[]
+  vouchers   Voucher[]
+
+  @@index([status])
+  @@index([startAt, endAt])
+}
+
+model CampaignProduct {
+  id         Int      @id @default(autoincrement())
+  campaignId Int
+  productId  Int
+  campaign   Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  product    Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([campaignId, productId])
+  @@index([campaignId])
+  @@index([productId])
+}
+
+model CampaignCategory {
+  id         Int      @id @default(autoincrement())
+  campaignId Int
+  category   String
+  campaign   Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@unique([campaignId, category])
+  @@index([campaignId])
+}
+
+enum CampaignType {
+  GENERAL
+  FLASH_SALE
+  CATEGORY_DISCOUNT
+  PRODUCT_DISCOUNT
+}
+
+enum CampaignStatus {
+  DRAFT
+  SCHEDULED
+  ACTIVE
+  ENDED
+  CANCELLED
+}
+
+// ------------------------------------------
+// 3. PRODUCT DISCOUNT
+// ------------------------------------------
+
+model ProductDiscount {
+  id        Int  @id @default(autoincrement())
+  productId Int
+  variantId Int?
+
+  type        Voucher_type
+  value       Decimal      @db.Decimal(12, 2)
+  maxDiscount Decimal?     @db.Decimal(12, 2)
+
+  startAt  DateTime
+  endAt    DateTime
+  isActive Boolean  @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  product Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
+  variant ProductVariant? @relation(fields: [variantId], references: [id], onDelete: Cascade)
+
+  @@index([productId])
+  @@index([variantId])
+  @@index([isActive, startAt, endAt])
+}
+
+// ------------------------------------------
+// 4. FLASH SALE
+// ------------------------------------------
+
+model FlashSale {
+  id        Int    @id @default(autoincrement())
+  name      String
+  productId Int
+  variantId Int
+
+  salePrice     Decimal @db.Decimal(12, 2)
+  saleStock     Int
+  soldCount     Int     @default(0)
+  purchaseLimit Int?    @default(1)
+
+  startAt  DateTime
+  endAt    DateTime
+  isActive Boolean  @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  product   Product             @relation(fields: [productId], references: [id], onDelete: Cascade)
+  variant   ProductVariant      @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  purchases FlashSalePurchase[]
+
+  @@unique([variantId])
+  @@index([isActive, startAt, endAt])
+  @@index([variantId])
+}
+
+model FlashSalePurchase {
+  id          Int    @id @default(autoincrement())
+  flashSaleId Int
+  userId      String
+  quantity    Int
+
+  createdAt DateTime @default(now())
+
+  flashSale FlashSale @relation(fields: [flashSaleId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id])
+
+  @@unique([flashSaleId, userId])
+  @@index([flashSaleId])
+  @@index([userId])
+}
+
+// ------------------------------------------
+// 6. PROMOTION / BANNER
+// ------------------------------------------
+
+model Promotion {
+  id        Int                @id @default(autoincrement())
+  title     String
+  imageUrl  String             @db.Text
+  link      String?            @db.Text
+  placement PromotionPlacement @default(HOMEPAGE)
+
+  priority Int     @default(0)
+  isActive Boolean @default(true)
+
+  startAt DateTime?
+  endAt   DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([placement, isActive])
+  @@index([startAt, endAt])
+}
+
+enum PromotionPlacement {
+  HOMEPAGE
+  CAMPAIGN
+  CATEGORY
+  PRODUCT
+}
+
+// ==========================================
+// VOUCHER EXTENSIONS — NEW MODELS
+// ------------------------------------------
+// 7.1 VOUCHER PRODUCT
+// ------------------------------------------
+
+model VoucherProduct {
+  id        Int     @id @default(autoincrement())
+  voucherId Int
+  productId Int
+  voucher   Voucher @relation(fields: [voucherId], references: [id], onDelete: Cascade)
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([voucherId, productId])
+  @@index([voucherId])
+  @@index([productId])
+}
+
+// ------------------------------------------
+// 7.2 VOUCHER CATEGORY
+// ------------------------------------------
+
+model VoucherCategory {
+  id        Int     @id @default(autoincrement())
+  voucherId Int
+  category  String
+  voucher   Voucher @relation(fields: [voucherId], references: [id], onDelete: Cascade)
+
+  @@unique([voucherId, category])
+  @@index([voucherId])
+}
+
+// ------------------------------------------
+// 7.3 VOUCHER USER USAGE
+// ------------------------------------------
+
+model VoucherUserUsage {
+  id         Int    @id @default(autoincrement())
+  voucherId  Int
+  userId     String
+  usageCount Int    @default(1)
+
+  voucher Voucher @relation(fields: [voucherId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id])
+
+  @@unique([voucherId, userId])
+  @@index([voucherId])
+  @@index([userId])
+}
+
+// ==========================================
+// BULK DISCOUNT (BELI BANYAK LEBIH HEMAT)
+// ==========================================
+
+model BulkDiscount {
+  id        Int    @id @default(autoincrement())
+  name      String
+  productId Int
+  variantId Int?
+
+  minQuantity Int
+  type        Voucher_type
+  value       Decimal @db.Decimal(12, 2)
+  maxDiscount Decimal? @db.Decimal(12, 2)
+
+  startAt  DateTime
+  endAt    DateTime
+  isActive Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  product Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
+  variant ProductVariant? @relation(fields: [variantId], references: [id], onDelete: Cascade)
+
+  @@index([productId])
+  @@index([variantId])
+  @@index([isActive, startAt, endAt])
+}
+
+// ==========================================
+// SHIPPING DISCOUNT (DISKON ONGKIR)
+// ==========================================
+
+model ShippingDiscount {
+  id             Int     @id @default(autoincrement())
+  name           String
+  code           String? @unique
+
+  type           Voucher_type
+  value          Decimal @db.Decimal(12, 2)
+  maxDiscount    Decimal? @db.Decimal(12, 2)
+  minPurchase    Decimal? @db.Decimal(12, 2)
+
+  startAt  DateTime
+  endAt    DateTime
+  isActive Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([isActive, startAt, endAt])
+  @@index([code])
+}
+
+// ==========================================
+// BROADCAST SYSTEM
+// ==========================================
+
+model Broadcast {
+  id          Int    @id @default(autoincrement())
+  name        String
+  type        BroadcastType
+  channel     NotificationChannel
+
+  subject     String? @db.Text
+  message     String  @db.Text
+  imageUrl    String? @db.Text
+  link        String? @db.Text
+
+  status      BroadcastStatus @default(DRAFT)
+  scheduledAt DateTime?
+  sentAt      DateTime?
+
+  audienceCount Int @default(0)
+  sentCount     Int @default(0)
+  failedCount   Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([type])
+  @@index([status])
+  @@index([createdAt])
+}
+
+enum BroadcastType {
+  BEST_SELLER
+  NEW_PRODUCT
+  BUY_AGAIN
+  INACTIVE_BUYER
+  PRICE_DROP
+  CART_REMINDER
+  CHECKOUT_REMINDER
+  THANK_YOU
+}
+
+enum NotificationChannel {
+  whatsapp
+  email
+  sms
+  push
+}
+
+enum BroadcastStatus {
+  DRAFT
+  SCHEDULED
+  SENDING
+  COMPLETED
+  FAILED
+}
+
+// ==========================================
+// AFFILIATE SYSTEM — NEW MODELS
+// ==========================================
+
+// ------------------------------------------
+// 8.1 AFFILIATE PROFILE
+// ------------------------------------------
+
+model AffiliateProfile {
+  id             Int             @id @default(autoincrement())
+  userId         String          @unique
+  status         AffiliateStatus @default(PENDING)
+  affiliateCode  String          @unique
+  commissionRate Decimal         @default(5.00) @db.Decimal(5, 2)
+
+  rejectionReason String?
+  approvedAt      DateTime?
+  approvedBy      String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user        User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  kyc         AffiliateKyc?
+  clicks      AffiliateClick[]
+  conversions AffiliateConversion[]
+  payouts     AffiliatePayout[]
+
+  @@index([status])
+}
+
+enum AffiliateStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  SUSPENDED
+}
+
+// ------------------------------------------
+// 8.2 AFFILIATE KYC
+// ------------------------------------------
+
+model AffiliateKyc {
+  id          Int @id @default(autoincrement())
+  affiliateId Int @unique
+
+  // KTP (ID card)
+  ktpImageUrl String? @db.Text
+  ktpName     String?
+  ktpNumber   String?
+
+  // Social media
+  socialMediaPlatform String?
+  socialMediaUsername String?
+  socialMediaUrl      String? @db.Text
+
+  // Bank account
+  bankName          String
+  bankAccountName   String
+  bankAccountNumber String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  affiliate AffiliateProfile @relation(fields: [affiliateId], references: [id], onDelete: Cascade)
+}
+
+// ------------------------------------------
+// 9. AFFILIATE CLICKS / TRACKING
+// ------------------------------------------
+
+model AffiliateClick {
+  id          Int     @id @default(autoincrement())
+  affiliateId Int
+  code        String
+  sessionId   String?
+  productId   Int?
+  landingUrl  String? @db.Text
+
+  createdAt DateTime @default(now())
+
+  affiliate AffiliateProfile @relation(fields: [affiliateId], references: [id], onDelete: Cascade)
+  product   Product?         @relation(fields: [productId], references: [id], onDelete: SetNull)
+
+  @@index([affiliateId])
+  @@index([code])
+  @@index([sessionId])
+  @@index([createdAt])
+}
+
+// ------------------------------------------
+// 10. AFFILIATE CONVERSION
+// ------------------------------------------
+
+model AffiliateConversion {
+  id            Int    @id @default(autoincrement())
+  affiliateId   Int
+  orderId       Int    @unique
+  affiliateCode String
+
+  orderSubtotal    Decimal @db.Decimal(12, 2)
+  commissionRate   Decimal @db.Decimal(5, 2)
+  commissionAmount Decimal @db.Decimal(12, 2)
+
+  status AffiliateConversionStatus @default(PENDING)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  affiliate AffiliateProfile @relation(fields: [affiliateId], references: [id], onDelete: Restrict)
+  order     Order            @relation(fields: [orderId], references: [id], onDelete: Restrict)
+
+  @@index([affiliateId])
+  @@index([status])
+}
+
+enum AffiliateConversionStatus {
+  PENDING
+  APPROVED
+  CANCELLED
+  REVERSED
+  PAID
+}
+
+// ------------------------------------------
+// 11. AFFILIATE PAYOUT
+// ------------------------------------------
+
+model AffiliatePayout {
+  id          Int                   @id @default(autoincrement())
+  affiliateId Int
+  amount      Decimal               @db.Decimal(12, 2)
+  status      AffiliatePayoutStatus @default(PENDING)
+
+  // Bank info snapshot
+  bankName          String
+  bankAccountName   String
+  bankAccountNumber String
+
+  requestedAt     DateTime  @default(now())
+  processedAt     DateTime?
+  processedBy     String?
+  rejectionReason String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  affiliate AffiliateProfile @relation(fields: [affiliateId], references: [id], onDelete: Restrict)
+
+  @@index([affiliateId])
+  @@index([status])
+}
+
+enum AffiliatePayoutStatus {
+  PENDING
+  PROCESSING
+  PAID
+  REJECTED
+  CANCELLED
 }

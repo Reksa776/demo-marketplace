@@ -11,24 +11,28 @@ import {
 } from "react-icons/fi";
 import toast from "react-hot-toast";
 
+/**
+ * Cart item structure matches /api/cart GET response.
+ * The API returns flat items — NOT nested variant/product objects.
+ */
 type CartItem = {
     id: number;
+    productId: number;
+    variantId: number;
+    productName: string;
+    variantName: string;
+    productSlug: string;
+    image: string | null;
+    price: number;           // effectivePrice (marketing-adjusted)
+    originalPrice: number;   // raw variant.price
+    discount: number;        // discount amount
+    hasDiscount: boolean;
+    priceSource: string;     // ORIGINAL | FLASH_SALE | PRODUCT_DISCOUNT | CAMPAIGN | BULK_DISCOUNT
+    flashSaleName: string | null;
+    bulkDiscountName: string | null;
     quantity: number;
-
-    product: {
-        id: number;
-        name: string;
-        slug: string;
-        image: string | null;
-    };
-
-    variant: {
-        id: number;
-        name: string;
-        price: string | number;
-        stock: number;
-        image: string | null;
-    };
+    stock: number;
+    weight: number;
 };
 
 type Cart = {
@@ -86,9 +90,9 @@ export default function CartPage() {
             return;
         }
 
-        if (quantity > item.variant.stock) {
+        if (quantity > item.stock) {
             toast.error(
-                `Stok tersedia hanya ${item.variant.stock}.`
+                `Stok tersedia hanya ${item.stock}.`
             );
 
             return;
@@ -197,11 +201,15 @@ export default function CartPage() {
 
     const items = cart?.items ?? [];
 
+    /**
+     * Subtotal uses effectivePrice (marketing-adjusted),
+     * NOT the raw variant price.
+     */
     const subtotal = items.reduce(
         (total, item) => {
             return (
                 total +
-                Number(item.variant.price) *
+                item.price *
                 item.quantity
             );
         },
@@ -266,18 +274,14 @@ export default function CartPage() {
                     {/* ITEMS */}
                     <div className="space-y-4">
                         {items.map((item) => {
-                            const price =
-                                Number(
-                                    item.variant.price
-                                );
-
-                            const itemTotal =
-                                price *
-                                item.quantity;
-
-                            const image =
-                                item.variant.image ??
-                                item.product.image;
+                            /**
+                             * Use effectivePrice for display and subtotal.
+                             * originalPrice shown as strikethrough if discounted.
+                             */
+                            const price = item.price;
+                            const originalPrice = item.originalPrice;
+                            const itemTotal = price * item.quantity;
+                            const image = item.image;
 
                             return (
                                 <div
@@ -291,7 +295,7 @@ export default function CartPage() {
                                             {image ? (
                                                 <img
                                                     src={image}
-                                                    alt={item.product.name}
+                                                    alt={item.productName}
                                                     className="h-full w-full object-cover"
                                                     loading="lazy"
                                                 />
@@ -308,23 +312,28 @@ export default function CartPage() {
                                             <div className="flex justify-between gap-3">
                                                 <div>
                                                     <Link
-                                                        href={`/products/${item.product.slug}`}
+                                                        href={`/products/${item.productSlug}`}
                                                         className="line-clamp-2 text-sm font-semibold text-gray-900 hover:text-rose-600"
                                                     >
-                                                        {
-                                                            item.product
-                                                                .name
-                                                        }
+                                                        {item.productName}
                                                     </Link>
 
                                                     <p className="mt-1 text-xs text-gray-500">
                                                         Varian:{" "}
-                                                        {
-                                                            item
-                                                                .variant
-                                                                .name
-                                                        }
+                                                        {item.variantName}
                                                     </p>
+
+                                                    {item.flashSaleName && (
+                                                        <p className="mt-0.5 text-xs font-medium text-rose-500">
+                                                            🔥 {item.flashSaleName}
+                                                        </p>
+                                                    )}
+
+                                                    {item.bulkDiscountName && (
+                                                        <p className="mt-0.5 text-xs font-medium text-blue-500">
+                                                            📦 {item.bulkDiscountName}
+                                                        </p>
+                                                    )}
                                                 </div>
 
                                                 <button
@@ -350,12 +359,23 @@ export default function CartPage() {
 
                                             <div className="mt-4 flex items-center justify-between gap-3">
 
-                                                <p className="text-sm font-bold text-gray-900">
-                                                    Rp{" "}
-                                                    {price.toLocaleString(
-                                                        "id-ID"
+                                                <div className="flex items-center gap-2">
+                                                    <p className="text-sm font-bold text-gray-900">
+                                                        Rp{" "}
+                                                        {price.toLocaleString(
+                                                            "id-ID"
+                                                        )}
+                                                    </p>
+
+                                                    {item.hasDiscount && originalPrice > price && (
+                                                        <p className="text-xs text-gray-400 line-through">
+                                                            Rp{" "}
+                                                            {originalPrice.toLocaleString(
+                                                                "id-ID"
+                                                            )}
+                                                        </p>
                                                     )}
-                                                </p>
+                                                </div>
 
                                                 <div className="flex items-center rounded-xl border border-gray-200">
 
@@ -393,8 +413,7 @@ export default function CartPage() {
                                                         type="button"
                                                         disabled={
                                                             item.quantity >=
-                                                            item.variant
-                                                                .stock ||
+                                                            item.stock ||
                                                             updatingId ===
                                                             item.id
                                                         }

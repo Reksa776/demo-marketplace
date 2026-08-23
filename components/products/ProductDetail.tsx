@@ -17,6 +17,13 @@ type ProductVariant = {
     id: number;
     name: string;
     price: number;
+    effectivePrice?: number;
+    originalPrice?: number;
+    discount?: number;
+    hasDiscount?: boolean;
+    priceSource?: string;
+    flashSaleName?: string | null;
+    flashSaleEndAt?: string | null;
     stock: number;
     image: string | null;
 };
@@ -61,6 +68,45 @@ export default function ProductDetail({
 
     const [loading, setLoading] =
         useState(false);
+
+    const [bulkTiers, setBulkTiers] =
+        useState<Array<{
+            id: number;
+            name: string;
+            minQuantity: number;
+            type: string;
+            value: number;
+            maxDiscount: number | null;
+        }>>([]);
+
+    /*
+|--------------------------------------------------------------------------
+| LOAD BULK DISCOUNT TIERS
+|--------------------------------------------------------------------------
+*/
+
+    useEffect(() => {
+        if (!product.id) return;
+
+        async function loadBulkTiers() {
+            try {
+                const params = new URLSearchParams({
+                    productId: String(product.id),
+                });
+                if (selectedVariant) {
+                    params.set("variantId", String(selectedVariant.id));
+                }
+                const res = await fetch(`/api/bulk-discounts?${params}`);
+                const data = await res.json();
+                if (data.success && Array.isArray(data.data)) {
+                    setBulkTiers(data.data);
+                }
+            } catch {
+                setBulkTiers([]);
+            }
+        }
+        loadBulkTiers();
+    }, [product.id, selectedVariant?.id]);
 
     /*
 |--------------------------------------------------------------------------
@@ -136,7 +182,18 @@ export default function ProductDetail({
     */
 
     const price =
+        selectedVariant?.effectivePrice ??
         selectedVariant?.price ?? 0;
+
+    const originalPrice =
+        selectedVariant?.originalPrice ??
+        selectedVariant?.price ?? 0;
+
+    const hasDiscount =
+        selectedVariant?.hasDiscount ?? false;
+
+    const flashSaleName =
+        selectedVariant?.flashSaleName ?? null;
 
     /*
     |--------------------------------------------------------------------------
@@ -489,20 +546,31 @@ export default function ProductDetail({
 
                         <div className="mt-6">
 
-                            <p className="text-3xl font-bold text-gray-900">
-                                Rp{" "}
-                                {formatPrice(
-                                    price
-                                )}
-                            </p>
+                            {hasDiscount ? (
+                                <>
+                                    <p className="text-sm text-gray-400 line-through">
+                                        Rp {formatPrice(originalPrice)}
+                                    </p>
+                                    <p className="text-3xl font-bold text-rose-600">
+                                        Rp {formatPrice(price)}
+                                    </p>
+                                    {flashSaleName && (
+                                        <p className="mt-1 text-xs font-medium text-rose-500">
+                                            🔥 {flashSaleName}
+                                        </p>
+                                    )}
+                                </>
+                            ) : (
+                                <p className="text-3xl font-bold text-gray-900">
+                                    Rp {formatPrice(price)}
+                                </p>
+                            )}
 
                             {selectedVariant && (
                                 <p className="mt-1 text-sm text-gray-500">
                                     Varian:{" "}
                                     <span className="font-medium text-gray-700">
-                                        {
-                                            selectedVariant.name
-                                        }
+                                        {selectedVariant.name}
                                     </span>
                                 </p>
                             )}
@@ -590,7 +658,7 @@ export default function ProductDetail({
                                                         <p className="mt-1 text-xs text-gray-500">
                                                             Rp{" "}
                                                             {formatPrice(
-                                                                variant.price
+                                                                variant.effectivePrice ?? variant.price
                                                             )}
                                                         </p>
 
@@ -678,6 +746,51 @@ export default function ProductDetail({
                             </div>
 
                         </div>
+
+                        {/* ================================================= */}
+                        {/* BULK DISCOUNT TIERS */}
+                        {/* ================================================= */}
+
+                        {bulkTiers.length > 0 && (
+                            <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4">
+                                <p className="text-xs font-semibold text-amber-700">
+                                    🛒 Beli Banyak Lebih Hemat!
+                                </p>
+                                <div className="mt-2 space-y-1.5">
+                                    {bulkTiers.map((tier) => {
+                                        const originalPrice = selectedVariant?.price ?? 0;
+                                        const savingsPerItem = tier.type === "PERCENTAGE"
+                                            ? Math.round((originalPrice * tier.value) / 100)
+                                            : tier.value;
+                                        const finalPrice = Math.max(0, originalPrice - savingsPerItem);
+                                        return (
+                                            <div
+                                                key={tier.id}
+                                                className={`flex items-center justify-between rounded-lg px-3 py-2 text-sm ${
+                                                    quantity >= tier.minQuantity
+                                                        ? "bg-amber-100 font-semibold text-amber-800"
+                                                        : "text-amber-600"
+                                                }`}
+                                            >
+                                                <span>
+                                                    Beli {tier.minQuantity}+ item
+                                                </span>
+                                                <div className="text-right">
+                                                    <span>
+                                                        {tier.type === "PERCENTAGE"
+                                                            ? `Hemat Rp ${savingsPerItem.toLocaleString("id-ID")}/item`
+                                                            : `Hemat Rp ${tier.value.toLocaleString("id-ID")}/item`}
+                                                    </span>
+                                                    <span className="block text-[10px] opacity-70">
+                                                        Harga: Rp {finalPrice.toLocaleString("id-ID")}/item
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        )}
 
                         {/* ================================================= */}
                         {/* ACTION BUTTON */}

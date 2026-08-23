@@ -2,7 +2,20 @@ import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 
-export async function GET() {
+/* ==========================================
+ * GET /api/admin/orders
+ * ==========================================
+ *
+ * Query params:
+ *   page   — page number (default 1)
+ *   limit  — items per page (default 20, max 100)
+ *   status — optional order status filter
+ *   search — optional search by orderNumber/recipientName
+ */
+
+export async function GET(
+    request: Request
+) {
     try {
         const session = await auth();
 
@@ -26,32 +39,110 @@ export async function GET() {
             );
         }
 
-        const orders =
-            await prisma.order.findMany({
-                orderBy: {
-                    createdAt: "desc",
-                },
+        const { searchParams } = new URL(
+            request.url
+        );
 
-                include: {
-                    user: {
-                        select: {
-                            id: true,
-                            name: true,
-                            email: true,
-                            phone: true,
-                        },
+        // ==========================================
+        // PARSE & VALIDATE PAGINATION
+        // ==========================================
+
+        const rawPage = Number(
+            searchParams.get("page") ?? "1"
+        );
+        const rawLimit = Number(
+            searchParams.get("limit") ?? "20"
+        );
+
+        const page =
+            Number.isInteger(rawPage) &&
+            rawPage > 0
+                ? rawPage
+                : 1;
+
+        const limit = Math.min(
+            100,
+            Math.max(
+                1,
+                Number.isInteger(rawLimit) &&
+                    rawLimit > 0
+                    ? rawLimit
+                    : 20
+            )
+        );
+
+        const offset = (page - 1) * limit;
+
+        // ==========================================
+        // PARSE FILTERS
+        // ==========================================
+
+        const search =
+            searchParams
+                .get("search")
+                ?.trim() || undefined;
+
+        const statusParam =
+            searchParams.get("status");
+
+        const where: any = {};
+
+        if (search) {
+            where.OR = [
+                {
+                    orderNumber: {
+                        contains: search,
                     },
-
-                    items: true,
                 },
-            });
+                {
+                    recipientName: {
+                        contains: search,
+                    },
+                },
+            ];
+        }
+
+        if (statusParam) {
+            where.status = statusParam;
+        }
+
+        // ==========================================
+        // FETCH WITH PAGINATION
+        // ==========================================
+
+        const [orders, total] =
+            await Promise.all([
+                prisma.order.findMany({
+                    where,
+                    orderBy: {
+                        createdAt: "desc",
+                    },
+                    include: {
+                        user: {
+                            select: {
+                                id: true,
+                                name: true,
+                                email: true,
+                                phone: true,
+                            },
+                        },
+                        items: true,
+                    },
+                    take: limit,
+                    skip: offset,
+                }),
+                prisma.order.count({
+                    where,
+                }),
+            ]);
 
         const data = orders.map((order) => ({
             id: order.id,
 
             orderNumber: order.orderNumber,
 
-            recipientName: order.recipientName,
+            recipientName:
+                order.recipientName,
             phone: order.phone,
 
             address: order.address,
@@ -61,12 +152,16 @@ export async function GET() {
             postalCode: order.postalCode,
 
             subtotal: Number(order.subtotal),
-            shippingCost: Number(order.shippingCost),
+            shippingCost: Number(
+                order.shippingCost
+            ),
             total: Number(order.total),
 
             status: order.status,
-            paymentMethod: order.paymentMethod,
-            paymentStatus: order.paymentStatus,
+            paymentMethod:
+                order.paymentMethod,
+            paymentStatus:
+                order.paymentStatus,
 
             shippingCourier:
                 order.shippingCourier,
@@ -77,8 +172,7 @@ export async function GET() {
             trackingNumber:
                 order.trackingNumber,
 
-            trackingUrl:
-                order.trackingUrl,
+            trackingUrl: order.trackingUrl,
 
             createdAt:
                 order.createdAt.toISOString(),
@@ -88,11 +182,17 @@ export async function GET() {
 
             user: order.user
                 ? {
-                    id: order.user.id,
-                    name: order.user?.name ?? order.recipientName,
-                    email: order.user?.email ?? "-",
-                    phone: order.user?.phone ?? order.phone,
-                }
+                      id: order.user.id,
+                      name:
+                          order.user.name ??
+                          order.recipientName,
+                      email:
+                          order.user.email ??
+                          "-",
+                      phone:
+                          order.user.phone ??
+                          order.phone,
+                  }
                 : null,
 
             items: order.items.map(
@@ -102,19 +202,28 @@ export async function GET() {
                         item.productName,
                     variantName:
                         item.variantName,
-                    quantity:
-                        item.quantity,
-                    price:
-                        Number(item.price),
-                    subtotal:
-                        Number(item.subtotal),
+                    quantity: item.quantity,
+                    price: Number(item.price),
+                    subtotal: Number(
+                        item.subtotal
+                    ),
                 })
             ),
         }));
 
         return NextResponse.json({
             success: true,
-            data,
+            data: {
+                items: data,
+                pagination: {
+                    page,
+                    limit,
+                    total,
+                    totalPages: Math.ceil(
+                        total / limit
+                    ),
+                },
+            },
         });
     } catch (error) {
         console.error(

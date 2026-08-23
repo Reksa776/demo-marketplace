@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
+import { resolveBatchPrices } from "@/lib/marketing/batch-pricing";
 import {
     FiArrowRight,
     FiShoppingBag,
@@ -9,6 +10,7 @@ import BannerSlider from "@/components/products/BannerSlider";
 import { ProductProvider } from "@/components/products/ProductContext";
 import { auth } from "@/auth";
 import BottomNavbar from "@/components/products/BottomNavbar";
+import { getActivePromotions } from "@/lib/marketing/promotion";
 
 type ProductWithVariant = {
     bestseller: boolean;
@@ -18,10 +20,16 @@ type ProductWithVariant = {
     image: string | null;
     sold: number;
     rating: number;
+    category: string | null;
     variants: {
         id: number;
         name: string;
-        price: unknown;
+        price: number;
+        effectivePrice: number;
+        discount: number;
+        hasDiscount: boolean;
+        priceSource: string;
+        flashSaleName: string | null;
         image: string | null;
     }[];
 };
@@ -37,7 +45,19 @@ function getProductPrice(product: ProductWithVariant) {
 
     return Math.min(
         ...product.variants.map((variant) =>
-            Number(variant.price)
+            variant.effectivePrice
+        )
+    );
+}
+
+function getProductOriginalPrice(product: ProductWithVariant) {
+    if (!product.variants.length) {
+        return 0;
+    }
+
+    return Math.min(
+        ...product.variants.map((variant) =>
+            variant.price
         )
     );
 }
@@ -80,6 +100,7 @@ async function getProducts() {
             prisma.product.findMany({
                 where: {
                     bestseller: true,
+                    isArchived: false,
                 },
                 orderBy: [
                     {
@@ -101,6 +122,9 @@ async function getProducts() {
             }),
 
             prisma.product.findMany({
+                where: {
+                    isArchived: false,
+                },
                 orderBy: {
                     createdAt: "desc",
                 },
@@ -116,9 +140,55 @@ async function getProducts() {
             }),
         ]);
 
+    // ==========================================
+    // BATCH MARKETING PRICING
+    // ==========================================
+    const allProducts = [...bestSeller, ...latest];
+
+    const allVariantInputs = allProducts.flatMap((product) =>
+        product.variants.map((v) => ({
+            productId: product.id,
+            variantId: v.id,
+            originalPrice: Number(v.price),
+            quantity: 1,
+            category: product.category,
+        }))
+    );
+
+    const pricingResults = await resolveBatchPrices(allVariantInputs);
+
+    const pricingMap = new Map(
+        pricingResults.map((r) => [r.variantId, r])
+    );
+
+    // ==========================================
+    // SERIALIZE WITH MARKETING PRICES
+    // ==========================================
+    function serializeProducts(products: typeof bestSeller): ProductWithVariant[] {
+        return products.map((product) => ({
+            ...product,
+            variants: product.variants.map((variant) => {
+                const pricing = pricingMap.get(variant.id);
+                const rawPrice = Number(variant.price);
+
+                return {
+                    id: variant.id,
+                    name: variant.name,
+                    price: rawPrice,
+                    effectivePrice: pricing?.effectivePrice ?? rawPrice,
+                    discount: pricing?.discountAmount ?? 0,
+                    hasDiscount: (pricing?.discountAmount ?? 0) > 0,
+                    priceSource: pricing?.source ?? "ORIGINAL",
+                    flashSaleName: pricing?.flashSaleName ?? null,
+                    image: variant.image,
+                };
+            }),
+        }));
+    }
+
     return {
-        bestSeller,
-        latest,
+        bestSeller: serializeProducts(bestSeller),
+        latest: serializeProducts(latest),
     };
 }
 
@@ -129,6 +199,19 @@ function ProductCard({
 }) {
     const image = getProductImage(product);
     const price = getProductPrice(product);
+    const originalPrice = getProductOriginalPrice(product);
+    const hasDiscount = price < originalPrice;
+
+    /*
+     * Discount percentage — calculated from
+     * original vs effective price.
+     */
+    const discountPercent =
+        hasDiscount && originalPrice > 0
+            ? Math.round(
+                  ((originalPrice - price) / originalPrice) * 100
+              )
+            : 0;
 
     return (
         <Link
@@ -153,6 +236,12 @@ function ProductCard({
                         BEST SELLER
                     </span>
                 )}
+
+                {hasDiscount && discountPercent > 0 && (
+                    <span className="absolute right-3 top-3 rounded-full bg-red-500 px-2 py-0.5 text-[10px] font-bold text-white shadow-sm">
+                        -{discountPercent}%
+                    </span>
+                )}
             </div>
 
             <div className="p-4">
@@ -160,14 +249,33 @@ function ProductCard({
                     {product.name}
                 </h3>
 
-                <div className="mt-3 flex items-center justify-between gap-3">
-                    <span className="text-base font-bold text-rose-600">
-                        {formatRupiah(price)}
-                    </span>
+                <div className="mt-3">
+                    {hasDiscount ? (
+                        <div>
+                            <p className="text-[11px] text-gray-400 line-through">
+                                {formatRupiah(originalPrice)}
+                            </p>
+                            <div className="flex items-center justify-between gap-3">
+                                <span className="text-base font-bold text-rose-600">
+                                    {formatRupiah(price)}
+                                </span>
 
-                    <span className="text-xs text-gray-400">
-                        {product.sold} terjual
-                    </span>
+                                <span className="text-xs text-gray-400">
+                                    {product.sold} terjual
+                                </span>
+                            </div>
+                        </div>
+                    ) : (
+                        <div className="flex items-center justify-between gap-3">
+                            <span className="text-base font-bold text-gray-900">
+                                {formatRupiah(price)}
+                            </span>
+
+                            <span className="text-xs text-gray-400">
+                                {product.sold} terjual
+                            </span>
+                        </div>
+                    )}
                 </div>
 
                 {product.rating > 0 && (
@@ -338,11 +446,20 @@ function WelcomeCard({
     );
 }
 
-export default async function HomePage() {
-    const { bestSeller, latest } =
-        await getProducts();
+async function getHomepageBanners() {
+    const now = new Date();
+    const promotions = await getActivePromotions("HOMEPAGE", now);
+    return promotions.map((p) => ({
+        id: p.id,
+        imageUrl: p.imageUrl,
+        title: p.title,
+        link: p.link,
+    }));
+}
 
-    const session = await auth();
+export default async function HomePage() {
+    const [{ bestSeller, latest }, banners, session] =
+        await Promise.all([getProducts(), getHomepageBanners(), auth()]);
 
     if (!session?.user) {
         return (
@@ -362,7 +479,7 @@ export default async function HomePage() {
 
                     {/* BANNER DI BAWAH */}
                     <section className="mb-10 overflow-hidden rounded-2xl">
-                        <BannerSlider />
+                        <BannerSlider banners={banners} />
                     </section>
 
                     <div className="space-y-12">

@@ -1,8 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-
-
+import { resolveBatchPrices } from "@/lib/marketing/batch-pricing";
 
 export async function GET() {
     try {
@@ -12,7 +11,8 @@ export async function GET() {
             return NextResponse.json(
                 {
                     success: false,
-                    message: "Silakan login terlebih dahulu.",
+                    message:
+                        "Silakan login terlebih dahulu.",
                 },
                 {
                     status: 401,
@@ -22,34 +22,37 @@ export async function GET() {
 
         const userId = session.user.id;
 
-        /*
-         * ==========================================
-         * CART
-         * ==========================================
-         */
+        // ==========================================
+        // CART
+        // ==========================================
 
-        const cart = await prisma.cart.findUnique({
-            where: {
-                userId,
-            },
-            include: {
-                items: {
-                    orderBy: {
-                        createdAt: "asc",
-                    },
-                    include: {
-                        product: true,
-                        variant: true,
+        const cart =
+            await prisma.cart.findUnique({
+                where: {
+                    userId,
+                },
+                include: {
+                    items: {
+                        orderBy: {
+                            createdAt: "asc",
+                        },
+                        include: {
+                            product: true,
+                            variant: true,
+                        },
                     },
                 },
-            },
-        });
+            });
 
-        if (!cart || cart.items.length === 0) {
+        if (
+            !cart ||
+            cart.items.length === 0
+        ) {
             return NextResponse.json(
                 {
                     success: false,
-                    message: "Keranjang kosong.",
+                    message:
+                        "Keranjang kosong.",
                 },
                 {
                     status: 400,
@@ -57,48 +60,47 @@ export async function GET() {
             );
         }
 
-        /*
-         * ==========================================
-         * ADDRESSES
-         * ==========================================
-         */
+        // ==========================================
+        // ADDRESSES
+        // ==========================================
 
-        const addresses = await prisma.userAddress.findMany({
-            where: {
-                userId,
-            },
-            orderBy: [
-                {
-                    isDefault: "desc",
+        const addresses =
+            await prisma.userAddress.findMany({
+                where: {
+                    userId,
                 },
-                {
-                    createdAt: "desc",
+                orderBy: [
+                    {
+                        isDefault: "desc",
+                    },
+                    {
+                        createdAt: "desc",
+                    },
+                ],
+            });
+
+        // ==========================================
+        // STORE
+        // ==========================================
+
+        const store =
+            await prisma.storeSetting.findUnique({
+                where: {
+                    id: 1,
                 },
-            ],
-        });
-
-        /*
-         * ==========================================
-         * STORE
-         * ==========================================
-         */
-
-        const store = await prisma.storeSetting.findUnique({
-            where: {
-                id: 1,
-            },
-            select: {
-                id: true,
-                storeName: true,
-                rajaOngkirDestinationId: true,
-            },
-        });
+                select: {
+                    id: true,
+                    storeName: true,
+                    rajaOngkirDestinationId: true,
+                },
+            });
 
         if (!store) {
             return NextResponse.json(
                 {
                     success: false,
-                    message: "Data toko belum dikonfigurasi.",
+                    message:
+                        "Data toko belum dikonfigurasi.",
                 },
                 {
                     status: 500,
@@ -109,9 +111,13 @@ export async function GET() {
         if (
             !store.rajaOngkirDestinationId ||
             !Number.isInteger(
-                Number(store.rajaOngkirDestinationId)
+                Number(
+                    store.rajaOngkirDestinationId
+                )
             ) ||
-            Number(store.rajaOngkirDestinationId) <= 0
+            Number(
+                store.rajaOngkirDestinationId
+            ) <= 0
         ) {
             return NextResponse.json(
                 {
@@ -125,92 +131,149 @@ export async function GET() {
             );
         }
 
-        /*
-         * ==========================================
-         * ITEMS
-         * ==========================================
-         */
+        // ==========================================
+        // BATCH MARKETING PRICING
+        // ==========================================
 
-        const items = cart.items.map((item) => {
-            const price = Number(item.variant.price);
+        const pricingResults =
+            await resolveBatchPrices(
+                cart.items.map((item) => ({
+                    productId: item.productId,
+                    variantId: item.variantId,
+                    originalPrice: Number(
+                        item.variant.price
+                    ),
+                    quantity: Number(
+                        item.quantity
+                    ),
+                    category:
+                        item.product.category,
+                }))
+            );
 
-            const rawWeight = Number(item.variant.weight);
+        const pricingMap = new Map(
+            pricingResults.map((r) => [
+                r.variantId,
+                r,
+            ])
+        );
 
-            const weight =
-                Number.isFinite(rawWeight) && rawWeight >= 0
-                    ? Math.round(rawWeight)
-                    : 0;
+        // ==========================================
+        // ITEMS (with marketing prices)
+        // ==========================================
 
-            const rawQuantity = Number(item.quantity);
+        const items = cart.items.map(
+            (item) => {
+                const pricing =
+                    pricingMap.get(
+                        item.variantId
+                    );
 
-            const quantity =
-                Number.isInteger(rawQuantity) && rawQuantity > 0
-                    ? rawQuantity
-                    : 1;
+                const rawPrice = Number(
+                    item.variant.price
+                );
 
-            const subtotal = price * quantity;
+                const effectivePrice =
+                    pricing
+                        ?.effectivePrice ??
+                    rawPrice;
 
-            const totalWeight = weight * quantity;
+                const rawWeight = Number(
+                    item.variant.weight
+                );
 
-            return {
-                id: item.id,
+                const weight =
+                    Number.isFinite(
+                        rawWeight
+                    ) && rawWeight >= 0
+                        ? Math.round(rawWeight)
+                        : 0;
 
-                productId: item.productId,
-                variantId: item.variantId,
+                const rawQuantity = Number(
+                    item.quantity
+                );
 
-                productName: item.product.name,
-                variantName: item.variant.name,
+                const quantity =
+                    Number.isInteger(
+                        rawQuantity
+                    ) && rawQuantity > 0
+                        ? rawQuantity
+                        : 1;
 
-                image:
-                    item.variant.image ||
-                    item.product.image ||
-                    null,
+                const subtotal =
+                    effectivePrice * quantity;
 
-                price,
+                const totalWeight =
+                    weight * quantity;
 
-                quantity,
+                return {
+                    id: item.id,
 
-                /*
-                 * Berat satu variant dalam gram.
-                 */
-                weight,
+                    productId:
+                        item.productId,
+                    variantId:
+                        item.variantId,
 
-                /*
-                 * Berat variant x quantity.
-                 */
-                totalWeight,
+                    productName:
+                        item.product.name,
+                    variantName:
+                        item.variant.name,
 
-                subtotal,
-            };
-        });
+                    image:
+                        item.variant.image ||
+                        item.product.image ||
+                        null,
 
-        /*
-         * ==========================================
-         * SUBTOTAL
-         * ==========================================
-         */
+                    price: effectivePrice,
+                    originalPrice:
+                        pricing
+                            ?.originalPrice ??
+                        rawPrice,
+                    discount:
+                        pricing
+                            ?.discountAmount ??
+                        0,
+                    hasDiscount:
+                        (pricing
+                            ?.discountAmount ??
+                            0) > 0,
+                    priceSource:
+                        pricing
+                            ?.source ??
+                        "ORIGINAL",
+
+                    quantity,
+
+                    weight,
+                    totalWeight,
+                    subtotal,
+                };
+            }
+        );
+
+        // ==========================================
+        // SUBTOTAL
+        // ==========================================
 
         const subtotal = items.reduce(
-            (total, item) => total + item.subtotal,
+            (total, item) =>
+                total + item.subtotal,
             0
         );
 
-        /*
-         * ==========================================
-         * TOTAL WEIGHT
-         * ==========================================
-         */
+        // ==========================================
+        // TOTAL WEIGHT
+        // ==========================================
 
         const totalWeight = items.reduce(
-            (total, item) => total + item.totalWeight,
+            (total, item) =>
+                total + item.totalWeight,
             0
         );
 
-        /*
-         * ==========================================
-         * RESPONSE
-         * ==========================================
-         */
+        // ==========================================
+        // RESPONSE
+        // ==========================================
 
         return NextResponse.json({
             success: true,
@@ -220,15 +283,6 @@ export async function GET() {
 
                 subtotal,
 
-                /*
-                 * Selalu number.
-                 *
-                 * Contoh:
-                 * 500g x 2 = 1000g
-                 * 1000g x 1 = 1000g
-                 *
-                 * totalWeight = 2000
-                 */
                 totalWeight,
 
                 addresses,
@@ -236,7 +290,8 @@ export async function GET() {
                 store: {
                     id: store.id,
 
-                    storeName: store.storeName,
+                    storeName:
+                        store.storeName,
 
                     rajaOngkirDestinationId:
                         store.rajaOngkirDestinationId,
@@ -244,12 +299,16 @@ export async function GET() {
             },
         });
     } catch (error) {
-        console.error("CHECKOUT GET ERROR:", error);
+        console.error(
+            "CHECKOUT GET ERROR:",
+            error
+        );
 
         return NextResponse.json(
             {
                 success: false,
-                message: "Gagal mengambil data checkout.",
+                message:
+                    "Gagal mengambil data checkout.",
             },
             {
                 status: 500,

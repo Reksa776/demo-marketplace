@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { resolveBatchPrices } from "@/lib/marketing/batch-pricing";
 
 export async function GET() {
     try {
@@ -12,11 +13,10 @@ export async function GET() {
 
         const products =
             await prisma.product.findMany({
-                where: authenticated
-                    ? {}
-                    : {
-                          bestseller: true,
-                      },
+                where: {
+                    isArchived: false,
+                    ...(authenticated ? {} : { bestseller: true }),
+                },
 
                 orderBy: [
                     {
@@ -36,6 +36,38 @@ export async function GET() {
                 },
             });
 
+        // ==========================================
+        // BATCH MARKETING PRICING
+        // ==========================================
+
+        const allVariantInputs =
+            products.flatMap((product) =>
+                product.variants.map((v) => ({
+                    productId: product.id,
+                    variantId: v.id,
+                    originalPrice: Number(v.price),
+                    quantity: 1,
+                    category: product.category,
+                }))
+            );
+
+        const pricingResults =
+            await resolveBatchPrices(
+                allVariantInputs
+            );
+
+        // Build lookup: variantId → pricing result
+        const pricingMap = new Map(
+            pricingResults.map((r) => [
+                r.variantId,
+                r,
+            ])
+        );
+
+        // ==========================================
+        // FORMAT RESPONSE
+        // ==========================================
+
         const formattedProducts =
             products.map((product) => ({
                 id: product.id,
@@ -53,19 +85,45 @@ export async function GET() {
 
                 variants:
                     product.variants.map(
-                        (variant) => ({
-                            id: variant.id,
-                            productId:
-                                variant.productId,
-                            name: variant.name,
-                            price: Number(
-                                variant.price
-                            ),
-                            stock:
-                                variant.stock,
-                            image:
-                                variant.image,
-                        })
+                        (variant) => {
+                            const pricing =
+                                pricingMap.get(
+                                    variant.id
+                                );
+
+                            const rawPrice =
+                                Number(
+                                    variant.price
+                                );
+
+                            return {
+                                id: variant.id,
+                                productId:
+                                    variant.productId,
+                                name: variant.name,
+                                price: rawPrice,
+                                effectivePrice:
+                                    pricing
+                                        ?.effectivePrice ??
+                                    rawPrice,
+                                discount:
+                                    pricing
+                                        ?.discountAmount ??
+                                    0,
+                                hasDiscount:
+                                    (pricing
+                                        ?.discountAmount ??
+                                        0) > 0,
+                                priceSource:
+                                    pricing
+                                        ?.source ??
+                                    "ORIGINAL",
+                                stock:
+                                    variant.stock,
+                                image:
+                                    variant.image,
+                            };
+                        }
                     ),
             }));
 

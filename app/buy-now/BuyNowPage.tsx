@@ -90,6 +90,13 @@ type VariantData = {
     name: string;
     image: string | null;
     price: number;
+    originalPrice?: number;
+    effectivePrice?: number;
+    discount?: number;
+    hasDiscount?: boolean;
+    priceSource?: string;
+    flashSaleName?: string | null;
+    flashSaleEndAt?: string | null;
     weight: number;
     stock: number;
 };
@@ -462,6 +469,9 @@ export default function BuyNowPage({
 
     const [shippingRetrying, setShippingRetrying] =
         useState(false);
+
+    const [shippingDiscount, setShippingDiscount] = useState(0);
+    const [shippingDiscountName, setShippingDiscountName] = useState<string | null>(null);
 
     /*
      * =====================================================
@@ -2005,6 +2015,62 @@ export default function BuyNowPage({
 
     /*
      * =====================================================
+     * SHIPPING DISCOUNT PREVIEW
+     * =====================================================
+     *
+     * Fetch shipping discount when shipping is selected.
+     */
+    useEffect(() => {
+        if (!selectedShipping || !data) {
+            setShippingDiscount(0);
+            setShippingDiscountName(null);
+            return;
+        }
+
+        const sc = Number(
+            selectedShipping.cost ??
+            selectedShipping.price ??
+            selectedShipping.shipping_cost ??
+            0
+        );
+
+        if (!Number.isFinite(sc) || sc <= 0) {
+            setShippingDiscount(0);
+            setShippingDiscountName(null);
+            return;
+        }
+
+        async function fetchShippingDiscount() {
+            try {
+                const response = await fetch("/api/shipping/discount-preview", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        shippingCost: sc,
+                        subtotal: data!.subtotal,
+                        code: appliedVoucherCode || null,
+                    }),
+                    cache: "no-store",
+                });
+                const result = await response.json();
+                if (result.success && result.data?.hasDiscount) {
+                    setShippingDiscount(result.data.discountAmount || 0);
+                    setShippingDiscountName(result.data.name || null);
+                } else {
+                    setShippingDiscount(0);
+                    setShippingDiscountName(null);
+                }
+            } catch {
+                setShippingDiscount(0);
+                setShippingDiscountName(null);
+            }
+        }
+
+        fetchShippingDiscount();
+    }, [selectedShipping, data, appliedVoucherCode]);
+
+    /*
+     * =====================================================
      * SHIPPING COST
      * =====================================================
      */
@@ -2033,6 +2099,11 @@ export default function BuyNowPage({
      * =====================================================
      */
 
+    const finalShippingCost =
+        useMemo(() => {
+            return Math.max(0, shippingCost - shippingDiscount);
+        }, [shippingCost, shippingDiscount]);
+
     const grandTotal =
         useMemo(() => {
             if (!data) {
@@ -2051,13 +2122,14 @@ export default function BuyNowPage({
                 ) +
 
                 Number(
-                    shippingCost
+                    finalShippingCost
                 )
             );
         }, [
             data,
+
             voucherDiscount,
-            shippingCost,
+            finalShippingCost,
         ]);
 
     /*
@@ -2808,15 +2880,34 @@ export default function BuyNowPage({
                                         }
                                     </p>
 
-                                    <p className="mt-2 text-sm">
-                                        {data.quantity} × Rp{" "}
-                                        {Number(
-                                            data.variant
-                                                .price
-                                        ).toLocaleString(
-                                            "id-ID"
+                                    <div className="mt-2">
+                                        <p className="text-sm">
+                                            {data.quantity} × Rp{" "}
+                                            {Number(
+                                                data.variant
+                                                    .effectivePrice ??
+                                                data.variant
+                                                    .price
+                                            ).toLocaleString(
+                                                "id-ID"
+                                            )}
+                                        </p>
+                                        {(data.variant.hasDiscount ?? false) && (
+                                            <p className="mt-0.5 text-xs text-gray-400 line-through">
+                                                Rp {Number(
+                                                    data.variant
+                                                        .originalPrice ??
+                                                    data.variant
+                                                        .price
+                                                ).toLocaleString("id-ID")}
+                                            </p>
                                         )}
-                                    </p>
+                                        {(data.variant.priceSource === "FLASH_SALE") && data.variant.flashSaleName && (
+                                            <p className="mt-0.5 text-xs font-medium text-rose-500">
+                                                🔥 {data.variant.flashSaleName}
+                                            </p>
+                                        )}
+                                    </div>
 
                                     <p className="mt-1 text-xs text-gray-400">
                                         Berat{" "}
@@ -3897,6 +3988,19 @@ export default function BuyNowPage({
                                         : "Belum dipilih"}
                                 </span>
                             </div>
+
+                            {/* SHIPPING DISCOUNT */}
+
+                            {shippingDiscount > 0 && (
+                                <div className="flex justify-between gap-4 text-green-600">
+                                    <span>
+                                        Diskon Ongkir{shippingDiscountName ? ` (${shippingDiscountName})` : ""}
+                                    </span>
+                                    <span className="font-medium">
+                                        - Rp {shippingDiscount.toLocaleString("id-ID")}
+                                    </span>
+                                </div>
+                            )}
 
                             {/* VOUCHER */}
 

@@ -3,9 +3,20 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { hashPassword } from "@/lib/password";
 import { registerSchema } from "@/lib/validations/register";
+import { rateLimiters, getClientIp } from "@/lib/rate-limit";
 
 export async function POST(req: Request) {
     try {
+        // Rate limiting
+        const clientIp = getClientIp(req);
+        const rateLimit = rateLimiters.register(clientIp);
+        if (!rateLimit.allowed) {
+            return NextResponse.json(
+                { success: false, message: "Terlalu banyak permintaan. Coba lagi nanti." },
+                { status: 429 }
+            );
+        }
+
         const body = await req.json();
 
         const data = registerSchema.parse(body);

@@ -10,6 +10,8 @@ import {
     rollbackCheckoutOrder,
 } from "@/lib/checkout";
 
+import { rateLimiters } from "@/lib/rate-limit";
+
 const snap =
     new Midtrans.Snap({
         isProduction:
@@ -83,6 +85,25 @@ export async function POST(
 
         const userId =
             session.user.id;
+
+        /*
+         * ==========================================
+         * RATE LIMIT
+         * ==========================================
+         */
+
+        const rateLimit =
+            rateLimiters.orderCreation(userId);
+
+        if (!rateLimit.allowed) {
+            return NextResponse.json(
+                {
+                    success: false,
+                    message: "Terlalu banyak permintaan. Coba lagi nanti.",
+                },
+                { status: 429 }
+            );
+        }
 
         /*
          * ==========================================
@@ -550,17 +571,14 @@ export async function POST(
         );
     } catch (error: any) {
         console.error(
-            "========== MIDTRANS ERROR =========="
-        );
-
-        console.error(
-            "MESSAGE:",
-            error?.message
-        );
-
-        console.error(
-            "API RESPONSE:",
-            error?.ApiResponse
+            JSON.stringify({
+                event: "CHECKOUT_FAILURE",
+                checkoutType: "CART_MIDTRANS",
+                orderId: createdOrderId,
+                message: error?.message ?? "Unknown error",
+                midtransApiError: error?.ApiResponse?.status_message ?? null,
+                timestamp: new Date().toISOString(),
+            })
         );
 
         /*

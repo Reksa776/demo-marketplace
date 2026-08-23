@@ -1,6 +1,75 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+
+export async function GET(request: NextRequest) {
+    try {
+        const session = await auth();
+        if (!session?.user) {
+            return NextResponse.json({ success: false, message: "Unauthorized." }, { status: 401 });
+        }
+        const role = (session.user as any).role;
+        if (role !== "ADMIN") {
+            return NextResponse.json({ success: false, message: "Akses ditolak." }, { status: 403 });
+        }
+
+        const params = request.nextUrl.searchParams;
+        const page = Math.max(1, Number(params.get("page")) || 1);
+        const limit = Math.min(100, Math.max(1, Number(params.get("limit")) || 50));
+        const search = params.get("search") || undefined;
+        const category = params.get("category") || undefined;
+
+        // ==========================================
+        // ARCHIVED FILTER
+        // ==========================================
+        //
+        // ?archived=true   → only archived
+        // ?archived=false  → only active
+        // (omitted)        → all products (safe default for admin)
+
+        const archivedParam = params.get("archived");
+
+        const where: any = {};
+
+        if (archivedParam === "true") {
+            where.isArchived = true;
+        } else if (archivedParam === "false") {
+            where.isArchived = false;
+        }
+        // If not provided: no isArchived filter → show all
+        if (search && search.trim()) {
+            where.OR = [
+                { name: { contains: search.trim() } },
+                { slug: { contains: search.trim() } },
+            ];
+        }
+        if (category && category.trim()) {
+            where.category = category.trim();
+        }
+
+        const [products, total] = await Promise.all([
+            prisma.product.findMany({
+                where,
+                include: { variants: true },
+                orderBy: { createdAt: "desc" },
+                take: limit,
+                skip: (page - 1) * limit,
+            }),
+            prisma.product.count({ where }),
+        ]);
+
+        return NextResponse.json({
+            success: true,
+            data: {
+                items: products,
+                pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
+            },
+        });
+    } catch (error) {
+        console.error("GET /api/admin/products ERROR:", error);
+        return NextResponse.json({ success: false, message: "Gagal mengambil data produk." }, { status: 500 });
+    }
+}
 
 export async function POST(request: Request) {
     try {

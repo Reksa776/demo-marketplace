@@ -15,10 +15,49 @@ import {
     FiFileText,
     FiTag,
     FiMessageCircle,
+    FiZap,
+    FiTarget,
+    FiImage,
+    FiChevronDown,
+    FiChevronRight,
+    FiPercent,
+    FiTruck,
+    FiPackage,
+    FiDollarSign,
+    FiUserPlus,
+    FiUserCheck,
+    FiCodesandbox,
+    FiShoppingCart,
+    FiPercent as FiBulkDiscount,
+    FiMail,
+    FiStar,
+    FiTrendingUp,
+    FiClock,
+    FiShoppingBag as FiCartReminder,
+    FiArrowRight,
+    FiHeart,
 } from "react-icons/fi";
 import { useState } from "react";
 
-const menuItems = [
+type MenuItem = {
+    label: string;
+    href: string;
+    icon: any;
+};
+
+type MenuGroup = {
+    label: string;
+    icon: any;
+    children: MenuItem[];
+};
+
+type NavItem = MenuItem | MenuGroup;
+
+function isMenuGroup(item: NavItem): item is MenuGroup {
+    return "children" in item;
+}
+
+const menuItems: NavItem[] = [
     {
         label: "Dashboard",
         href: "/admin",
@@ -35,9 +74,31 @@ const menuItems = [
         icon: FiShoppingBag,
     },
     {
-        label: "Voucher",
-        href: "/admin/vouchers",
-        icon: FiTag,
+        label: "Marketing",
+        icon: FiTarget,
+        children: [
+            { label: "Flash Sale", href: "/admin/flash-sales", icon: FiZap },
+            { label: "Kampanye", href: "/admin/campaigns", icon: FiTarget },
+            { label: "Diskon Produk", href: "/admin/discounts", icon: FiPercent },
+            { label: "Voucher & Promo Code", href: "/admin/vouchers", icon: FiTag },
+            { label: "Beli Banyak Lebih Hemat", href: "/admin/bulk-discounts", icon: FiShoppingCart },
+            { label: "Diskon Ongkir", href: "/admin/shipping-discounts", icon: FiTruck },
+            { label: "Promosi / Banner", href: "/admin/promotions", icon: FiImage },
+        ],
+    },
+    {
+        label: "Broadcast",
+        icon: FiMail,
+        children: [
+            { label: "Produk Terlaris", href: "/admin/broadcasts?type=BEST_SELLER", icon: FiStar },
+            { label: "Produk Baru", href: "/admin/broadcasts?type=NEW_PRODUCT", icon: FiPackage },
+            { label: "Beli Lagi", href: "/admin/broadcasts?type=BUY_AGAIN", icon: FiArrowRight },
+            { label: "Pembeli Tidak Aktif", href: "/admin/broadcasts?type=INACTIVE_BUYER", icon: FiClock },
+            { label: "Harga Turun", href: "/admin/broadcasts?type=PRICE_DROP", icon: FiTrendingUp },
+            { label: "Keranjang", href: "/admin/broadcasts?type=CART_REMINDER", icon: FiShoppingBag },
+            { label: "Reminder Checkout", href: "/admin/broadcasts?type=CHECKOUT_REMINDER", icon: FiDollarSign },
+            { label: "Terima Kasih", href: "/admin/broadcasts?type=THANK_YOU", icon: FiHeart },
+        ],
     },
     {
         label: "Reports",
@@ -223,13 +284,69 @@ function AdminMenu({
     isActive: (href: string) => boolean;
     onNavigate?: () => void;
 }) {
+    const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
+
+    function toggleGroup(label: string) {
+        setExpandedGroups((prev) => ({ ...prev, [label]: !prev[label] }));
+    }
+
+    function isGroupActive(group: MenuGroup): boolean {
+        return group.children.some((child) => isActive(child.href));
+    }
+
     return (
         <nav className="space-y-1">
             {menuItems.map((item) => {
+                if (isMenuGroup(item)) {
+                    const group = item;
+                    const GroupIcon = group.icon;
+                    const expanded = expandedGroups[group.label] ?? isGroupActive(group);
+                    const groupActive = isGroupActive(group);
+
+                    return (
+                        <div key={group.label}>
+                            <button
+                                type="button"
+                                onClick={() => toggleGroup(group.label)}
+                                className={`flex w-full items-center gap-3 rounded-xl px-4 py-3 text-sm font-medium transition ${
+                                    groupActive && expanded
+                                        ? "bg-rose-50 text-rose-600"
+                                        : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+                                }`}
+                            >
+                                <GroupIcon size={19} />
+                                <span className="flex-1 text-left">{group.label}</span>
+                                {expanded ? <FiChevronDown size={14} /> : <FiChevronRight size={14} />}
+                            </button>
+                            {expanded && (
+                                <div className="ml-4 mt-1 space-y-0.5 border-l border-gray-200 pl-3">
+                                    {group.children.map((child) => {
+                                        const ChildIcon = child.icon;
+                                        const active = isActive(child.href);
+                                        return (
+                                            <Link
+                                                key={child.href + child.label}
+                                                href={child.href}
+                                                onClick={onNavigate}
+                                                className={`flex items-center gap-2.5 rounded-lg px-3 py-2 text-[13px] font-medium transition ${
+                                                    active
+                                                        ? "bg-rose-50 text-rose-600"
+                                                        : "text-gray-500 hover:bg-gray-100 hover:text-gray-900"
+                                                }`}
+                                            >
+                                                <ChildIcon size={14} />
+                                                <span>{child.label}</span>
+                                            </Link>
+                                        );
+                                    })}
+                                </div>
+                            )}
+                        </div>
+                    );
+                }
+
                 const Icon = item.icon;
-                const active = isActive(
-                    item.href
-                );
+                const active = isActive(item.href);
 
                 return (
                     <Link
@@ -243,10 +360,7 @@ function AdminMenu({
                         }`}
                     >
                         <Icon size={19} />
-
-                        <span>
-                            {item.label}
-                        </span>
+                        <span>{item.label}</span>
                     </Link>
                 );
             })}

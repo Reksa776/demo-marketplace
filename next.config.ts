@@ -5,7 +5,7 @@ const nextConfig: NextConfig = {
         "192.168.2.49",
         "202.73.25.122",
         "demosolusisejalan.my.id",
-        "pmc-constitutional-manager-articles.trycloudflare.com",
+        "wine-keeping-massachusetts-settled.trycloudflare.com",
     ],
     images: {
         remotePatterns: [
