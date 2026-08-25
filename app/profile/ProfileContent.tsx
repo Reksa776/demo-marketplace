@@ -11,6 +11,8 @@ import {
     FiEdit3,
     FiCheck,
     FiX,
+    FiUsers,
+    FiTag,
 } from "react-icons/fi";
 
 import LogoutButton from "@/components/profile/LogoutButton";
@@ -28,6 +30,8 @@ type Props = {
 const menuItems = [
     { href: "/orders", label: "Pesanan Saya", icon: FiPackage },
     { href: "/addresses", label: "Alamat Saya", icon: FiMapPin },
+    { href: "/promos", label: "Promo Saya", icon: FiTag },
+    { href: "/affiliate", label: "Daftar Affiliator", icon: FiUsers },
 ];
 
 export default function ProfileContent({ user }: Props) {

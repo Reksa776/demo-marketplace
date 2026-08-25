@@ -21,6 +21,9 @@ import {
 import {
     calculateDomesticCost,
 } from "./rajaongkir-shipping";
+import {
+    calculateSpinRewardDiscount,
+} from "./spin-wheel";
 
 export type CheckoutMode =
     | "CART"
@@ -73,6 +76,19 @@ export type CreateCheckoutInput = {
     paymentMethod: CheckoutPaymentMethod;
 
     voucherCode?: string | null;
+
+    /**
+     * Affiliate referral code from cookie.
+     * Server validates and resolves — never
+     * trust affiliateId from client.
+     */
+    affiliateCode?: string | null;
+
+    /**
+     * Spin wheel reward spin ID.
+     * Server validates ownership and eligibility.
+     */
+    spinWheelSpinId?: number | null;
 
     productId?: unknown;
     variantId?: unknown;
@@ -1349,13 +1365,93 @@ export async function createCheckoutOrder(
 
             /*
              * ==========================================
+             * SPIN WHEEL REWARD DISCOUNT
+             * ==========================================
+             *
+             * If user applies a spin wheel reward, validate
+             * server-side and calculate discount. Cannot be
+             * combined with voucher discount.
+             */
+
+            let spinWheelDiscount = 0;
+            let spinWheelSpinId: number | null = null;
+            let spinWheelRewardType: string | null = null;
+            let finalShippingCost2 = finalShippingCost;
+
+            if (
+                input.spinWheelSpinId &&
+                typeof input.spinWheelSpinId === "number"
+            ) {
+                const spinRecord = await tx.spinWheelSpin.findUnique({
+                    where: { id: input.spinWheelSpinId },
+                    include: {
+                        reward: true,
+                        campaign: true,
+                    },
+                });
+
+                if (
+                    !spinRecord ||
+                    spinRecord.userId !== input.userId
+                ) {
+                    throw new Error(
+                        "Reward spin wheel tidak valid."
+                    );
+                }
+
+                if (spinRecord.status !== "AVAILABLE") {
+                    throw new Error(
+                        "Reward spin wheel sudah digunakan atau kedaluwarsa."
+                    );
+                }
+
+                if (
+                    spinRecord.expiresAt &&
+                    spinRecord.expiresAt < new Date()
+                ) {
+                    throw new Error(
+                        "Reward spin wheel sudah kedaluwarsa."
+                    );
+                }
+
+                const reward = spinRecord.reward;
+
+                if (reward.type === "FREE_SHIPPING") {
+                    // Free shipping: set shipping to 0
+                    finalShippingCost2 = 0;
+                    spinWheelRewardType = "FREE_SHIPPING";
+                } else if (
+                    reward.type === "FIXED" ||
+                    reward.type === "PERCENTAGE"
+                ) {
+                    spinWheelDiscount = calculateSpinRewardDiscount(
+                        reward.type,
+                        Number(reward.value),
+                        reward.maxDiscount
+                            ? Number(reward.maxDiscount)
+                            : null,
+                        subtotal - discount
+                    );
+                } else if (reward.type === "CASHBACK") {
+                    // Cashback is not a direct discount
+                    // at checkout time
+                }
+
+                spinWheelSpinId = spinRecord.id;
+            }
+
+            finalShippingCost = finalShippingCost2;
+
+            /*
+             * ==========================================
              * TOTAL
              * ==========================================
              */
 
             const grossAmount =
                 subtotal -
-                discount +
+                discount -
+                spinWheelDiscount +
                 finalShippingCost;
 
             if (
@@ -1457,6 +1553,9 @@ export async function createCheckoutOrder(
              * ==========================================
              */
 
+            // Combine voucher discount + spin wheel discount
+            const totalDiscount = discount + spinWheelDiscount;
+
             const order =
                 await tx.order.create({
                     data: {
@@ -1502,7 +1601,7 @@ export async function createCheckoutOrder(
                         total:
                             grossAmount,
 
-                        discount,
+                        discount: totalDiscount,
 
                         voucherId:
                             voucherId ??
@@ -1678,6 +1777,142 @@ export async function createCheckoutOrder(
                         where: {
                             cartId,
                         },
+                    }
+                );
+            }
+
+            /*
+             * ==========================================
+             * AFFILIATE CONVERSION
+             * ==========================================
+             *
+             * If customer came via referral,
+             * create an AffiliateConversion record
+             * linking this order to the affiliate.
+             *
+             * Commission is calculated on subtotal
+             * (before shipping/discount) using the
+             * rate snapshot from AffiliateProfile.
+             */
+
+            if (input.affiliateCode) {
+                const affiliate =
+                    await tx.affiliateProfile.findFirst(
+                        {
+                            where: {
+                                affiliateCode:
+                                    input.affiliateCode,
+                                status: "APPROVED",
+                            },
+                            select: {
+                                id: true,
+                                userId: true,
+                                affiliateCode: true,
+                                commissionRate: true,
+                            },
+                        }
+                    );
+
+                /*
+                 * SELF-REFERRAL PREVENTION:
+                 * Affiliate cannot refer themselves.
+                 * If affiliate.userId === order userId,
+                 * skip commission entirely.
+                 */
+                if (affiliate && affiliate.userId === input.userId) {
+                    logCheckoutEvent(
+                        "SELF_REFERRAL_BLOCKED",
+                        {
+                            affiliateId: affiliate.id,
+                            affiliateCode: affiliate.affiliateCode,
+                            orderId: order.id,
+                        }
+                    );
+                } else if (affiliate) {
+                    /* ==========================================
+                     * MONEY-SAFE COMMISSION CALCULATION
+                     * ==========================================
+                     *
+                     * Uses calculateCommission() from commission.ts
+                     * which performs Decimal arithmetic throughout.
+                     * This ensures checkout and commission records
+                     * produce exactly the same result.
+                     */
+                    const { calculateCommission } =
+                        await import("@/lib/affiliate/commission");
+                    const commissionResult = calculateCommission(
+                        Number(subtotal),
+                        Number(affiliate.commissionRate)
+                    );
+
+                    try {
+                        await tx.affiliateConversion.create(
+                            {
+                                data: {
+                                    affiliateId:
+                                        affiliate.id,
+                                    orderId:
+                                        order.id,
+                                    affiliateCode:
+                                        affiliate.affiliateCode,
+                                    orderSubtotal:
+                                        commissionResult.orderSubtotal,
+                                    commissionRate:
+                                        commissionResult.commissionRate,
+                                    commissionAmount:
+                                        commissionResult.commissionAmount,
+                                    status: "PENDING",
+                                },
+                            }
+                        );
+
+                        console.log(
+                            `AFFILIATE_CONVERSION: Order ${order.id} linked to affiliate ${affiliate.affiliateCode}, commission ${commissionResult.commissionAmount}`
+                        );
+                    } catch (convError: any) {
+                        // P2002 = already exists (idempotent)
+                        if (
+                            convError?.code ===
+                            "P2002"
+                        ) {
+                            console.log(
+                                `AFFILIATE_CONVERSION: Order ${order.id} already has conversion`
+                            );
+                        } else {
+                            console.error(
+                                "AFFILIATE_CONVERSION ERROR:",
+                                convError
+                            );
+                        }
+                    }
+                }
+            }
+
+            /*
+             * ==========================================
+             * SPIN WHEEL REWARD: MARK AS USED
+             * ==========================================
+             *
+             * Link the spin record to this order and
+             * mark as USED so it cannot be used again.
+             */
+
+            if (spinWheelSpinId) {
+                await tx.spinWheelSpin.update({
+                    where: { id: spinWheelSpinId },
+                    data: {
+                        status: "USED",
+                        usedAt: new Date(),
+                        orderId: order.id,
+                    },
+                });
+
+                logCheckoutEvent(
+                    "SPIN_WHEEL_REWARD_APPLIED",
+                    {
+                        spinId: spinWheelSpinId,
+                        orderId: order.id,
+                        discount: spinWheelDiscount,
                     }
                 );
             }
@@ -2108,6 +2343,18 @@ export async function rollbackCheckoutOrder(
                         "FAILED",
                 },
             });
+
+            /*
+             * AFFILIATE COMMISSION CANCELLATION:
+             * Cancel commission when checkout rollback.
+             */
+            const { cancelCommissionForOrder } =
+                await import("@/lib/affiliate/cancel-commission");
+            await cancelCommissionForOrder(
+                tx,
+                order.id,
+                "ORDER_PAYMENT_FAILED"
+            );
         },
         {
             timeout: 15000,
@@ -2115,6 +2362,84 @@ export async function rollbackCheckoutOrder(
             maxWait: 10000,
         }
     );
+}
+
+/*
+ * ==========================================
+ * USER-INITIATED PENDING ORDER CANCEL
+ * ==========================================
+ *
+ * SOFT-CANCEL (P0 FIX C1):
+ *
+ * Previously this flow used prisma.order.delete()
+ * which permanently destroyed the order while:
+ *   - stock was never restored
+ *   - flash-sale reservations were never released
+ *   - voucher quota was never returned
+ *   - an active Midtrans transaction remained payable
+ *   - AffiliateConversion (FK Restrict) could make
+ *     the delete fail with P2003
+ *
+ * Now it delegates to rollbackCheckoutOrder() which
+ * already implements:
+ *   - atomic CAS transition (PENDING/PROCESSING → CANCELLED)
+ *   - stock restore (regular + flash-sale)
+ *   - FlashSalePurchase cleanup
+ *   - voucher quota + per-user usage restore
+ *   - affiliate commission cancellation
+ *
+ * The order row is NEVER deleted, so order history
+ * is preserved and a late settlement webhook cannot
+ * find-and-resurrect a missing order.
+ */
+
+export async function cancelOwnPendingOrder(
+    userId: string,
+    orderId: number
+): Promise<
+    | { ok: true }
+    | { ok: false; reason: "NOT_FOUND" | "NOT_CANCELLABLE" }
+> {
+    /*
+     * Ownership check: user may only cancel
+     * their own order.
+     */
+    const order = await prisma.order.findFirst({
+        where: {
+            id: orderId,
+            userId,
+        },
+        select: {
+            id: true,
+            status: true,
+            paymentStatus: true,
+            paymentMethod: true,
+        },
+    });
+
+    if (!order) {
+        return { ok: false, reason: "NOT_FOUND" };
+    }
+
+    /*
+     * Only unpaid pending orders are cancellable
+     * by the customer (same rule as before).
+     */
+    if (order.paymentStatus !== "PENDING") {
+        return { ok: false, reason: "NOT_CANCELLABLE" };
+    }
+
+    /*
+     * Atomic soft-cancel + full reservation release.
+     * CAS inside rollbackCheckoutOrder guarantees a
+     * concurrent webhook expire/fail/settlement cannot
+     * interleave destructively.
+     */
+    await rollbackCheckoutOrder(order.id, {
+        restoreCart: false,
+    });
+
+    return { ok: true };
 }
 
 /*

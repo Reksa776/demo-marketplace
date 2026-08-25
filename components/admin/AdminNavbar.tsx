@@ -36,6 +36,7 @@ import {
     FiShoppingBag as FiCartReminder,
     FiArrowRight,
     FiHeart,
+    FiDisc,
 } from "react-icons/fi";
 import { useState } from "react";
 
@@ -84,6 +85,7 @@ const menuItems: NavItem[] = [
             { label: "Beli Banyak Lebih Hemat", href: "/admin/bulk-discounts", icon: FiShoppingCart },
             { label: "Diskon Ongkir", href: "/admin/shipping-discounts", icon: FiTruck },
             { label: "Promosi / Banner", href: "/admin/promotions", icon: FiImage },
+            { label: "Spin Wheel", href: "/admin/spin-wheel", icon: FiDisc },
         ],
     },
     {
@@ -109,6 +111,16 @@ const menuItems: NavItem[] = [
         label: "Pengguna",
         href: "/admin/users",
         icon: FiUsers,
+    },
+    {
+        label: "Affiliator",
+        icon: FiUserPlus,
+        children: [
+            { label: "Pengajuan", href: "/admin/affiliate", icon: FiUserPlus },
+            { label: "Management", href: "/admin/affiliate/manage", icon: FiUserCheck },
+            { label: "Payouts", href: "/admin/affiliate/payouts", icon: FiDollarSign },
+            { label: "Audit Log", href: "/admin/affiliate/audit-log", icon: FiClock },
+        ],
     },
     {
         label: "WhatsApp",
@@ -186,21 +198,23 @@ export default function AdminNavbar() {
                     onClick={() => setOpen(false)}
                 >
                     <div
-                        className="absolute left-0 top-16 h-[calc(100vh-4rem)] w-72 border-r border-gray-200 bg-white p-4 shadow-xl"
+                        className="absolute left-0 top-16 flex h-[calc(100vh-4rem)] w-72 flex-col overflow-hidden border-r border-gray-200 bg-white p-4 shadow-xl"
                         onClick={(e) =>
                             e.stopPropagation()
                         }
                     >
-                        <AdminMenu
-                            pathname={pathname}
-                            isActive={isActive}
-                            onNavigate={() =>
-                                setOpen(false)
-                            }
-                        />
+                        <div className="min-h-0 flex-1 overflow-y-auto">
+                            <AdminMenu
+                                pathname={pathname}
+                                isActive={isActive}
+                                onNavigate={() =>
+                                    setOpen(false)
+                                }
+                            />
+                        </div>
 
                         {/* MOBILE LOGOUT */}
-                        <div className="mt-4 border-t border-gray-100 pt-4">
+                        <div className="mt-4 shrink-0 border-t border-gray-100 pt-4">
                             <button
                                 type="button"
                                 onClick={handleLogout}
@@ -234,13 +248,15 @@ export default function AdminNavbar() {
                     </Link>
                 </div>
 
-                <div className="flex h-[calc(100vh-4rem)] flex-col p-4">
-                    <AdminMenu
-                        pathname={pathname}
-                        isActive={isActive}
-                    />
+                <div className="flex h-[calc(100vh-4rem)] flex-col overflow-hidden p-4">
+                    <div className="min-h-0 flex-1 overflow-y-auto">
+                        <AdminMenu
+                            pathname={pathname}
+                            isActive={isActive}
+                        />
+                    </div>
 
-                    <div className="mt-auto space-y-2 border-t border-gray-100 pt-4">
+                    <div className="mt-auto shrink-0 space-y-2 border-t border-gray-100 pt-4">
                         {/* KEMBALI KE TOKO */}
                         <Link
                             href="/"

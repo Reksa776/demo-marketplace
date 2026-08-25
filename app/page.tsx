@@ -1,10 +1,12 @@
 import Image from "next/image";
 import Link from "next/link";
 import { FiLogIn, FiShoppingBag } from "react-icons/fi";
+import ReferralTracker from "./ReferralTracker";
 
 export default function HomePage() {
   return (
     <main className="min-h-screen bg-gradient-to-b from-rose-50 via-white to-white">
+      <ReferralTracker />
       <section className="mx-auto flex min-h-screen max-w-7xl items-center px-6 py-10">
         <div className="grid w-full items-center gap-12 lg:grid-cols-2">
           {/* ================= Banner ================= */}

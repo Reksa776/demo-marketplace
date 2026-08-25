@@ -33,7 +33,12 @@ export const {
 
             clientSecret:
                 process.env.GOOGLE_CLIENT_SECRET!,
-            allowDangerousEmailAccountLinking: true,
+            // SECURITY: Set to false to prevent OAuth account takeover.
+            // When true, a Google login with email X auto-links to the
+            // existing credentials account with email X — allowing an
+            // attacker who knows a victim's email to link their own
+            // Google account and take over the credentials account.
+            allowDangerousEmailAccountLinking: false,
         }),
 
         /*

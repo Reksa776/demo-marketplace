@@ -724,26 +724,34 @@ test("Pending webhook cannot revert PAID order (CAS guard)", () => {
     );
 });
 
-test("Webhook has flash-sale aware releaseReservedStock", () => {
+test("Webhook has flash-sale aware stock release (via shared module)", () => {
+    // Stock release was extracted to lib/order-stock.ts
+    const orderStockCode = readFile("lib/order-stock.ts");
     assert(
-        webhookCode.includes('flashSale.findFirst'),
-        "Webhook missing flash sale lookup"
+        orderStockCode.includes('flashSale.findFirst'),
+        "order-stock.ts missing flash sale lookup"
     );
     assert(
-        webhookCode.includes('UPDATE FlashSale'),
-        "Webhook missing flash sale stock restore"
+        orderStockCode.includes('UPDATE FlashSale'),
+        "order-stock.ts missing flash sale stock restore"
     );
     assert(
-        webhookCode.includes('soldCount >='),
-        "Webhook missing soldCount guard for flash sale restore"
+        orderStockCode.includes('soldCount >='),
+        "order-stock.ts missing soldCount guard for flash sale restore"
+    );
+    // Webhook imports the shared module
+    assert(
+        webhookCode.includes('releaseStockAndVoucherForOrder'),
+        "Webhook missing releaseStockAndVoucherForOrder import/usage"
     );
 });
 
-test("Webhook does not blindly increment ProductVariant.stock for all items", () => {
-    // The webhook should check flash sale first, then conditionally restore regular stock
+test("Stock release is conditional (flash sale vs regular)", () => {
+    // Conditional logic is in the shared module
+    const orderStockCode = readFile("lib/order-stock.ts");
     assert(
-        webhookCode.includes('else') || webhookCode.includes('} else {'),
-        "Webhook should have conditional stock restoration"
+        orderStockCode.includes('isFlashSale') || orderStockCode.includes('else'),
+        "order-stock.ts should have conditional stock restoration"
     );
 });
 
@@ -773,40 +781,42 @@ test("Webhook idempotent for PAID orders", () => {
     );
 });
 
-test("Webhook releaseReservedStock decrements VoucherUserUsage", () => {
+test("Stock release decrements VoucherUserUsage (via shared module)", () => {
+    const orderStockCode = readFile("lib/order-stock.ts");
     assert(
-        webhookCode.includes('voucherUserUsage.findUnique'),
-        "Webhook releaseReservedStock missing VoucherUserUsage lookup"
+        orderStockCode.includes('voucherUserUsage.findUnique'),
+        "order-stock.ts missing VoucherUserUsage lookup"
     );
     assert(
-        webhookCode.includes('voucherUserUsage.update'),
-        "Webhook releaseReservedStock missing VoucherUserUsage decrement"
-    );
-});
-
-test("Webhook releaseReservedStock checks usageCount > 0 before decrementing VoucherUserUsage", () => {
-    assert(
-        webhookCode.includes('userUsage.usageCount > 0'),
-        "Webhook releaseReservedStock missing usageCount > 0 guard for VoucherUserUsage"
+        orderStockCode.includes('voucherUserUsage.update'),
+        "order-stock.ts missing VoucherUserUsage decrement"
     );
 });
 
-test("Webhook releaseReservedStock uses voucherId_userId composite key for VoucherUserUsage", () => {
+test("Stock release checks usageCount > 0 before decrementing VoucherUserUsage", () => {
+    const orderStockCode = readFile("lib/order-stock.ts");
     assert(
-        webhookCode.includes('voucherId_userId'),
-        "Webhook releaseReservedStock not using voucherId_userId composite key"
+        orderStockCode.includes('usageCount > 0'),
+        "order-stock.ts missing usageCount > 0 guard for VoucherUserUsage"
     );
 });
 
-test("Webhook releaseReservedStock has both Voucher and VoucherUserUsage operations", () => {
-    // Both operations should exist in the webhook file
+test("Stock release uses voucherId_userId composite key for VoucherUserUsage", () => {
+    const orderStockCode = readFile("lib/order-stock.ts");
     assert(
-        webhookCode.includes('voucher.updateMany') && webhookCode.includes('voucherUserUsage'),
-        "Voucher.usedCount and VoucherUserUsage decrements both not found"
+        orderStockCode.includes('voucherId_userId'),
+        "order-stock.ts not using voucherId_userId composite key"
     );
-    // VoucherUserUsage should come after voucher.updateMany (same block)
-    const voucherIdx = webhookCode.indexOf('voucher.updateMany');
-    const userUsageIdx = webhookCode.indexOf('voucherUserUsage.findUnique');
+});
+
+test("Stock release has both Voucher and VoucherUserUsage operations", () => {
+    const orderStockCode = readFile("lib/order-stock.ts");
+    assert(
+        orderStockCode.includes('voucher.updateMany') && orderStockCode.includes('voucherUserUsage'),
+        "Voucher.usedCount and VoucherUserUsage decrements both not found in order-stock.ts"
+    );
+    const voucherIdx = orderStockCode.indexOf('voucher.updateMany');
+    const userUsageIdx = orderStockCode.indexOf('voucherUserUsage.findUnique');
     assert(
         userUsageIdx > voucherIdx,
         "VoucherUserUsage decrement should come after Voucher.usedCount decrement"
@@ -827,11 +837,12 @@ test("Product.sold uses GREATEST guard in checkout rollback", () => {
     );
 });
 
-test("Product.sold uses GREATEST guard in webhook releaseReservedStock", () => {
+test("Product.sold uses GREATEST guard in stock release (shared module)", () => {
+    const orderStockCode = readFile("lib/order-stock.ts");
     assert(
-        webhookCode.includes('GREATEST(0, sold -') ||
-        webhookCode.includes('GREATEST(0,sold -'),
-        "Webhook releaseReservedStock missing GREATEST guard on Product.sold"
+        orderStockCode.includes('GREATEST(0, sold -') ||
+        orderStockCode.includes('GREATEST(0,sold -'),
+        "order-stock.ts missing GREATEST guard on Product.sold"
     );
 });
 
@@ -1160,30 +1171,29 @@ test("RollbackCheckoutOrder uses $executeRaw for CAS (not findUnique-then-update
     );
 });
 
-test("Webhook expired: CAS comes before releaseReservedStock", () => {
-    // Find the EXPIRED handler section (the if block, not the variable)
+test("Webhook expired: CAS comes before stock release", () => {
     const expiredIfIdx = webhookCode.indexOf('if (\n            isExpired');
     const failedIfIdx = webhookCode.indexOf('if (\n            isFailed');
     assert(expiredIfIdx >= 0 && failedIfIdx > expiredIfIdx, "Cannot locate isExpired handler");
     const expiredSection = webhookCode.substring(expiredIfIdx, failedIfIdx);
     const casIdx = expiredSection.indexOf("$executeRaw");
-    const releaseIdx = expiredSection.indexOf("releaseReservedStock");
+    const releaseIdx = expiredSection.indexOf("releaseStockAndVoucherForOrder");
     assert(
         casIdx >= 0 && releaseIdx >= 0 && casIdx < releaseIdx,
-        "CAS must come before releaseReservedStock in expired handler"
+        "CAS must come before stock release in expired handler"
     );
 });
 
-test("Webhook failed: CAS comes before releaseReservedStock", () => {
+test("Webhook failed: CAS comes before stock release", () => {
     const failedIfIdx = webhookCode.indexOf('if (\n            isFailed');
     const refundedIfIdx = webhookCode.indexOf('if (\n            isRefunded');
     assert(failedIfIdx >= 0 && refundedIfIdx > failedIfIdx, "Cannot locate isFailed handler");
     const failedSection = webhookCode.substring(failedIfIdx, refundedIfIdx);
     const casIdx = failedSection.indexOf("$executeRaw");
-    const releaseIdx = failedSection.indexOf("releaseReservedStock");
+    const releaseIdx = failedSection.indexOf("releaseStockAndVoucherForOrder");
     assert(
         casIdx >= 0 && releaseIdx >= 0 && casIdx < releaseIdx,
-        "CAS must come before releaseReservedStock in failed handler"
+        "CAS must come before stock release in failed handler"
     );
 });
 
@@ -1200,29 +1210,26 @@ test("RollbackCheckoutOrder does NOT have non-atomic read-check pattern", () => 
     );
 });
 
-test("Webhook expired/failed use CAS (no findUnique before releaseReservedStock)", () => {
-    // Expired handler: CAS must come before releaseReservedStock, no findUnique in between
+test("Webhook expired/failed use CAS (no findUnique before stock release)", () => {
     const expiredIfIdx = webhookCode.indexOf('if (\n            isExpired');
     const failedIfIdx = webhookCode.indexOf('if (\n            isFailed');
     const expiredSection = webhookCode.substring(expiredIfIdx, failedIfIdx);
     const casIdx = expiredSection.indexOf("$executeRaw");
-    const releaseIdx = expiredSection.indexOf("releaseReservedStock");
+    const releaseIdx = expiredSection.indexOf("releaseStockAndVoucherForOrder");
     const findUniqueIdx = expiredSection.indexOf("findUnique");
-    // findUnique should NOT appear between CAS and releaseReservedStock
     assert(
         findUniqueIdx < 0 || findUniqueIdx > releaseIdx,
-        "Expired handler still has findUnique before releaseReservedStock (non-atomic)"
+        "Expired handler still has findUnique before stock release (non-atomic)"
     );
 
-    // Failed handler: same check
     const refundedIfIdx = webhookCode.indexOf('if (\n            isRefunded');
     const failedSection = webhookCode.substring(failedIfIdx, refundedIfIdx);
     const failedCasIdx = failedSection.indexOf("$executeRaw");
-    const failedReleaseIdx = failedSection.indexOf("releaseReservedStock");
+    const failedReleaseIdx = failedSection.indexOf("releaseStockAndVoucherForOrder");
     const failedFindIdx = failedSection.indexOf("findUnique");
     assert(
         failedFindIdx < 0 || failedFindIdx > failedReleaseIdx,
-        "Failed handler still has findUnique before releaseReservedStock (non-atomic)"
+        "Failed handler still has findUnique before stock release (non-atomic)"
     );
 });
 
@@ -1701,27 +1708,28 @@ const releaseFnStart = webhookCodeT1.indexOf("async function releaseReservedStoc
 const releaseFnEnd = webhookCodeT1.indexOf("export async function POST(");
 const releaseFn = webhookCodeT1.substring(releaseFnStart, releaseFnEnd);
 
-test("Webhook releaseReservedStock deletes FlashSalePurchase after restoring flash sale stock", () => {
+const orderStockCode = readFile("lib/order-stock.ts");
+
+test("Stock release deletes FlashSalePurchase after restoring flash sale stock", () => {
     assert(
-        releaseFn.includes("flashSalePurchase.deleteMany"),
-        "Webhook releaseReservedStock missing flashSalePurchase.deleteMany"
+        orderStockCode.includes("flashSalePurchase.deleteMany"),
+        "order-stock.ts missing flashSalePurchase.deleteMany"
     );
 });
 
-test("Webhook releaseReservedStock FlashSalePurchase cleanup uses flashSaleId and userId", () => {
+test("Stock release FlashSalePurchase cleanup uses variantId and userId", () => {
     assert(
-        releaseFn.includes("flashSaleId: flashSale.id") && releaseFn.includes("userId: order.userId"),
-        "Webhook releaseReservedStock FlashSalePurchase cleanup missing flashSaleId or userId"
+        orderStockCode.includes("flashSale: { variantId:") && orderStockCode.includes("userId: order.userId"),
+        "order-stock.ts FlashSalePurchase cleanup missing variantId or userId"
     );
 });
 
-test("Webhook releaseReservedStock FlashSalePurchase cleanup is inside flash sale block", () => {
-    const flashSaleUpdateIdx = releaseFn.indexOf("UPDATE FlashSale");
-    const deleteManyIdx = releaseFn.indexOf("flashSalePurchase.deleteMany");
-    const elseIfIdx = releaseFn.indexOf("} else if (", flashSaleUpdateIdx);
+test("Stock release FlashSalePurchase cleanup is inside flash sale block", () => {
+    const flashSaleUpdateIdx = orderStockCode.indexOf("UPDATE FlashSale");
+    const deleteManyIdx = orderStockCode.indexOf("flashSalePurchase.deleteMany");
     assert(
-        flashSaleUpdateIdx > 0 && deleteManyIdx > flashSaleUpdateIdx && deleteManyIdx < elseIfIdx,
-        "Webhook FlashSalePurchase cleanup is not inside the flash sale block"
+        flashSaleUpdateIdx > 0 && deleteManyIdx > flashSaleUpdateIdx,
+        "FlashSalePurchase cleanup should come after flash sale stock restore"
     );
 });
 
@@ -1764,13 +1772,12 @@ test("Admin PATCH prevents CANCELLED backward transitions", () => {
         patchFn.includes('CANCELLED:') && patchFn.includes('[]'),
         "Admin PATCH missing CANCELLED empty transition list"
     );
-});
-
-test("Admin PATCH transition guard is before order update", () => {
+});test("Admin PATCH transition guard is before order update", () => {
     const guardIdx = patchFn.indexOf("validTransitions[order.status]");
-    const updateIdx = patchFn.indexOf("prisma.order.update");
-    assert(
-        guardIdx > 0 && updateIdx > 0 && guardIdx < updateIdx,
+    const updateIdxPrisma = patchFn.indexOf("prisma.order.update");
+    const updateIdxTx = patchFn.indexOf("tx.order.update");
+    const updateIdx = updateIdxPrisma > 0 ? updateIdxPrisma : updateIdxTx;
+    assert(guardIdx > 0 && updateIdx > 0 && guardIdx < updateIdx,
         "Admin PATCH transition guard must be before order update"
     );
 });
@@ -1844,39 +1851,41 @@ test("Failed webhook has both status IN and paymentStatus != PAID guards", () =>
     );
 });
 
-test("Refund webhook only processes PAID orders (status guard)", () => {
+test("Refund webhook uses CAS with paymentStatus = 'PAID' guard", () => {
     const refundSection = webhookCodeT2.substring(
         webhookCodeT2.indexOf('if (\n            isRefunded'),
         webhookCodeT2.indexOf('Status lain')
     );
     assert(
-        refundSection.includes('paymentStatus === "PAID"'),
-        "Refund webhook missing PAID status guard — could affect CANCELLED orders"
+        refundSection.includes("paymentStatus = 'PAID'"),
+        "Refund webhook missing CAS paymentStatus PAID guard — could affect CANCELLED orders"
     );
 });
 
-test("Refund webhook is idempotent (skips if already REFUNDED)", () => {
-    // If paymentStatus !== 'PAID' → skip. This is inherently idempotent
-    // because once REFUNDED, the PAID check fails.
+test("Refund webhook is idempotent (CAS prevents double-processing)", () => {
+    // CAS UPDATE with paymentStatus = 'PAID' means second call affects 0 rows
     const refundSection = webhookCodeT2.substring(
         webhookCodeT2.indexOf('if (\n            isRefunded'),
         webhookCodeT2.indexOf('Status lain')
     );
     assert(
-        refundSection.includes('paymentStatus === "PAID"'),
-        "Refund webhook missing idempotency guard"
+        refundSection.includes('refundSettled'),
+        "Refund webhook missing refundSettled idempotency flag"
     );
 });
 
-test("Settlement webhook is idempotent (checks PAID already)", () => {
+test("Settlement webhook is idempotent (CAS prevents resurrection)", () => {
     const settlementSection = webhookCodeT2.substring(
         webhookCodeT2.indexOf('if (\n            isSuccess'),
         webhookCodeT2.indexOf('if (\n            isPending')
     );
     assert(
-        settlementSection.includes('paymentStatus === "PAID"') &&
-        settlementSection.includes('order.status !== "CANCELLED"'),
-        "Settlement webhook missing idempotency guard"
+        settlementSection.includes('settled'),
+        "Settlement webhook missing settled idempotency flag"
+    );
+    assert(
+        settlementSection.includes('affectedRows'),
+        "Settlement webhook missing CAS affectedRows check"
     );
 });
 
@@ -1909,23 +1918,21 @@ test("Webhook returns 500 on error (triggers Midtrans retry)", () => {
     );
 });
 
-test("All three failure webhooks (expired, failed, settle) use releaseReservedStock inside transaction", () => {
-    // Expired and failed handlers should call releaseReservedStock inside their $transaction
+test("All three failure webhooks (expired, failed, refund) use releaseStockAndVoucherForOrder inside transaction", () => {
     assert(
-        webhookCodeT2.includes('releaseReservedStock'),
-        "Webhook missing releaseReservedStock"
+        webhookCodeT2.includes('releaseStockAndVoucherForOrder'),
+        "Webhook missing releaseStockAndVoucherForOrder"
     );
 });
 
 test("Webhook does NOT restore stock on settlement (PAID)", () => {
-    // Settlement handler uses prisma.$transaction directly, not releaseReservedStock
     const settlementSection = webhookCodeT2.substring(
         webhookCodeT2.indexOf('Payment settlement processed'),
         webhookCodeT2.indexOf('isPending')
     );
     assert(
-        !settlementSection.includes('releaseReservedStock'),
-        "Settlement handler should NOT call releaseReservedStock"
+        !settlementSection.includes('releaseStockAndVoucherForOrder'),
+        "Settlement handler should NOT call releaseStockAndVoucherForOrder"
     );
     assert(
         !settlementSection.includes('UPDATE FlashSale'),

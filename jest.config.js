@@ -8,6 +8,7 @@ module.exports = {
     testMatch: [
         "**/__tests__/marketing/*.test.ts",
         "!**/__tests__/marketing/pricing-engine.test.ts",
+        "**/__tests__/p0/*.test.ts",
     ],
     transform: {
         "^.+\\.tsx?$": [

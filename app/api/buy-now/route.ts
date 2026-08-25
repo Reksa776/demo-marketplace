@@ -3,6 +3,8 @@ import { Prisma } from "@prisma/client";
 import {
     createCheckoutOrder,
 } from "@/lib/checkout";
+
+import { getReferralCode } from "@/lib/affiliate/referral";
 import { resolveBatchPrices } from "@/lib/marketing/batch-pricing";
 
 import { prisma } from "@/lib/prisma";
@@ -37,6 +39,7 @@ type BuyNowPostBody = {
     shipping: ShippingPayload;
     paymentMethod: PaymentMethod;
     voucherCode?: string | null;
+    spinWheelSpinId?: number | null;
 };
 
 function jsonError(
@@ -563,7 +566,12 @@ export async function POST(
         const shippingService =
             getShippingService(
                 body.shipping
-            );        const result =
+            );        const affiliateCode =
+            getReferralCode(
+                request.headers.get("cookie")
+            );
+
+        const result =
             await createCheckoutOrder({
                 userId: user.id,
                 mode: "BUY_NOW",
@@ -574,6 +582,8 @@ export async function POST(
                 productId,
                 variantId,
                 quantity,
+                affiliateCode,
+                spinWheelSpinId: typeof body.spinWheelSpinId === "number" ? body.spinWheelSpinId : null,
             });
 
         return jsonSuccess(

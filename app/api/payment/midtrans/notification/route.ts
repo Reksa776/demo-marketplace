@@ -10,6 +10,7 @@ import {
 } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
+import { releaseStockAndVoucherForOrder } from "@/lib/order-stock";
 
 export const dynamic =
     "force-dynamic";
@@ -48,9 +49,7 @@ function verifySignature(
     }
 
     const raw =
-        `${notification.order_id}${notification.status_code}${notification.gross_amount}${serverKey}`;
-
-    const expected =
+        `${notification.order_id}${notification.status_code}${notification.gross_amount}${serverKey}`;    const expected =
         crypto
             .createHash(
                 "sha512"
@@ -58,7 +57,21 @@ function verifySignature(
             .update(raw)
             .digest("hex");
 
-    return crypto.timingSafeEqual(
+        /*
+         * timingSafeEqual THROWS when buffer lengths differ,
+         * which turned malformed signatures into HTTP 500.
+         * Guard the length check first.
+         */
+        if (
+            typeof notification.signature_key !==
+                "string" ||
+            notification.signature_key.length !==
+                expected.length
+        ) {
+            return false;
+        }
+
+        return crypto.timingSafeEqual(
         Buffer.from(
             expected,
             "utf8"
@@ -80,161 +93,7 @@ function json(
     );
 }
 
-async function releaseReservedStock(
-    tx: Prisma.TransactionClient,
-    orderId: number
-) {
-    const order =
-        await tx.order.findUnique({
-            where: {
-                id: orderId,
-            },
 
-            include: {
-                items: true,
-            },
-        });
-
-    if (!order) {
-        return;
-    }
-
-    for (const item of order.items) {
-        /*
-         * variantId/productId di OrderItem sekarang
-         * nullable (SetNull ketika produk dihapus).
-         * Kalau produknya sudah dihapus, tidak ada
-         * lagi row ProductVariant/Product untuk
-         * di-restore stock/sold-nya - cukup skip.
-         */
-
-        /*
-         * Check if this item used a flash sale.
-         * FlashSale has @@unique([variantId]).
-         * If a FlashSale exists for this variant,
-         * the checkout reserved flash-sale stock,
-         * NOT regular ProductVariant.stock.
-         */
-        const flashSale = item.variantId !== null
-            ? await tx.flashSale.findFirst({
-                  where: { variantId: item.variantId },
-              })
-            : null;
-
-        if (flashSale) {
-            /*
-             * FLASH SALE ITEM:
-             * Restore flash-sale stock.
-             * Do NOT touch ProductVariant.stock.
-             *
-             * BUG #3 FIX: Conditional update prevents
-             * negative soldCount and saleStock inflation.
-             */
-            await tx.$executeRaw`
-                UPDATE FlashSale
-                SET saleStock = saleStock + ${item.quantity},
-                    soldCount = soldCount - ${item.quantity}
-                WHERE id = ${flashSale.id}
-                  AND soldCount >= ${item.quantity}
-            `;
-
-            /*
-             * FLASH SALE PURCHASE CLEANUP (BUG T1-1 FIX):
-             * Delete FlashSalePurchase record so the user
-             * can re-attempt if they want to.
-             * Without this, the user is permanently blocked
-             * from buying this flash sale (purchaseLimit
-             * already consumed).
-             */
-            await tx.flashSalePurchase.deleteMany({
-                where: {
-                    flashSaleId: flashSale.id,
-                    userId: order.userId,
-                },
-            });
-        } else if (
-            item.variantId !== null
-        ) {
-            /*
-             * REGULAR ITEM:
-             * Restore regular product stock.
-             */
-            await tx.productVariant.update({
-                where: {
-                    id: item.variantId,
-                },
-                data: {
-                    stock: {
-                        increment: item.quantity,
-                    },
-                },
-            });
-        }
-
-        if (
-            item.productId !== null
-        ) {
-            await tx.$executeRaw`
-                UPDATE Product
-                SET sold = GREATEST(0, sold - ${item.quantity})
-                WHERE id = ${item.productId}
-            `;
-        }
-    }
-
-    /*
-     * Release voucher quota.
-     *
-     * Hanya dilakukan kalau order sebelumnya
-     * belum final paid.
-     */
-    if (
-        order.voucherId
-    ) {
-        await tx.voucher.updateMany(
-            {
-                where: {
-                    id: order.voucherId,
-                    usedCount: { gt: 0 },
-                },
-                data: {
-                    usedCount: { decrement: 1 },
-                },
-            }
-        );
-
-        /*
-         * Restore per-user usage count.
-         *
-         * Mirrors rollbackCheckoutOrder() in lib/checkout.ts.
-         * Without this, a user whose payment expired/failed
-         * would permanently lose one usage slot for the voucher.
-         */
-        const userUsage =
-            await tx.voucherUserUsage.findUnique({
-                where: {
-                    voucherId_userId: {
-                        voucherId: order.voucherId,
-                        userId: order.userId,
-                    },
-                },
-            });
-
-        if (
-            userUsage &&
-            userUsage.usageCount > 0
-        ) {
-            await tx.voucherUserUsage.update({
-                where: { id: userUsage.id },
-                data: {
-                    usageCount: {
-                        decrement: 1,
-                    },
-                },
-            });
-        }
-    }
-}
 
 export async function POST(
     request: NextRequest
@@ -458,47 +317,69 @@ export async function POST(
          */
 
         if (isSuccess) {
+            /*
+             * ========================================================
+             * ATOMIC CAS SETTLEMENT GUARD (P0 FIX C4)
+             * ========================================================
+             *
+             * State machine policy (consistent with the expire/fail
+             * paths below and with admin PATCH transitions):
+             *
+             *   PENDING / PROCESSING → PAID   (allowed)
+             *   PAID                  → PAID  (idempotent no-op)
+             *   CANCELLED / EXPIRED / FAILED → final, NEVER resurrected
+             *   REFUNDED              → final, never overwritten
+             *
+             * Previously this path only did findUnique() + if + update,
+             * so a late settlement notification could resurrect a
+             * CANCELLED/EXPIRED order to PAID AFTER its stock had
+             * already been released by the expire/fail handler —
+             * causing oversell / negative stock.
+             *
+             * The conditional UPDATE makes transition, idempotency and
+             * resurrection-prevention a single atomic operation.
+             */
+            const settledRef =
+                body.transaction_id || null;
+
+            let settled = false;
+
             await prisma.$transaction(async (tx) => {
-                const order = await tx.order.findUnique({
-                    where: { id: existingOrder.id },
-                });
+                const affectedRows =
+                    await tx.$executeRaw`
+                    UPDATE \`Order\`
+                    SET status = 'PAID',
+                        paymentStatus = 'PAID',
+                        paidAt = IFNULL(paidAt, CURRENT_TIMESTAMP),
+                        paymentReference = COALESCE(${settledRef}, paymentReference)
+                    WHERE id = ${existingOrder.id}
+                      AND status IN ('PENDING', 'PROCESSING')
+                      AND paymentStatus NOT IN ('PAID', 'REFUNDED')
+                `;
 
-                if (!order) {
+                if (affectedRows === 0) {
+                    /*
+                     * Either already PAID (duplicate settlement → idempotent)
+                     * or CANCELLED/EXPIRED/REFUNDED (final state — do not
+                     * resurrect). Stock must NOT be touched in either case.
+                     */
                     return;
                 }
 
-                /*
-                 * Idempotent:
-                 *
-                 * Kalau webhook settlement datang
-                 * dua kali, jangan proses ulang.
-                 */
-                if (
-                    order.paymentStatus === "PAID" &&
-                    order.status !== "CANCELLED"
-                ) {
-                    return;
-                }
-
-                await tx.order.update({
-                    where: { id: order.id },
-                    data: {
-                        status: "PAID",
-                        paymentStatus: "PAID",
-                        paidAt: order.paidAt || new Date(),
-                        paymentReference:
-                            body.transaction_id || order.paymentReference,
-                    },
-                });
+                settled = true;
 
                 /*
                  * Kosongkan cart HANYA kalau order ini
                  * berasal dari checkout cart (bukan buy-now,
                  * bukan COD yang sudah dihapus di endpoint lain).
                  */
-                if (order.orderNumber.startsWith("PAY-CART-")) {
+                if (
+                    existingOrder.orderNumber.startsWith(
+                        "PAY-CART-"
+                    )
+                ) {
                     const cart = await tx.cart.findUnique({
-                        where: { userId: order.userId },
+                        where: { userId: existingOrder.userId },
                     });
 
                     if (cart) {
@@ -514,11 +395,12 @@ export async function POST(
              * NOTIFICATION TRIGGER
              * ==========================================
              *
-             * Fire-and-forget.
+             * Fire-and-forget, hanya bila transisi
+             * benar-benar terjadi (bukan duplicate).
              * Notification error tidak boleh
              * mempengaruhi webhook response.
              */
-            if (existingOrder.status !== "PAID") {
+            if (settled) {
                 const { onOrderStatusChanged } =
                     await import(
                         "@/lib/notification/order-status-handler"
@@ -538,7 +420,9 @@ export async function POST(
 
             return json({
                 success: true,
-                message: "Payment settlement processed.",
+                message: settled
+                    ? "Payment settlement processed."
+                    : "Settlement ignored: order already processed or cancelled/expired.",
             });
         }
 
@@ -587,7 +471,6 @@ export async function POST(
          * EXPIRED
          * ========================================================
          */
-
         if (
             isExpired
         ) {
@@ -617,9 +500,21 @@ export async function POST(
                         return;
                     }
 
-                    await releaseReservedStock(
+                    await releaseStockAndVoucherForOrder(
                         tx,
                         existingOrder.id
+                    );
+
+                    /*
+                     * AFFILIATE COMMISSION CANCELLATION:
+                     * Cancel commission when order expires.
+                     */
+                    const { cancelCommissionForOrder } =
+                        await import("@/lib/affiliate/cancel-commission");
+                    await cancelCommissionForOrder(
+                        tx,
+                        existingOrder.id,
+                        "ORDER_EXPIRED"
                     );
                 }
             );
@@ -659,7 +554,6 @@ export async function POST(
          * DENY / CANCEL / FAILURE
          * ========================================================
          */
-
         if (
             isFailed
         ) {
@@ -689,9 +583,21 @@ export async function POST(
                         return;
                     }
 
-                    await releaseReservedStock(
+                    await releaseStockAndVoucherForOrder(
                         tx,
                         existingOrder.id
+                    );
+
+                    /*
+                     * AFFILIATE COMMISSION CANCELLATION:
+                     * Cancel commission when payment fails.
+                     */
+                    const { cancelCommissionForOrder } =
+                        await import("@/lib/affiliate/cancel-commission");
+                    await cancelCommissionForOrder(
+                        tx,
+                        existingOrder.id,
+                        "ORDER_PAYMENT_FAILED"
                     );
                 }
             );
@@ -730,7 +636,8 @@ export async function POST(
          * ========================================================
          * REFUND
          * ========================================================
-         */        if (
+         */
+        if (
             isRefunded
         ) {
             /*
@@ -738,34 +645,71 @@ export async function POST(
              * Only process refund for orders that are currently PAID.
              * Ignore refund for CANCELLED/PENDING/FAILED orders.
              */
-            if (
-                existingOrder.paymentStatus === "PAID"
-            ) {
+            /*
+             * P0 FIX: CAS update + stock release for refunds.
+             *
+             * The paymentStatus = 'PAID' guard outside the transaction
+             * is a fast-path filter. The CAS UPDATE inside the
+             * transaction prevents double-processing: if two refund
+             * webhooks arrive concurrently, only one will see
+             * affectedRows > 0 and restore stock.
+             */
+            const refundedRef = body.transaction_id || existingOrder.paymentReference;
+
+            let refundSettled = false;
+
+            await prisma.$transaction(async (tx) => {
+                const affectedRows = await tx.$executeRaw`
+                    UPDATE \`Order\`
+                    SET paymentStatus = 'REFUNDED',
+                        paymentReference = COALESCE(${refundedRef}, paymentReference)
+                    WHERE id = ${existingOrder.id}
+                      AND paymentStatus = 'PAID'
+                `;
+
+                if (affectedRows === 0) {
+                    /*
+                     * Already REFUNDED (duplicate webhook → idempotent)
+                     * or not PAID (should not happen given outer guard,
+                     * but defense-in-depth).
+                     */
+                    return;
+                }
+
+                refundSettled = true;
+
                 /*
-                 * Only process refund if order is currently PAID.
-                 * This is inherently idempotent: once REFUNDED,
-                 * the PAID check will fail on subsequent calls.
+                 * RELEASE STOCK:
+                 * A refunded order should not keep reserved inventory.
+                 * Uses conditional updates (GREATEST, saleStock >= qty)
+                 * to prevent double-restoring if stock was already
+                 * released by a concurrent handler.
                  */
-                await prisma.order.update({
-                    where: {
-                        id:
-                            existingOrder.id,
-                    },
+                await releaseStockAndVoucherForOrder(
+                    tx,
+                    existingOrder.id
+                );
 
-                    data: {
-                        paymentStatus:
-                            "REFUNDED",
-
-                        paymentReference:
-                            body.transaction_id || existingOrder.paymentReference,
-                    },
-                });
-            }
+                /*
+                 * AFFILIATE COMMISSION CANCELLATION:
+                 * Cancel commission when order is refunded.
+                 * Only PENDING/APPROVED commissions are cancelled.
+                 * PAID commissions require manual admin review.
+                 */
+                const { cancelCommissionForOrder } =
+                    await import("@/lib/affiliate/cancel-commission");
+                await cancelCommissionForOrder(
+                    tx,
+                    existingOrder.id,
+                    "ORDER_REFUNDED"
+                );
+            });
 
             return json({
                 success: true,
-
-                message: "Refund processed.",
+                message: refundSettled
+                    ? "Refund processed, stock and voucher restored."
+                    : "Refund already processed (idempotent).",
             });
         }
 

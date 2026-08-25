@@ -63,7 +63,7 @@ export default function BannerSlider({ banners }: { banners?: BannerItem[] }) {
         pagination={{
           clickable: true,
         }}
-        loop
+        loop={items.length > 1}
         className="banner-swiper overflow-hidden rounded-2xl"
       >
         {items.map((banner) => {

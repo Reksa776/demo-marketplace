@@ -11,6 +11,8 @@ import {
     getShippingCost,
 } from "@/lib/checkout";
 
+import { getReferralCode } from "@/lib/affiliate/referral";
+
 import { rateLimiters } from "@/lib/rate-limit";
 
 /*
@@ -96,6 +98,7 @@ export async function POST(
             shipping,
             paymentMethod,
             voucherCode,
+            spinWheelSpinId,
         } = body;
 
         /*
@@ -198,6 +201,11 @@ export async function POST(
          * ==========================================
          */
 
+        const affiliateCode =
+            getReferralCode(
+                request.headers.get("cookie")
+            );
+
         const result =
             await createCheckoutOrder(
                 {
@@ -218,6 +226,10 @@ export async function POST(
                         "string"
                             ? voucherCode
                             : null,
+
+                    affiliateCode,
+
+                    spinWheelSpinId: typeof spinWheelSpinId === "number" ? spinWheelSpinId : null,
                 }
             );
 

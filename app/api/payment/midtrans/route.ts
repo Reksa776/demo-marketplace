@@ -10,6 +10,8 @@ import {
     rollbackCheckoutOrder,
 } from "@/lib/checkout";
 
+import { getReferralCode } from "@/lib/affiliate/referral";
+
 import { rateLimiters } from "@/lib/rate-limit";
 
 const snap =
@@ -130,6 +132,8 @@ export async function POST(
             variantId,
 
             quantity,
+
+            spinWheelSpinId,
         } = body;
 
         /*
@@ -240,6 +244,11 @@ export async function POST(
          * ==========================================
          */
 
+        const affiliateCode =
+            getReferralCode(
+                request.headers.get("cookie")
+            );
+
         const result =
             await createCheckoutOrder(
                 {
@@ -260,6 +269,10 @@ export async function POST(
                     variantId,
 
                     quantity,
+
+                    affiliateCode,
+
+                    spinWheelSpinId: typeof spinWheelSpinId === "number" ? spinWheelSpinId : null,
                 }
             );
 

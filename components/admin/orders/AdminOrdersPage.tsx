@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import toast from "react-hot-toast";
 import Link from "next/link";
 
@@ -97,6 +97,25 @@ function paymentStatusClass(status: string) {
     }
 }
 
+type ImportRowResult = {
+    row: number;
+    orderNumber: string;
+    trackingNumber: string;
+    courier: string;
+    status: "SUCCESS" | "FAILED" | "SKIPPED";
+    reason: string;
+};
+
+type ImportResult = {
+    summary: {
+        total: number;
+        success: number;
+        failed: number;
+        skipped: number;
+    };
+    results: ImportRowResult[];
+};
+
 export default function AdminOrdersPage() {
     const [orders, setOrders] = useState<Order[]>([]);
     const [pagination, setPagination] = useState<Pagination>({ page: 1, limit: 20, total: 0, totalPages: 0 });
@@ -104,6 +123,13 @@ export default function AdminOrdersPage() {
     const [search, setSearch] = useState("");
     const [statusFilter, setStatusFilter] = useState("ALL");
     const [page, setPage] = useState(1);
+
+    // ---- Tracking Import State ----
+    const [importing, setImporting] = useState(false);
+    const [importResult, setImportResult] = useState<ImportResult | null>(null);
+    const [showImportResult, setShowImportResult] = useState(false);
+    const [downloadingTemplate, setDownloadingTemplate] = useState(false);
+    const fileInputRef = useRef<HTMLInputElement>(null);
 
     const loadOrders = useCallback(async (pageNum: number, searchVal: string, statusVal: string) => {
         try {
@@ -158,6 +184,130 @@ export default function AdminOrdersPage() {
         );
     }
 
+    // ---- Download Template ----
+    async function handleDownloadTemplate() {
+        try {
+            setDownloadingTemplate(true);
+            const response = await fetch("/api/admin/orders/tracking-template", {
+                cache: "no-store",
+            });
+
+            if (!response.ok) {
+                const data = await response.json();
+                throw new Error(data.message ?? "Gagal mengunduh template.");
+            }
+
+            const blob = await response.blob();
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = "template-import-resi.xlsx";
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            window.URL.revokeObjectURL(url);
+            toast.success("Template berhasil diunduh.");
+        } catch (error) {
+            toast.error(
+                error instanceof Error
+                    ? error.message
+                    : "Gagal mengunduh template."
+            );
+        } finally {
+            setDownloadingTemplate(false);
+        }
+    }
+
+    // ---- Upload Excel ----
+    async function handleUploadExcel(file: File) {
+        try {
+            setImporting(true);
+            setImportResult(null);
+            setShowImportResult(false);
+
+            const formData = new FormData();
+            formData.append("file", file);
+
+            const response = await fetch("/api/admin/orders/tracking-import", {
+                method: "POST",
+                body: formData,
+                cache: "no-store",
+            });
+
+            const data = await response.json();
+
+            if (!response.ok || !data.success) {
+                throw new Error(data.message ?? "Gagal memproses import.");
+            }
+
+            setImportResult(data.data);
+            setShowImportResult(true);
+
+            const summary = data.data.summary;
+            if (summary.failed > 0 && summary.success === 0) {
+                toast.error(`Import selesai. ${summary.failed} baris gagal.`);
+            } else if (summary.failed > 0) {
+                toast.success(`Import selesai: ${summary.success} berhasil, ${summary.failed} gagal, ${summary.skipped} dilewati.`);
+            } else {
+                toast.success(`Import selesai: ${summary.success} berhasil.`);
+            }
+
+            // Reload orders list
+            loadOrders(page, search, statusFilter);
+        } catch (error) {
+            toast.error(
+                error instanceof Error
+                    ? error.message
+                    : "Gagal memproses import."
+            );
+        } finally {
+            setImporting(false);
+        }
+    }
+
+    function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
+        const file = e.target.files?.[0];
+        if (file) {
+            handleUploadExcel(file);
+        }
+        // Reset input so same file can be re-selected
+        e.target.value = "";
+    }
+
+    // ---- Download Error Report ----
+    async function handleDownloadErrorReport(errors: ImportRowResult[]) {
+        try {
+            const response = await fetch("/api/admin/orders/tracking-error-report", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ errors }),
+                cache: "no-store",
+            });
+
+            if (!response.ok) {
+                const data = await response.json();
+                throw new Error(data.message ?? "Gagal mengunduh error report.");
+            }
+
+            const blob = await response.blob();
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = `error-report-import-resi.xlsx`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            window.URL.revokeObjectURL(url);
+            toast.success("Error report berhasil diunduh.");
+        } catch (error) {
+            toast.error(
+                error instanceof Error
+                    ? error.message
+                    : "Gagal mengunduh error report."
+            );
+        }
+    }
+
     return (
         <div className="p-4 sm:p-6">
             <div className="flex flex-col gap-1">
@@ -165,7 +315,141 @@ export default function AdminOrdersPage() {
                 <p className="text-sm text-gray-500">Kelola pesanan customer dan pantau proses pengirimannya.</p>
             </div>
 
-            <div className="mt-6 overflow-hidden rounded-xl border border-gray-200 bg-white">
+            {/* ---- IMPORT RESI SECTION ---- */}
+            <div className="mt-4 flex flex-col gap-3 rounded-xl border border-gray-200 bg-white p-4 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex items-center gap-2">
+                    <span className="text-lg">📦</span>
+                    <div>
+                        <p className="text-sm font-medium text-gray-900">Import Resi Bulk</p>
+                        <p className="text-xs text-gray-500">Download template, isi nomor resi, lalu upload kembali.</p>
+                    </div>
+                </div>
+                <div className="flex gap-2">
+                    <button
+                        type="button"
+                        onClick={handleDownloadTemplate}
+                        disabled={downloadingTemplate}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3.5 py-2 text-xs font-medium text-gray-700 transition hover:border-gray-300 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                        <span>📥</span>
+                        {downloadingTemplate ? "Mengunduh..." : "Download Template"}
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                        disabled={importing}
+                        className="inline-flex items-center gap-1.5 rounded-lg bg-gray-900 px-3.5 py-2 text-xs font-medium text-white transition hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                        <span>{importing ? "⏳" : "📤"}</span>
+                        {importing ? "Memproses..." : "Import Resi Excel"}
+                    </button>
+                    <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept=".xlsx,.xls,.csv"
+                        onChange={handleFileSelect}
+                        className="hidden"
+                    />
+                </div>
+            </div>
+
+            {/* ---- IMPORT RESULT PANEL ---- */}
+            {showImportResult && importResult && (
+                <div className="mt-4 rounded-xl border border-gray-200 bg-white">
+                    <div className="flex items-center justify-between border-b border-gray-100 px-5 py-4">
+                        <div>
+                            <h3 className="text-sm font-semibold text-gray-900">Hasil Import Resi</h3>
+                            <p className="mt-0.5 text-xs text-gray-500">Ringkasan proses import Excel</p>
+                        </div>
+                        <button
+                            type="button"
+                            onClick={() => setShowImportResult(false)}
+                            className="rounded-lg p-1.5 text-gray-400 transition hover:bg-gray-100 hover:text-gray-600"
+                        >
+                            ✕
+                        </button>
+                    </div>
+
+                    <div className="px-5 py-4">
+                        {/* Summary */}
+                        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                            <div className="rounded-lg bg-gray-50 px-3 py-2.5">
+                                <p className="text-[11px] uppercase tracking-wide text-gray-400">Total</p>
+                                <p className="mt-0.5 text-lg font-semibold text-gray-900">{importResult.summary.total}</p>
+                            </div>
+                            <div className="rounded-lg bg-emerald-50 px-3 py-2.5">
+                                <p className="text-[11px] uppercase tracking-wide text-emerald-600">Berhasil</p>
+                                <p className="mt-0.5 text-lg font-semibold text-emerald-700">{importResult.summary.success}</p>
+                            </div>
+                            <div className="rounded-lg bg-red-50 px-3 py-2.5">
+                                <p className="text-[11px] uppercase tracking-wide text-red-600">Gagal</p>
+                                <p className="mt-0.5 text-lg font-semibold text-red-700">{importResult.summary.failed}</p>
+                            </div>
+                            <div className="rounded-lg bg-amber-50 px-3 py-2.5">
+                                <p className="text-[11px] uppercase tracking-wide text-amber-600">Dilewati</p>
+                                <p className="mt-0.5 text-lg font-semibold text-amber-700">{importResult.summary.skipped}</p>
+                            </div>
+                        </div>
+
+                        {/* Error Report Button */}
+                        {importResult.summary.failed > 0 && (
+                            <div className="mt-4">
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        const errors = importResult.results.filter((r) => r.status === "FAILED");
+                                        handleDownloadErrorReport(errors);
+                                    }}
+                                    className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 bg-white px-3.5 py-2 text-xs font-medium text-red-700 transition hover:bg-red-50"
+                                >
+                                    <span>📥</span>
+                                    Download Error Report
+                                </button>
+                            </div>
+                        )}
+
+                        {/* Results Table */}
+                        <div className="mt-4 overflow-x-auto">
+                            <table className="w-full min-w-[700px] text-left">
+                                <thead className="border-b border-gray-100 bg-gray-50/70">
+                                    <tr>
+                                        <th className="px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-gray-500">Baris</th>
+                                        <th className="px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-gray-500">Nomor Pesanan</th>
+                                        <th className="px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-gray-500">Nomor Resi</th>
+                                        <th className="px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-gray-500">Ekspedisi</th>
+                                        <th className="px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-gray-500">Status</th>
+                                        <th className="px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-gray-500">Keterangan</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-50">
+                                    {importResult.results.map((r, idx) => (
+                                        <tr key={idx} className="transition-colors hover:bg-gray-50/50">
+                                            <td className="px-3 py-2.5 text-xs text-gray-500">{r.row}</td>
+                                            <td className="px-3 py-2.5 text-xs font-medium text-gray-900">{r.orderNumber}</td>
+                                            <td className="px-3 py-2.5 text-xs text-gray-700">{r.trackingNumber}</td>
+                                            <td className="px-3 py-2.5 text-xs text-gray-700">{r.courier}</td>
+                                            <td className="px-3 py-2.5">
+                                                <span className={`inline-flex items-center rounded-md px-2 py-0.5 text-[11px] font-semibold ${
+                                                    r.status === "SUCCESS"
+                                                        ? "bg-emerald-50 text-emerald-700"
+                                                        : r.status === "SKIPPED"
+                                                            ? "bg-amber-50 text-amber-700"
+                                                            : "bg-red-50 text-red-700"
+                                                }`}>
+                                                    {r.status === "SUCCESS" ? "✅ Berhasil" : r.status === "SKIPPED" ? "⏭️ Dilewati" : "❌ Gagal"}
+                                                </span>
+                                            </td>
+                                            <td className="px-3 py-2.5 text-xs text-gray-500">{r.reason}</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            <div className="mt-4 overflow-hidden rounded-xl border border-gray-200 bg-white">
                 <div className="border-b border-gray-100 px-5 py-4">
                     <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                         <div>

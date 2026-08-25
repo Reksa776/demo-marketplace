@@ -11,6 +11,7 @@ import { ProductProvider } from "@/components/products/ProductContext";
 import { auth } from "@/auth";
 import BottomNavbar from "@/components/products/BottomNavbar";
 import { getActivePromotions } from "@/lib/marketing/promotion";
+import SpinWheelContainer from "@/components/SpinWheelContainer";
 
 type ProductWithVariant = {
     bestseller: boolean;
@@ -469,6 +470,7 @@ export default async function HomePage() {
 
     return (
         <ProductProvider>
+            <SpinWheelContainer />
             <main className="min-h-screen bg-gray-50 pb-20">
                 <div className="mx-auto max-w-7xl px-4 pt-5 mb-9 sm:px-6 sm:pt-7 lg:px-8">
 

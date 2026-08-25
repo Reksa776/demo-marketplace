@@ -36,6 +36,9 @@ model User {
   affiliateProfile   AffiliateProfile?
   flashSalePurchases FlashSalePurchase[]
   voucherUsages      VoucherUserUsage[]
+
+  // Spin Wheel relations
+  spinWheelSpins SpinWheelSpin[]
 }
 
 model Account {
@@ -225,6 +228,9 @@ model Order {
 
   // Affiliate relation (optional)
   affiliateConversion AffiliateConversion?
+
+  // Spin Wheel relation (optional)
+  spinWheelSpin SpinWheelSpin?
 
   @@index([userId])
   @@index([status])
@@ -960,6 +966,16 @@ model AffiliatePayout {
   processedBy     String?
   rejectionReason String?
 
+  // Provider/disbursement fields
+  providerTransactionId String?
+  providerReference     String?
+  idempotencyKey        String?   @unique
+  paidAt                DateTime?
+  failedAt              DateTime?
+  failureReason         String?   @db.Text
+  providerStatus        String?
+  proofFilePath         String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -967,6 +983,7 @@ model AffiliatePayout {
 
   @@index([affiliateId])
   @@index([status])
+  @@index([providerTransactionId])
 }
 
 enum AffiliatePayoutStatus {
@@ -974,5 +991,109 @@ enum AffiliatePayoutStatus {
   PROCESSING
   PAID
   REJECTED
+  FAILED
+  CANCELLED
+}
+
+// ------------------------------------------
+// 12. ADMIN AUDIT LOG
+// ------------------------------------------
+
+model AdminAuditLog {
+  id          Int      @id @default(autoincrement())
+  adminId     String
+  action      String
+  entityType  String
+  entityId    Int?
+  description String
+  metadata    Json?
+  createdAt   DateTime @default(now())
+
+  @@index([adminId])
+  @@index([entityType, entityId])
+  @@index([action])
+  @@index([createdAt])
+}
+
+// ==========================================
+// SPIN WHEEL PROMO SYSTEM
+// ==========================================
+
+model SpinWheelCampaign {
+  id              Int      @id @default(autoincrement())
+  name            String
+  slug            String   @unique
+  description     String?  @db.Text
+  minimumSpend    Decimal  @db.Decimal(12, 2) @default(0)
+  maxSpinsPerUser Int      @default(1)
+  startAt         DateTime
+  endAt           DateTime
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  rewards SpinWheelReward[]
+  spins   SpinWheelSpin[]
+
+  @@index([isActive])
+  @@index([startAt, endAt])
+}
+
+model SpinWheelReward {
+  id            Int                    @id @default(autoincrement())
+  campaignId    Int
+  name          String
+  type          SpinWheelRewardType
+  value         Decimal                @db.Decimal(12, 2)
+  maxDiscount   Decimal?               @db.Decimal(12, 2)
+  weight        Int                    @default(1)
+  totalQuantity Int?
+  usedQuantity  Int                    @default(0)
+  isActive      Boolean                @default(true)
+  createdAt     DateTime               @default(now())
+  updatedAt     DateTime               @updatedAt
+
+  campaign SpinWheelCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  spins    SpinWheelSpin[]
+
+  @@index([campaignId])
+  @@index([isActive])
+}
+
+model SpinWheelSpin {
+  id         Int                   @id @default(autoincrement())
+  campaignId Int
+  userId     String
+  rewardId   Int
+  status     SpinWheelSpinStatus   @default(AVAILABLE)
+  expiresAt  DateTime?
+  usedAt     DateTime?
+  orderId    Int?    @unique
+  createdAt  DateTime              @default(now())
+  updatedAt  DateTime              @updatedAt
+
+  campaign SpinWheelCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  user     User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  reward   SpinWheelReward    @relation(fields: [rewardId], references: [id], onDelete: Restrict)
+  order    Order?             @relation(fields: [orderId], references: [id], onDelete: SetNull)
+
+  @@unique([campaignId, userId])
+  @@index([campaignId])
+  @@index([userId])
+  @@index([status])
+}
+
+enum SpinWheelRewardType {
+  PERCENTAGE
+  FIXED
+  FREE_SHIPPING
+  CASHBACK
+  ZONK
+}
+
+enum SpinWheelSpinStatus {
+  AVAILABLE
+  USED
+  EXPIRED
   CANCELLED
 }

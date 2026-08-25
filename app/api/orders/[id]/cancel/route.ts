@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
-import { prisma } from "@/lib/prisma";
+import { cancelOwnPendingOrder } from "@/lib/checkout";
 
 export async function POST(
     req: Request,
@@ -27,7 +27,7 @@ export async function POST(
 
         const orderId = Number(id);
 
-        if (!Number.isInteger(orderId)) {
+        if (!Number.isInteger(orderId) || orderId <= 0) {
             return NextResponse.json(
                 {
                     success: false,
@@ -37,33 +37,30 @@ export async function POST(
             );
         }
 
-        const order =
-            await prisma.order.findFirst({
-                where: {
-                    id: orderId,
-                    userId: session.user.id,
-                },
-            });
-
-        if (!order) {
-            return NextResponse.json(
-                {
-                    success: false,
-                    message: "Order tidak ditemukan.",
-                },
-                { status: 404 }
-            );
-        }
-
         /*
-         * Hanya order yang belum dibayar
-         * yang boleh dibatalkan/dihapus.
+         * P0 FIX (C1):
+         * Soft-cancel via atomic CAS state transition.
+         * The order is NEVER deleted. rollbackCheckoutOrder
+         * restores stock / flash-sale reservation / voucher
+         * quota and cancels the affiliate commission inside
+         * the same transaction.
          */
+        const result = await cancelOwnPendingOrder(
+            session.user.id,
+            orderId
+        );
 
-        if (
-            order.paymentStatus !==
-            "PENDING"
-        ) {
+        if (!result.ok) {
+            if (result.reason === "NOT_FOUND") {
+                return NextResponse.json(
+                    {
+                        success: false,
+                        message: "Order tidak ditemukan.",
+                    },
+                    { status: 404 }
+                );
+            }
+
             return NextResponse.json(
                 {
                     success: false,
@@ -73,16 +70,6 @@ export async function POST(
                 { status: 400 }
             );
         }
-
-        /*
-         * HAPUS ORDER SEMENTARA
-         */
-
-        await prisma.order.delete({
-            where: {
-                id: order.id,
-            },
-        });
 
         return NextResponse.json({
             success: true,

@@ -63,6 +63,50 @@ export async function POST(req: Request) {
             .substring(2, 8)
             .toUpperCase()}`;
 
+        /* ==========================================
+         * SERVER-SIDE REFERRAL VALIDATION
+         * ==========================================
+         *
+         * Only store referredBy if the code is a valid,
+         * APPROVED affiliate. Never trust client input
+         * for attribution — validate server-side.
+         *
+         * Security:
+         *   - Client cannot submit affiliateId
+         *   - Client cannot submit commissionRate
+         *   - Client cannot submit commissionAmount
+         *   - Only affiliateCode is accepted
+         *   - Server resolves the affiliate profile
+         */
+        let validatedReferredBy: string | null = null;
+
+        if (data.referralCode && data.referralCode.trim()) {
+            const trimmedCode = data.referralCode.trim();
+
+            // Validate against AffiliateProfile
+            const affiliate =
+                await prisma.affiliateProfile.findFirst({
+                    where: {
+                        affiliateCode: trimmedCode,
+                        status: "APPROVED",
+                    },
+                    select: {
+                        affiliateCode: true,
+                    },
+                });
+
+            // Only store if affiliate is valid and APPROVED
+            if (affiliate) {
+                validatedReferredBy = affiliate.affiliateCode;
+            } else {
+                // Invalid or non-APPROVED code — store null
+                // Don't reveal to client that the code was invalid
+                console.log(
+                    `REGISTER_REFERRAL: Code "${trimmedCode}" is invalid or not APPROVED. Storing null.`
+                );
+            }
+        }
+
         const user = await prisma.user.create({
             data: {
                 name: data.name,
@@ -70,8 +114,7 @@ export async function POST(req: Request) {
                 phone: data.phone || null,
                 password: hashedPassword,
                 referralCode,
-                referredBy:
-                    data.referralCode || null,
+                referredBy: validatedReferredBy,
             },
         });
 

@@ -7,6 +7,8 @@ import {
     rollbackCheckoutOrder,
 } from "@/lib/checkout";
 
+import { getReferralCode } from "@/lib/affiliate/referral";
+
 import { rateLimiters } from "@/lib/rate-limit";
 
 import Midtrans from "midtrans-client";
@@ -38,6 +40,7 @@ type Body = {
     shipping: ShippingPayload;
     paymentMethod: PaymentMethod;
     voucherCode?: string | null;
+    spinWheelSpinId?: number | null;
 };
 
 const snap = new Midtrans.Snap({
@@ -285,6 +288,11 @@ export async function POST(
         let createdOrderId: number | null =
             null;
 
+        const affiliateCode =
+            getReferralCode(
+                request.headers.get("cookie")
+            );
+
         const result =
             await createCheckoutOrder({
                 userId: user.id,
@@ -297,6 +305,8 @@ export async function POST(
                 productId,
                 variantId,
                 quantity,
+                affiliateCode,
+                spinWheelSpinId: typeof body.spinWheelSpinId === "number" ? body.spinWheelSpinId : null,
             });
 
         createdOrderId = result.order.id;

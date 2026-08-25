@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { releaseStockAndVoucherForOrder } from "@/lib/order-stock";
 
 type RouteContext = {
     params: Promise<{
@@ -473,25 +474,71 @@ export async function PATCH(
 
         const previousStatus = order.status;
 
-        const updatedOrder =
-            await prisma.order.update({
-                where: {
-                    id: orderId,
-                },
+        const updatedOrder = await prisma.$transaction(async (tx) => {
+            /*
+             * P0 FIX (C3): CAS status update.
+             *
+             * When transitioning to CANCELLED, also restore stock
+             * and cancel affiliate commission inside the same
+             * transaction. The stock release uses conditional
+             * updates (GREATEST, saleStock >= qty) so duplicate
+             * calls are safe.
+             */
+            if (status === "CANCELLED" && previousStatus !== "CANCELLED") {
+                // CAS: atomically set status to CANCELLED
+                const casAffected = await tx.$executeRaw`
+                    UPDATE \`Order\`
+                    SET status = 'CANCELLED'
+                    WHERE id = ${orderId}
+                      AND status != 'CANCELLED'
+                `;
 
+                if (casAffected === 0) {
+                    // Already cancelled — return current state
+                    return await tx.order.findUnique({ where: { id: orderId } });
+                }
+
+                // Release reserved stock and voucher usage
+                await releaseStockAndVoucherForOrder(tx, orderId);
+
+                // Cancel affiliate commission
+                const { cancelCommissionForOrder } =
+                    await import("@/lib/affiliate/cancel-commission");
+                await cancelCommissionForOrder(tx, orderId, "ADMIN_CANCELLED");
+
+                return await tx.order.findUnique({ where: { id: orderId } });
+            }
+
+            // Non-cancel transitions: update fields
+            const updated = await tx.order.update({
+                where: { id: orderId },
                 data: {
                     status,
-
                     trackingNumber:
-                        trackingNumber !==
-                        undefined
-                            ? cleanTrackingNumber ||
-                              null
+                        trackingNumber !== undefined
+                            ? cleanTrackingNumber || null
                             : order.trackingNumber,
-
                     trackingUrl,
                 },
             });
+
+            /*
+             * AFFILIATE COMMISSION AUTO-APPROVAL:
+             * When order reaches COMPLETED, approve
+             * the associated PENDING commission.
+             */
+            if (status === "COMPLETED") {
+                const { approveCommissionForOrder } =
+                    await import("@/lib/affiliate/approve-commission");
+                await approveCommissionForOrder(
+                    tx,
+                    orderId,
+                    "ORDER_COMPLETED"
+                );
+            }
+
+            return updated;
+        });
 
         /*
          * ==========================================
@@ -518,34 +565,24 @@ export async function PATCH(
                     err
                 )
             );
+        }        if (!updatedOrder) {
+            return NextResponse.json(
+                { success: false, message: "Pesanan tidak ditemukan." },
+                { status: 404 }
+            );
         }
 
         return NextResponse.json({
             success: true,
-
-            message:
-                "Pesanan berhasil diperbarui.",
-
+            message: "Pesanan berhasil diperbarui.",
             data: {
                 id: updatedOrder.id,
-
-                orderNumber:
-                    updatedOrder.orderNumber,
-
-                status:
-                    updatedOrder.status,
-
-                shippingCourier:
-                    updatedOrder.shippingCourier,
-
-                shippingService:
-                    updatedOrder.shippingService,
-
-                trackingNumber:
-                    updatedOrder.trackingNumber,
-
-                trackingUrl:
-                    updatedOrder.trackingUrl,
+                orderNumber: updatedOrder.orderNumber,
+                status: updatedOrder.status,
+                shippingCourier: updatedOrder.shippingCourier,
+                shippingService: updatedOrder.shippingService,
+                trackingNumber: updatedOrder.trackingNumber,
+                trackingUrl: updatedOrder.trackingUrl,
             },
         });
     } catch (error) {
