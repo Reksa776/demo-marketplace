@@ -6,7 +6,7 @@ const nextConfig: NextConfig = {
         "103.93.132.21",
         "202.73.25.122",
         "demosolusisejalan.my.id",
-        "rivers-teenage-monitored-msg.trycloudflare.com",
+        "found-mystery-unfortunately-sheriff.trycloudflare.com",
     ],
     images: {
         remotePatterns: [

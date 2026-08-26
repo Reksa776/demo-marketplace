@@ -487,18 +487,13 @@ export default function BuyNowPage({
 
     /*
      * =====================================================
-     * MIDTRANS SNAP
+     * PAYMENT READY (always true for redirect flow)
      * =====================================================
      */
 
-    const [snapReady, setSnapReady] =
-        useState(false);
-
-    const [snapLoading, setSnapLoading] =
-        useState(true);
-
-    const [snapError, setSnapError] =
-        useState<string | null>(null);
+    const snapReady = true;
+    const snapLoading = false;
+    const snapError = null;
 
     /*
      * =====================================================
@@ -506,145 +501,10 @@ export default function BuyNowPage({
      * =====================================================
      */
 
-    useEffect(() => {
-        let script =
-            document.getElementById(
-                "midtrans-snap"
-            ) as HTMLScriptElement | null;
-
-        const isProduction =
-            process.env
-                .NEXT_PUBLIC_MIDTRANS_IS_PRODUCTION ===
-            "true";
-
-        const clientKey =
-            process.env
-                .NEXT_PUBLIC_MIDTRANS_CLIENT_KEY ||
-            "";
-
-        if (!clientKey) {
-            console.error(
-                "NEXT_PUBLIC_MIDTRANS_CLIENT_KEY belum diset."
-            );
-
-            setSnapReady(false);
-            setSnapLoading(false);
-            setSnapError(
-                "Midtrans Client Key belum dikonfigurasi."
-            );
-
-            return;
-        }
-
-        /*
-         * Snap sudah tersedia.
-         */
-
-        if (
-            (window as any).snap
-        ) {
-            setSnapReady(true);
-            setSnapLoading(false);
-            setSnapError(null);
-
-            return;
-        }
-
-        /*
-         * Buat script kalau belum ada.
-         */
-
-        if (!script) {
-            script =
-                document.createElement(
-                    "script"
-                );
-
-            script.id =
-                "midtrans-snap";
-
-            script.src = isProduction
-                ? "https://app.midtrans.com/snap/snap.js"
-                : "https://app.sandbox.midtrans.com/snap/snap.js";
-
-            script.setAttribute(
-                "data-client-key",
-                clientKey
-            );
-
-            script.async = true;
-
-            document.body.appendChild(
-                script
-            );
-        }
-
-        const handleLoad = () => {
-            if (
-                (window as any).snap
-            ) {
-                setSnapReady(true);
-                setSnapError(null);
-            } else {
-                setSnapReady(false);
-
-                setSnapError(
-                    "Snap.js berhasil dimuat tetapi object Snap tidak tersedia."
-                );
-            }
-
-            setSnapLoading(false);
-        };
-
-        const handleError = () => {
-            console.error(
-                "MIDTRANS SNAP.JS GAGAL DIMUAT."
-            );
-
-            setSnapReady(false);
-
-            setSnapLoading(false);
-
-            setSnapError(
-                "Gagal memuat Midtrans Snap.js."
-            );
-        };
-
-        script.addEventListener(
-            "load",
-            handleLoad
-        );
-
-        script.addEventListener(
-            "error",
-            handleError
-        );
-
-        /*
-         * Cek sekali lagi kalau script
-         * ternyata sudah selesai loading.
-         */
-
-        if (
-            (window as any).snap
-        ) {
-            setSnapReady(true);
-            setSnapLoading(false);
-            setSnapError(null);
-        }
-
-        return () => {
-            script?.removeEventListener(
-                "load",
-                handleLoad
-            );
-
-            script?.removeEventListener(
-                "error",
-                handleError
-            );
-        };
-    }, []);
+    // iPaymu redirect flow — no client-side
+    // payment library needed.
+    // Snap.js loading removed.
+    useEffect(() => {}, []);
 
     /*
      * =====================================================
@@ -2345,11 +2205,11 @@ export default function BuyNowPage({
 
     /*
      * =====================================================
-     * CREATE MIDTRANS PAYMENT
+     * CREATE IPAYMU PAYMENT
      * =====================================================
      */
 
-    async function createMidtransPayment() {
+    async function createIpaymuPayment() {
         if (!data) {
             return;
         }
@@ -2399,7 +2259,7 @@ export default function BuyNowPage({
 
             const paymentResponse =
                 await fetch(
-                    "/api/buy-now/midtrans",
+                    "/api/buy-now/ipaymu",
                     {
                         method: "POST",
 
@@ -2446,7 +2306,7 @@ export default function BuyNowPage({
             ) {
                 throw new Error(
                     paymentResult?.message ||
-                    "Gagal membuat pembayaran Midtrans."
+                    "Gagal membuat pembayaran."
                 );
             }
 
@@ -2454,142 +2314,40 @@ export default function BuyNowPage({
                 paymentResult?.data;
 
             if (
-                !paymentData?.token
+                !paymentData?.paymentUrl
             ) {
                 console.error(
-                    "MIDTRANS TOKEN TIDAK ADA:",
+                    "IPAYMU PAYMENT URL TIDAK ADA:",
                     paymentData
                 );
 
                 throw new Error(
-                    "Token pembayaran Midtrans tidak ditemukan."
+                    "URL pembayaran tidak ditemukan."
                 );
             }
 
             /*
-             * Payment reference wajib ada
-             * karena dipakai setelah Snap callback.
-             */
-
-            if (
-                !paymentData?.paymentReference
-            ) {
-                console.error(
-                    "MIDTRANS PAYMENT REFERENCE TIDAK ADA:",
-                    paymentData
-                );
-
-                throw new Error(
-                    "Payment reference Midtrans tidak ditemukan."
-                );
-            }
-
-            const snap =
-                (window as any).snap;
-
-            if (!snap) {
-                throw new Error(
-                    "Snap.js Midtrans belum tersedia."
-                );
-            }
-
-            /*
-             * Tutup state loading SEBELUM membuka Snap.
+             * ==========================================
+             * REDIRECT KE HALAMAN PEMBAYARAN
+             * ==========================================
              *
-             * Snap punya lifecycle sendiri.
+             * Customer diarahkan ke halaman
+             * pembayaran iPaymu untuk menyelesaikan
+             * transaksi.
              */
 
-            setCreatingOrder(
-                false
-            );
-
-            snap.pay(
-                paymentData.token,
-                {
-                    onSuccess: (
-                        result: any
-                    ) => {
-                        console.log(
-                            "MIDTRANS SUCCESS:",
-                            result
-                        );
-
-                        toast.success(
-                            "Pembayaran berhasil."
-                        );
-
-                        router.push(
-                            `/checkout/payment-finish?payment=${encodeURIComponent(
-                                String(
-                                    paymentData.paymentReference
-                                )
-                            )}&status=success`
-                        );
-                    },
-
-                    onPending: (
-                        result: any
-                    ) => {
-                        console.log(
-                            "MIDTRANS PENDING:",
-                            result
-                        );
-
-                        toast(
-                            "Pembayaran sedang menunggu penyelesaian."
-                        );
-
-                        router.push(
-                            `/checkout/payment-finish?payment=${encodeURIComponent(
-                                String(
-                                    paymentData.paymentReference
-                                )
-                            )}&status=pending`
-                        );
-                    },
-
-                    onError: (
-                        result: any
-                    ) => {
-                        console.error(
-                            "MIDTRANS ERROR:",
-                            result
-                        );
-
-                        toast.error(
-                            "Pembayaran gagal."
-                        );
-
-                        setCreatingOrder(
-                            false
-                        );
-                    },
-
-                    onClose: () => {
-                        console.log(
-                            "MIDTRANS SNAP DITUTUP USER."
-                        );
-
-                        toast(
-                            "Pembayaran ditutup."
-                        );
-
-                        setCreatingOrder(
-                            false
-                        );
-                    },
-                }
-            );
+            window.location.href =
+                paymentData.paymentUrl;
         } catch (error) {
             console.error(
-                "MIDTRANS PAYMENT ERROR:",
+                "IPAYMU PAYMENT ERROR:",
                 error
             );
 
             toast.error(
                 error instanceof Error
                     ? error.message
-                    : "Gagal membuat pembayaran Midtrans."
+                    : "Gagal membuat pembayaran."
             );
 
             setCreatingOrder(
@@ -2703,7 +2461,7 @@ export default function BuyNowPage({
             return;
         }
 
-        await createMidtransPayment();
+        await createIpaymuPayment();
     }
 
     /*

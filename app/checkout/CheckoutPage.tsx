@@ -1601,26 +1601,21 @@ export default function CheckoutPage() {
 
             /*
              * ==========================================
-             * MIDTRANS
+             * IPAYMU PAYMENT
              * ==========================================
              *
              * BANK_TRANSFER
              * E_WALLET
              * QRIS
              *
-             * PENTING:
-             *
-             * Di sini TIDAK memanggil /api/orders.
-             *
-             * Jadi:
-             * - Order belum dibuat
-             * - Stock belum dikurangi
-             * - Cart belum dikosongkan
+             * Creates order + payment via iPaymu,
+             * then redirects customer to iPaymu
+             * payment page.
              */
 
             const paymentResponse =
                 await fetch(
-                    "/api/payment/midtrans",
+                    "/api/payment/ipaymu",
                     {
                         method: "POST",
 
@@ -1647,7 +1642,7 @@ export default function CheckoutPage() {
                 await paymentResponse.json();
 
             console.log(
-                "MIDTRANS RESPONSE:",
+                "IPAYMU RESPONSE:",
                 paymentResult
             );
 
@@ -1657,107 +1652,31 @@ export default function CheckoutPage() {
             ) {
                 throw new Error(
                     paymentResult.message ||
-                    "Gagal membuat pembayaran Midtrans."
+                    "Gagal membuat pembayaran."
                 );
             }
 
             const paymentData =
                 paymentResult.data;
 
-            if (!paymentData) {
+            if (!paymentData?.paymentUrl) {
                 throw new Error(
-                    "Data pembayaran Midtrans tidak ditemukan."
+                    "URL pembayaran tidak ditemukan."
                 );
             }
 
-            console.log(
-                "MIDTRANS PAYMENT DATA:",
-                paymentData
-            );
-
             /*
              * ==========================================
-             * REDIRECT KE MIDTRANS
+             * REDIRECT KE HALAMAN PEMBAYARAN
              * ==========================================
              *
-             * API kita memberikan:
-             *
-             * data.redirectUrl
-             *
-             * atau:
-             *
-             * data.token
+             * Customer diarahkan ke halaman
+             * pembayaran iPaymu untuk menyelesaikan
+             * transaksi.
              */
 
-            // if (
-            //     paymentData.redirectUrl
-            // ) {
-            //     window.location.href =
-            //         paymentData.redirectUrl;
-
-            //     return;
-            // }
-
-            /*
-             * ==========================================
-             * SNAP TOKEN
-             * ==========================================
-             *
-             * Dipakai kalau redirectUrl
-             * tidak tersedia tetapi token ada.
-             */
-
-            if (paymentData.token) {
-                if (
-                    typeof window !== "undefined" &&
-                    (window as any).snap
-                ) {
-                    if (snapProcessingRef.current) {
-                        console.log(
-                            "MIDTRANS SNAP: popup masih aktif."
-                        );
-
-                        return;
-                    }
-                    snapProcessingRef.current = true;
-
-                    window.snap.pay(paymentData.token, {
-                        onSuccess: (result: any) => {
-                            snapProcessingRef.current = false;
-                            router.push(
-                                `/checkout/payment-finish?payment=${encodeURIComponent(paymentData.paymentReference)}`
-                            );
-                        },
-
-                        onPending: (result: any) => {
-                            snapProcessingRef.current = false;
-                            router.push(
-                                `/checkout/payment-finish?payment=${encodeURIComponent(paymentData.paymentReference)}`
-                            );
-                        },
-
-                        onError: (result: any) => {
-                            snapProcessingRef.current = false;
-                            toast.error("Pembayaran gagal.");
-                        },
-
-                        onClose: () => {
-                            snapProcessingRef.current = false;
-                            toast("Pembayaran ditutup.");
-                        },
-                    });
-
-                    return;
-                }
-
-                throw new Error(
-                    "Snap.js Midtrans belum tersedia."
-                );
-            }
-
-            throw new Error(
-                "Respons pembayaran Midtrans tidak valid."
-            );
+            window.location.href =
+                paymentData.paymentUrl;
         } catch (error) {
             console.error(
                 "CREATE PAYMENT ERROR:",
