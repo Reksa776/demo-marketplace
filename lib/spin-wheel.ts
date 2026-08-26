@@ -15,6 +15,12 @@ export type EligibilityResult = {
     spinsRemaining: number;
     hasSpun: boolean;
     rewards: Array<{ id: number; name: string; type: string }>;
+    /** true when SPIN_WHEEL_TEST_MODE=true AND user is ADMIN */
+    isTestMode: boolean;
+    /** Total milestones earned from lifetime spending */
+    totalMilestones: number;
+    /** Spending progress toward next milestone (0 to minimumSpend) */
+    spendingProgress: number;
 };
 
 export type SpinResult = {
@@ -30,18 +36,26 @@ export type SpinResult = {
 };
 
 // ==========================================
-// ELIGIBILITY CHECK
+// ELIGIBILITY CHECK — MILESTONE SYSTEM
 // ==========================================
 
 /**
  * Check if user is eligible to spin in an active campaign.
  *
- * Minimum spending is calculated from subtotal of all PAID orders
- * (paymentStatus = 'PAID'). This is consistent with how the
- * codebase defines "paid orders" for voucher eligibility.
+ * MILESTONE SYSTEM:
+ * - Every `minimumSpend` of eligible orders grants 1 spin opportunity.
+ * - Spending that exceeds a milestone carries over to the next.
+ * - Using a spin consumes one opportunity but does NOT reset spending.
+ * - Progress = totalEligibleSpend - (milestonesConsumed * minimumSpend)
+ *
+ * Example with minimumSpend = 100000:
+ *   Spending 250000 → 2 milestones earned → 2 spins
+ *   After using 1 spin → 1 available, progress 50000
+ *   Spend 50000 more → progress 100000 → +1 spin → 2 available, progress 0
  */
 export async function checkEligibility(
-    userId: string
+    userId: string,
+    userRole?: string
 ): Promise<EligibilityResult> {
     const now = new Date();
 
@@ -66,12 +80,17 @@ export async function checkEligibility(
             spinsRemaining: 0,
             hasSpun: false,
             rewards: [],
+            isTestMode: false,
+            totalMilestones: 0,
+            spendingProgress: 0,
         };
     }
 
     const minimumSpend = Number(campaign.minimumSpend);
 
-    // Calculate user's total paid spend (subtotal of PAID orders)
+    // ==========================================
+    // Calculate total eligible spending (PAID orders only)
+    // ==========================================
     const paidOrders = await prisma.order.aggregate({
         where: {
             userId,
@@ -82,11 +101,11 @@ export async function checkEligibility(
         },
     });
 
-    const currentSpend = Number(paidOrders._sum.subtotal ?? 0);
-    const remainingSpend = Math.max(0, minimumSpend - currentSpend);
-    const eligible = currentSpend >= minimumSpend && minimumSpend > 0;
+    const totalPaidSpend = Number(paidOrders._sum.subtotal ?? 0);
 
-    // Check how many spins user has remaining
+    // ==========================================
+    // Count existing spins (AVAILABLE + USED) per campaign
+    // ==========================================
     const existingSpins = await prisma.spinWheelSpin.count({
         where: {
             campaignId: campaign.id,
@@ -95,12 +114,73 @@ export async function checkEligibility(
         },
     });
 
-    const spinsRemaining = Math.max(
+    // Count only USED spins (consumed milestones)
+    const usedSpins = await prisma.spinWheelSpin.count({
+        where: {
+            campaignId: campaign.id,
+            userId,
+            status: "USED",
+        },
+    });
+
+    // ==========================================
+    // MILESTONE CALCULATION
+    // ==========================================
+    const totalMilestones =
+        minimumSpend > 0
+            ? Math.floor(totalPaidSpend / minimumSpend)
+            : 0;
+
+    // Available spins = milestones earned - spins consumed (USED)
+    const availableSpins = Math.max(
         0,
-        campaign.maxSpinsPerUser - existingSpins
+        totalMilestones - usedSpins
     );
 
-    // Fetch active rewards for this campaign (for frontend segment mapping)
+    // Optional campaign cap (maxSpinsPerUser > 1 means cap is active)
+    // maxSpinsPerUser = 0 or 1 means no effective cap beyond milestones
+    const maxSpinsCap = campaign.maxSpinsPerUser > 1
+        ? campaign.maxSpinsPerUser
+        : Infinity;
+
+    const spinsRemaining = Math.min(
+        availableSpins,
+        Math.max(0, maxSpinsCap - existingSpins)
+    );
+
+    // Spending progress toward NEXT milestone
+    const spendingProgress =
+        minimumSpend > 0
+            ? totalPaidSpend % minimumSpend
+            : 0;
+
+    // Debug logs
+    console.log(`[SpinWheel] totalPaidSpend: ${totalPaidSpend}`);
+    console.log(`[SpinWheel] minimumSpend: ${minimumSpend}`);
+    console.log(`[SpinWheel] totalMilestones: ${totalMilestones}`);
+    console.log(`[SpinWheel] existingSpins: ${existingSpins}`);
+    console.log(`[SpinWheel] usedSpins: ${usedSpins}`);
+    console.log(`[SpinWheel] availableSpins: ${availableSpins}`);
+    console.log(`[SpinWheel] spendingProgress: ${spendingProgress}`);
+    console.log(`[SpinWheel] maxSpinsPerUser: ${campaign.maxSpinsPerUser}`);
+
+    // ==========================================
+    // TEST MODE: bypass minimum spend for ADMIN
+    // ==========================================
+    const isTestMode =
+        process.env.SPIN_WHEEL_TEST_MODE === "true" &&
+        userRole === "ADMIN";
+
+    // User is eligible if:
+    // - they have available spins, OR
+    // - they are in test mode (admin with SPIN_WHEEL_TEST_MODE=true)
+    const eligible =
+        spinsRemaining > 0 ||
+        (isTestMode && totalMilestones > 0);
+
+    // ==========================================
+    // Fetch active rewards for frontend segment mapping
+    // ==========================================
     const campaignRewards = await prisma.spinWheelReward.findMany({
         where: {
             campaignId: campaign.id,
@@ -116,14 +196,17 @@ export async function checkEligibility(
 
     return {
         enabled: true,
-        eligible: eligible && spinsRemaining > 0,
+        eligible,
         campaignId: campaign.id,
         minimumSpend,
-        currentSpend,
-        remainingSpend,
+        currentSpend: spendingProgress,
+        remainingSpend: Math.max(0, minimumSpend - spendingProgress),
         spinsRemaining,
         hasSpun: existingSpins > 0,
         rewards: campaignRewards,
+        isTestMode,
+        totalMilestones,
+        spendingProgress,
     };
 }
 
@@ -221,20 +304,21 @@ export async function selectReward(
 // ==========================================
 
 /**
- * Execute a spin for a user. Uses transaction + unique constraint
- * to prevent double spins.
+ * Execute a spin for a user. Uses transaction + count check
+ * to prevent exceeding maxSpinsPerUser.
  *
  * Flow:
  * 1. Find active campaign
- * 2. Verify eligibility (minimum spend)
- * 3. Check spin availability (FOR UPDATE via unique constraint)
+ * 2. Verify eligibility (minimum spend / test mode)
+ * 3. Check spin availability (count existing spins)
  * 4. Select reward server-side (weighted random)
- * 5. Create spin record (unique constraint prevents duplicates)
+ * 5. Create spin record
  * 6. Increment reward usedQuantity
  * 7. Return reward to client (for animation)
  */
 export async function executeSpin(
-    userId: string
+    userId: string,
+    userRole?: string
 ): Promise<SpinResult> {
     const now = new Date();
 
@@ -264,10 +348,23 @@ export async function executeSpin(
         _sum: { subtotal: true },
     });
 
-    const currentSpend = Number(paidOrders._sum.subtotal ?? 0);
+    const totalPaidSpend = Number(paidOrders._sum.subtotal ?? 0);
     const minimumSpend = Number(campaign.minimumSpend);
 
-    if (currentSpend < minimumSpend || minimumSpend <= 0) {
+    // ==========================================
+    // TEST MODE: bypass minimum spend for ADMIN
+    // ==========================================
+    const isTestMode =
+        process.env.SPIN_WHEEL_TEST_MODE === "true" &&
+        userRole === "ADMIN";
+
+    // Check milestone eligibility
+    const totalMilestones =
+        minimumSpend > 0
+            ? Math.floor(totalPaidSpend / minimumSpend)
+            : 0;
+
+    if (!isTestMode && totalMilestones <= 0) {
         return {
             success: false,
             message: "Belum memenuhi minimum belanja untuk spin.",
@@ -276,7 +373,7 @@ export async function executeSpin(
 
     // Check spin availability + create atomically
     return prisma.$transaction(async (tx) => {
-        // Count existing spins
+        // Count existing spins (all statuses that consume milestones)
         const existingSpins = await tx.spinWheelSpin.count({
             where: {
                 campaignId: campaign.id,
@@ -285,10 +382,38 @@ export async function executeSpin(
             },
         });
 
-        if (existingSpins >= campaign.maxSpinsPerUser) {
+        // Count used spins (consumed milestones)
+        const usedSpins = await tx.spinWheelSpin.count({
+            where: {
+                campaignId: campaign.id,
+                userId,
+                status: "USED",
+            },
+        });
+
+        // Available spins = milestones earned - used spins
+        const availableSpins = Math.max(
+            0,
+            totalMilestones - usedSpins
+        );
+
+        // Optional campaign cap
+        const maxSpinsCap = campaign.maxSpinsPerUser > 1
+            ? campaign.maxSpinsPerUser
+            : Infinity;
+
+        if (existingSpins >= maxSpinsCap) {
             return {
                 success: false,
                 message: "Semua kesempatan spin sudah digunakan.",
+            };
+        }
+
+        if (!isTestMode && availableSpins <= 0) {
+            return {
+                success: false,
+                message:
+                    "Tidak ada kesempatan spin tersedia. Belanja lagi untuk mendapatkan kesempatan baru.",
             };
         }
 
@@ -303,7 +428,6 @@ export async function executeSpin(
         }
 
         // Create spin record
-        // Unique constraint on [campaignId, userId] prevents duplicate
         try {
             await tx.spinWheelSpin.create({
                 data: {
@@ -320,13 +444,6 @@ export async function executeSpin(
                 },
             });
         } catch (err: any) {
-            // P2002 = unique constraint violation = already spun
-            if (err?.code === "P2002") {
-                return {
-                    success: false,
-                    message: "Anda sudah melakukan spin untuk kampanye ini.",
-                };
-            }
             throw err;
         }
 

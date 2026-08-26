@@ -10,7 +10,7 @@ import type { EligibilityData } from "./SpinWheelPopup";
 // STORAGE KEY
 // =========================================
 
-const STORAGE_KEY = "spinWheelMinimized";
+const STORAGE_KEY_PREFIX = "spinWheelMinimized_";
 
 // =========================================
 // COMPONENT
@@ -36,6 +36,7 @@ export default function SpinWheelContainer() {
     const [eligibility, setEligibility] = useState<EligibilityData | null>(null);
     const [loading, setLoading] = useState(true);
     const [initialized, setInitialized] = useState(false);
+    const [storageKey, setStorageKey] = useState<string | null>(null);
 
     // ---------- Fetch eligibility from server ----------
     const fetchEligibility = useCallback(async () => {
@@ -82,14 +83,21 @@ export default function SpinWheelContainer() {
         console.log("[SpinWheel] user:", session.user.email ?? session.user.id);
 
         async function init() {
+            if (!session?.user) return;
+
             const data = await fetchEligibility();
             setEligibility(data);
+
+            // User-specific storage key so different users don't share minimize state
+            const userId = session.user.id ?? session.user.email ?? "unknown";
+            const key = `${STORAGE_KEY_PREFIX}${userId}`;
+            setStorageKey(key);
 
             if (data?.enabled) {
                 // Check sessionStorage: was popup minimized in this session?
                 const wasMinimized =
                     typeof window !== "undefined" &&
-                    sessionStorage.getItem(STORAGE_KEY) === "1";
+                    sessionStorage.getItem(key) === "1";
 
                 if (wasMinimized) {
                     // Stay minimized — show floating icon, don't open popup
@@ -116,18 +124,18 @@ export default function SpinWheelContainer() {
         console.log("[SpinWheel] popup minimized");
         setIsOpen(false);
         // Persist minimize state in sessionStorage (survives refresh + tab switch)
-        if (typeof window !== "undefined") {
-            sessionStorage.setItem(STORAGE_KEY, "1");
+        if (typeof window !== "undefined" && storageKey) {
+            sessionStorage.setItem(storageKey, "1");
         }
-    }, []);
+    }, [storageKey]);
 
     // ---------- Open from floating button (with fresh eligibility) ----------
     const handleOpenFromButton = useCallback(async () => {
         console.log("[SpinWheel] floating icon clicked — refreshing eligibility");
 
         // Clear minimize state
-        if (typeof window !== "undefined") {
-            sessionStorage.removeItem(STORAGE_KEY);
+        if (typeof window !== "undefined" && storageKey) {
+            sessionStorage.removeItem(storageKey);
         }
 
         // Fetch fresh eligibility before opening

@@ -3,6 +3,7 @@ import "./globals.css";
 import { Toaster } from "react-hot-toast";
 import AuthProvider from "@/components/providers/AuthProvider";
 import AnalyticsProvider from "@/components/analytics/AnalyticsProvider";
+import Footer from "@/components/Footer";
 import Script from "next/script";
 
 export default function RootLayout({
@@ -18,6 +19,8 @@ export default function RootLayout({
           <AnalyticsProvider />
 
           {children}
+
+          <Footer />
 
           <Toaster
             position="top-right"

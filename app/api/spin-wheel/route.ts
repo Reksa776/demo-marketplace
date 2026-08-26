@@ -23,7 +23,8 @@ export async function GET() {
         }
 
         const eligibility = await checkEligibility(
-            session.user.id
+            session.user.id,
+            (session.user as any).role
         );
 
         return NextResponse.json({

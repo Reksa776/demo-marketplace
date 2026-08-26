@@ -1025,7 +1025,7 @@ model SpinWheelCampaign {
   slug            String   @unique
   description     String?  @db.Text
   minimumSpend    Decimal  @db.Decimal(12, 2) @default(0)
-  maxSpinsPerUser Int      @default(1)
+  maxSpinsPerUser Int      @default(0) // 0 or 1 = no cap; >1 = lifetime cap
   startAt         DateTime
   endAt           DateTime
   isActive        Boolean  @default(true)
@@ -1077,7 +1077,6 @@ model SpinWheelSpin {
   reward   SpinWheelReward    @relation(fields: [rewardId], references: [id], onDelete: Restrict)
   order    Order?             @relation(fields: [orderId], references: [id], onDelete: SetNull)
 
-  @@unique([campaignId, userId])
   @@index([campaignId])
   @@index([userId])
   @@index([status])

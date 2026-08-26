@@ -22,7 +22,10 @@ export async function POST() {
             );
         }
 
-        const result = await executeSpin(session.user.id);
+        const result = await executeSpin(
+            session.user.id,
+            (session.user as any).role
+        );
 
         if (!result.success) {
             return NextResponse.json(

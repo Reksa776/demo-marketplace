@@ -250,8 +250,9 @@ test("SpinWheelCampaign has minimumSpend field", () => {
     assert(schema.includes("minimumSpend Decimal"), "Missing minimumSpend");
 });
 
-test("SpinWheelCampaign has maxSpinsPerUser field", () => {
+test("SpinWheelCampaign has maxSpinsPerUser field with default 0 (no cap)", () => {
     assert(schema.includes("maxSpinsPerUser Int"), "Missing maxSpinsPerUser");
+    assert(schema.includes("maxSpinsPerUser Int      @default(0)"), "maxSpinsPerUser should default to 0 (no cap)");
 });
 
 test("SpinWheelCampaign has isActive field", () => {
@@ -289,8 +290,9 @@ test("SpinWheelSpin has userId relation", () => {
     assert(schema.includes("userId String"), "Missing userId");
 });
 
-test("SpinWheelSpin has unique constraint on [campaignId, userId]", () => {
-    assert(schema.includes("@@unique([campaignId, userId])"), "Missing unique constraint");
+test("SpinWheelSpin does NOT have [campaignId, userId] unique constraint (allows multiple spins per user)", () => {
+    // The [campaignId, userId] unique constraint was removed to allow milestone-based multiple spins
+    assert(!schema.includes("@@unique([campaignId, userId])"), "Must NOT have [campaignId, userId] unique constraint");
 });
 
 test("SpinWheelSpin has unique orderId for order linking", () => {

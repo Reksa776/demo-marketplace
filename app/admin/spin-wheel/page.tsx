@@ -45,7 +45,7 @@ const emptyForm: FormState = {
     name: "",
     description: "",
     minimumSpend: "100000",
-    maxSpinsPerUser: "1",
+    maxSpinsPerUser: "0", // 0 = no cap, milestone-based unlimited
     startAt: "",
     endAt: "",
     isActive: true,
@@ -408,7 +408,8 @@ export default function AdminSpinWheelPage() {
                                     </div>
                                     <div>
                                         <label className="mb-1.5 block text-xs font-semibold text-gray-700">Max Spin per User</label>
-                                        <input type="number" value={form.maxSpinsPerUser} onChange={(e) => updateForm("maxSpinsPerUser", e.target.value)} className="h-10 w-full border border-gray-200 bg-white px-3 text-sm outline-none focus:border-gray-400" min="1" />
+                                        <input type="number" value={form.maxSpinsPerUser} onChange={(e) => updateForm("maxSpinsPerUser", e.target.value)} className="h-10 w-full border border-gray-200 bg-white px-3 text-sm outline-none focus:border-gray-400" min="0" />
+                                        <p className="mt-1 text-[11px] text-gray-400">0 = tanpa batas (berdasarkan milestone belanja)</p>
                                     </div>
                                 </div>
 

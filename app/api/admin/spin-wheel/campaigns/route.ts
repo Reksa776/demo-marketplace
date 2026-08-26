@@ -160,9 +160,9 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        // Validate maxSpinsPerUser
-        const maxSpinsPerUser = Number(body.maxSpinsPerUser ?? 1);
-        if (!Number.isInteger(maxSpinsPerUser) || maxSpinsPerUser < 1) {
+        // Validate maxSpinsPerUser (0 = no cap, >1 = lifetime cap)
+        const maxSpinsPerUser = Number(body.maxSpinsPerUser ?? 0);
+        if (!Number.isInteger(maxSpinsPerUser) || maxSpinsPerUser < 0) {
             return NextResponse.json(
                 { success: false, message: "Max spin per user tidak valid." },
                 { status: 400 }
