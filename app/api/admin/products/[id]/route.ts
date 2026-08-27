@@ -583,10 +583,7 @@ export async function PUT(
         return NextResponse.json(
             {
                 success: false,
-                message:
-                    error instanceof Error
-                        ? error.message
-                        : "Gagal memperbarui produk.",
+                message: "Gagal memperbarui produk.",
             },
             {
                 status: 500,
@@ -693,10 +690,7 @@ export async function DELETE(
         return NextResponse.json(
             {
                 success: false,
-                message:
-                    error instanceof Error
-                        ? error.message
-                        : "Gagal menghapus produk.",
+                message: "Gagal menghapus produk.",
             },
             {
                 status: 500,

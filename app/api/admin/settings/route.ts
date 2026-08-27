@@ -365,10 +365,7 @@ export async function PUT(
         return NextResponse.json(
             {
                 success: false,
-                message:
-                    error instanceof Error
-                        ? error.message
-                        : "Gagal menyimpan pengaturan toko.",
+                message: "Gagal menyimpan pengaturan toko.",
             },
             { status: 500 }
         );

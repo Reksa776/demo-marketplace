@@ -622,39 +622,13 @@ export async function POST(
                     rollbackError
                 );
             }
-        }
-
-        const midtransMessages =
-            error?.ApiResponse
-                ?.error_messages;
-
-        const message =
-            Array.isArray(
-                midtransMessages
-            )
-                ? midtransMessages.join(
-                      ", "
-                  )
-                : error?.ApiResponse
-                      ?.status_message ??
-                  error?.message ??
-                  "Gagal membuat pembayaran Midtrans.";
-
-        const status =
-            Number.isInteger(
-                error?.status
-            )
-                ? error.status
-                : 500;
-
-        return NextResponse.json(
+        }        return NextResponse.json(
             {
                 success: false,
-
-                message,
+                message: "Gagal membuat pembayaran Midtrans.",
             },
             {
-                status,
+                status: 500,
             }
         );
     }

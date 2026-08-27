@@ -174,6 +174,54 @@ export async function POST(request: Request) {
         }
 
         /* ==========================================
+         * MAGIC BYTE VALIDATION
+         * ==========================================
+         *
+         * Verify actual file content matches claimed
+         * MIME type. Prevents HTML/SVG/script uploads
+         * disguised as images.
+         */
+
+        const bytes = await file.arrayBuffer();
+        const buffer = Buffer.from(bytes);
+
+        if (buffer.length < 4) {
+            return NextResponse.json(
+                {
+                    success: false,
+                    message: "File terlalu kecil.",
+                },
+                { status: 400 }
+            );
+        }
+
+        const isValidJpeg =
+            buffer[0] === 0xff &&
+            buffer[1] === 0xd8 &&
+            buffer[2] === 0xff;
+        const isValidPng =
+            buffer[0] === 0x89 &&
+            buffer[1] === 0x50 &&
+            buffer[2] === 0x4e &&
+            buffer[3] === 0x47;
+        const isValidWebp =
+            buffer[0] === 0x52 &&
+            buffer[1] === 0x49 &&
+            buffer[2] === 0x46 &&
+            buffer[3] === 0x46;
+
+        if (!isValidJpeg && !isValidPng && !isValidWebp) {
+            return NextResponse.json(
+                {
+                    success: false,
+                    message:
+                        "File bukan gambar valid (JPEG/PNG/WebP).",
+                },
+                { status: 400 }
+            );
+        }
+
+        /* ==========================================
          * DETERMINE UPLOAD DIRECTORY
          * ==========================================
          *
@@ -221,10 +269,6 @@ export async function POST(request: Request) {
         /* ==========================================
          * WRITE FILE
          * ========================================== */
-
-        const bytes =
-            await file.arrayBuffer();
-        const buffer = Buffer.from(bytes);
 
         await fs.writeFile(filePath, buffer);
 

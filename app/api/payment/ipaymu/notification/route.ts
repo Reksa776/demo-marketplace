@@ -103,21 +103,22 @@ export async function POST(
                 raw.status,
         };
 
+        /* ==========================================
+         * SECURITY: LOG WEBHOOK (safe fields only)
+         * ==========================================
+         *
+         * Never log full payload to avoid leaking
+         * buyer PII or sensitive payment data.
+         */
         console.log(
             "IPAYMU WEBHOOK:",
             {
                 reference_id:
                     raw.reference_id,
                 trx_id: raw.trx_id,
-                sid: raw.sid,
-                status: raw.status,
                 status_code:
                     raw.status_code,
-                sub_total: raw.sub_total,
-                total: raw.total,
-                amount: raw.amount,
-                settlement_status:
-                    raw.settlement_status,
+                has_sid: !!raw.sid,
             }
         );
 
@@ -134,6 +135,9 @@ export async function POST(
             body.SessionId;
 
         if (!orderNumber) {
+            console.error(
+                "IPAYMU SECURITY: Missing ReferenceId/Sid in webhook"
+            );
             return json(
                 {
                     success: false,
@@ -157,7 +161,8 @@ export async function POST(
 
         if (!existingOrder) {
             console.error(
-                "IPAYMU ORDER NOT FOUND:",
+                "IPAYMU SECURITY: ORDER NOT FOUND — " +
+                "webhook for non-existent order",
                 orderNumber
             );
 
@@ -169,10 +174,8 @@ export async function POST(
                 message:
                     "Order tidak ditemukan.",
             });
-        }
-
-        /* ==========================================
-         * AMOUNT VALIDATION
+        }        /* ==========================================
+         * SECURITY: AMOUNT VALIDATION
          * ==========================================
          *
          * iPaymu sends:
@@ -181,6 +184,9 @@ export async function POST(
          *
          * verifyNotificationAmount prefers sub_total.
          * Fee iPaymu/escrow is excluded from comparison.
+         *
+         * This is a critical security check: attacker
+         * cannot forge a webhook with wrong amount.
          */
 
         if (
@@ -198,20 +204,24 @@ export async function POST(
                 )
             ) {
                 console.error(
-                    "IPAYMU AMOUNT MISMATCH:",
+                    "IPAYMU SECURITY: AMOUNT MISMATCH — " +
+                    "potential webhook spoofing attempt",
                     {
                         orderNumber,
                         notificationAmount:
                             body.Amount,
                         orderAmount,
+                        referenceId:
+                            body.ReferenceId,
+                        sessionId:
+                            body.SessionId,
                     }
                 );
 
                 return json(
                     {
                         success: false,
-                        message:
-                            "Amount tidak sesuai.",
+                        message: "Amount tidak sesuai.",
                     },
                     400
                 );

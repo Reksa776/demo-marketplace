@@ -322,27 +322,9 @@ export async function POST(
 
         /*
          * ==========================================
-         * DEBUG
+         * SECURITY: No user input logging
          * ==========================================
          */
-
-        console.log(
-            "CREATE ADDRESS INPUT:",
-            {
-                provinceId,
-                cityId,
-                districtId,
-                subdistrictId,
-
-                parsedProvinceId,
-                parsedCityId,
-                parsedDistrictId,
-                parsedVillageId,
-
-                rajaOngkirDestinationId:
-                    parsedDestinationId,
-            }
-        );
 
         /*
          * ==========================================
@@ -598,22 +580,7 @@ export async function POST(
          * ==========================================
          */
 
-        console.log(
-            "VALID LOCAL REGION IDS:",
-            {
-                provinceId:
-                    validProvinceId,
-
-                regencyId:
-                    validRegencyId,
-
-                districtId:
-                    validDistrictId,
-
-                villageId:
-                    validVillageId,
-            }
-        );
+        // Region ID validation is silent — no user input logged
 
         /*
          * ==========================================

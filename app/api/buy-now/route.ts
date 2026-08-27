@@ -619,14 +619,6 @@ export async function POST(
             })
         );
 
-        const message =
-            error instanceof Error
-                ? error.message
-                : "";
-
-        switch (message) {
-            default:
-                return jsonError(message || "Gagal membuat pesanan.", 400);
-        }
+        return jsonError("Gagal membuat pesanan.", 400);
     }
 }

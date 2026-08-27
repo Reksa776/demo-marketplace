@@ -229,38 +229,13 @@ export async function POST() {
             error
         );
 
-        const message =
-            error instanceof Error
-                ? error.message
-                : "Gagal melakukan sinkronisasi wilayah.";
-
-        /**
-         * ============================
-         * HTTP STATUS
-         * ============================
-         */
-
-        let status = 500;
-
-        if (
-            message === "UNAUTHORIZED"
-        ) {
-            status = 401;
-        }
-
-        if (
-            message === "FORBIDDEN"
-        ) {
-            status = 403;
-        }
-
         return NextResponse.json(
             {
                 success: false,
-                message,
+                message: "Gagal melakukan sinkronisasi wilayah.",
             },
             {
-                status,
+                status: 500,
             }
         );
     }

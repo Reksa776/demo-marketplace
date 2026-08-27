@@ -70,10 +70,7 @@ export async function GET(
 
         return NextResponse.json(
             {
-                message:
-                    error instanceof Error
-                        ? error.message
-                        : "Gagal mengambil destination RajaOngkir.",
+                message: "Gagal mengambil destination RajaOngkir.",
             },
             { status: 500 }
         );

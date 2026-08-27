@@ -119,7 +119,11 @@ export async function GET() {
                                         ?.source ??
                                     "ORIGINAL",
                                 stock:
-                                    variant.stock,
+                                    authenticated
+                                        ? variant.stock
+                                        : undefined,
+                                inStock:
+                                    variant.stock > 0,
                                 image:
                                     variant.image,
                             };

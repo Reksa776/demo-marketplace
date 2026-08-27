@@ -113,6 +113,28 @@ export async function POST(
             );
         }
 
+        // LOW-3 FIX: Validate magic bytes to prevent spoofed file types
+        const buffer = Buffer.from(await file.arrayBuffer());
+
+        if (buffer.length < 4) {
+            return NextResponse.json(
+                { success: false, message: "File terlalu kecil." },
+                { status: 400 }
+            );
+        }
+
+        const isValidJpeg = buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff;
+        const isValidPng = buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47;
+        const isValidWebp = buffer[0] === 0x52 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x46;
+        const isValidPdf = buffer[0] === 0x25 && buffer[1] === 0x50 && buffer[2] === 0x44 && buffer[3] === 0x46;
+
+        if (!isValidJpeg && !isValidPng && !isValidWebp && !isValidPdf) {
+            return NextResponse.json(
+                { success: false, message: "File bukan format yang valid (JPEG/PNG/WebP/PDF)." },
+                { status: 400 }
+            );
+        }
+
         // Save file
         const uploadDir = path.join(
             process.cwd(),
@@ -128,7 +150,6 @@ export async function POST(
         const filename = `${Date.now()}-${crypto.randomBytes(4).toString("hex")}${ext}`;
         const filePath = path.join(uploadDir, filename);
 
-        const buffer = Buffer.from(await file.arrayBuffer());
         await fs.writeFile(filePath, buffer);
 
         const relativePath = path.relative(process.cwd(), filePath);
@@ -156,7 +177,7 @@ export async function POST(
     } catch (error: any) {
         console.error("UPLOAD PROOF ERROR:", error);
         return NextResponse.json(
-            { success: false, message: error instanceof Error ? error.message : "Gagal upload bukti." },
+            { success: false, message: "Gagal upload bukti." },
             { status: 500 }
         );
     }

@@ -511,10 +511,6 @@ export async function POST(request: Request) {
             }
         }
 
-        const message =
-            error?.message ??
-            "Gagal membuat pembayaran iPaymu.";
-
         const status = Number.isInteger(
             error?.status
         )
@@ -525,7 +521,7 @@ export async function POST(request: Request) {
             {
                 success: false,
 
-                message,
+                message: "Gagal membuat pembayaran iPaymu.",
             },
             {
                 status,

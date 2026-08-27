@@ -132,7 +132,7 @@ export async function POST(req: Request) {
     } catch (error) {
         console.error("AFFILIATE PAYOUT REQUEST ERROR:", error);
         return NextResponse.json(
-            { success: false, message: error instanceof Error ? error.message : "Gagal mengajukan pencairan." },
+            { success: false, message: "Gagal mengajukan pencairan." },
             { status: 500 }
         );
     }

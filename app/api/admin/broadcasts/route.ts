@@ -35,7 +35,7 @@ export async function GET(request: NextRequest) {
         });
     } catch (error: any) {
         console.error("GET /api/admin/broadcasts ERROR:", error?.message);
-        return NextResponse.json({ success: false, message: error?.message ?? "Gagal mengambil data." }, { status: 500 });
+        return NextResponse.json({ success: false, message: "Gagal mengambil data." }, { status: 500 });
     }
 }
 
@@ -77,6 +77,6 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ success: true, message: "Broadcast berhasil dibuat.", data: broadcast }, { status: 201 });
     } catch (error: any) {
         console.error("POST /api/admin/broadcasts ERROR:", error?.message);
-        return NextResponse.json({ success: false, message: error?.message ?? "Gagal membuat broadcast." }, { status: 400 });
+        return NextResponse.json({ success: false, message: "Gagal membuat broadcast." }, { status: 400 });
     }
 }

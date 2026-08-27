@@ -292,7 +292,7 @@ export async function PATCH(req: Request, { params }: RouteContext) {
     } catch (error) {
         console.error("ADMIN AFFILIATE UPDATE ERROR:", error);
         return NextResponse.json(
-            { success: false, message: error instanceof Error ? error.message : "Gagal update affiliate." },
+            { success: false, message: "Gagal update affiliate." },
             { status: 500 }
         );
     }

@@ -46,7 +46,11 @@ function EditAddressPageContent() {
     const params = useParams();
 
     const addressId = params.id as string;
-    const callbackUrl = searchParams.get("callbackUrl") || "/addresses";
+    // LOW-2 FIX: Validate callbackUrl is a relative path to prevent open redirect
+    const rawCallback = searchParams.get("callbackUrl") || "/addresses";
+    const callbackUrl = rawCallback.startsWith("/") && !rawCallback.startsWith("//")
+        ? rawCallback
+        : "/addresses";
 
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);

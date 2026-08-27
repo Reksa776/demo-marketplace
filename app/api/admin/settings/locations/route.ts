@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { auth } from "@/auth";
 
 import {
     getProvinces,
@@ -9,6 +10,13 @@ import {
 
 export async function GET(request: NextRequest) {
     try {
+        const session = await auth();
+        if (!session?.user?.id) {
+            return NextResponse.json({ success: false, message: "Silakan login terlebih dahulu." }, { status: 401 });
+        }
+        if (session.user.role !== "ADMIN") {
+            return NextResponse.json({ success: false, message: "Akses ditolak." }, { status: 403 });
+        }
         const { searchParams } =
             new URL(request.url);
 
@@ -112,10 +120,7 @@ export async function GET(request: NextRequest) {
         return NextResponse.json(
             {
                 success: false,
-                message:
-                    error instanceof Error
-                        ? error.message
-                        : "Gagal mengambil wilayah.",
+                message: "Gagal mengambil wilayah.",
             },
             { status: 500 }
         );

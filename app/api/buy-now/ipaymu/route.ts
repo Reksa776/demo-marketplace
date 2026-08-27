@@ -495,8 +495,7 @@ export async function POST(
 
             default:
                 return jsonError(
-                    message ||
-                        "Gagal membuat pembayaran iPaymu.",
+                    "Gagal membuat pembayaran iPaymu.",
                     500
                 );
         }

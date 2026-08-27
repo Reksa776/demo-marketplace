@@ -51,14 +51,9 @@ export async function POST(
             data: result,
         });
     } catch (error: any) {
-        const status = error?.message?.includes("tidak ditemukan") ? 404 :
-                       error?.message?.includes("tidak diperbolehkan") ? 400 :
-                       error?.message?.includes("sudah dalam status") ? 409 :
-                       error?.message?.includes("tidak terkoneksi") ? 503 : 500;
-
         return NextResponse.json(
-            { success: false, message: error?.message ?? "Gagal mengirim broadcast." },
-            { status }
+            { success: false, message: "Gagal mengirim broadcast." },
+            { status: 500 }
         );
     }
 }

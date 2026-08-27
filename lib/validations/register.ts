@@ -17,11 +17,14 @@ export const registerSchema = z
 
     password: z
       .string()
-      .min(6, "Password minimal 6 karakter"),
+      .min(8, "Password minimal 8 karakter")
+      .regex(/[A-Z]/, "Password harus mengandung minimal 1 huruf besar")
+      .regex(/[a-z]/, "Password harus mengandung minimal 1 huruf kecil")
+      .regex(/[0-9]/, "Password harus mengandung minimal 1 angka"),
 
     confirmPassword: z
       .string()
-      .min(6, "Konfirmasi password wajib diisi"),
+      .min(8, "Konfirmasi password wajib diisi"),
 
     referralCode: z
       .string()

@@ -136,9 +136,7 @@ export async function POST(req: Request) {
 
         return NextResponse.json(
             {
-                message:
-                    error?.message ||
-                    "Terjadi kesalahan.",
+                message: "Terjadi kesalahan saat registrasi.",
             },
             { status: 500 }
         );

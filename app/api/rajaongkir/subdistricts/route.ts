@@ -47,10 +47,7 @@ export async function GET(
         return NextResponse.json(
             {
                 success: false,
-                message:
-                    error instanceof Error
-                        ? error.message
-                        : "Gagal mengambil kelurahan.",
+                message: "Gagal mengambil kelurahan.",
             },
             {
                 status: 500,

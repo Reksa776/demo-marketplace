@@ -867,10 +867,8 @@ describe("iPaymu Webhook Integration", () => {
             "reference_id"
         );
         expect(webhook).toContain("trx_id");
-        expect(webhook).toContain("sub_total");
-        expect(webhook).toContain(
-            "settlement_status"
-        );
+        // SECURITY: sub_total and settlement_status removed from
+        // logs to prevent leaking payment details
     });
 
     test("webhook does not log API key or credentials", () => {

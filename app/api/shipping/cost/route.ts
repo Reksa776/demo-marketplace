@@ -244,15 +244,8 @@ export async function POST(request: Request) {
             return NextResponse.json(
                 {
                     success: false,
-
-                    message:
-                        result?.meta?.message ||
-                        result?.message ||
-                        "Gagal menghitung ongkir.",
-
+                    message: "Gagal menghitung ongkir.",
                     data: null,
-
-                    meta: result?.meta ?? null,
                 },
                 {
                     status:

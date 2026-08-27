@@ -24,6 +24,7 @@ import {
 import {
     calculateSpinRewardDiscount,
 } from "./spin-wheel";
+import { formatProductName } from "./payment/ipaymu";
 
 export type CheckoutMode =
     | "CART"
@@ -429,10 +430,10 @@ function createMidtransItemDetails(
                     item.quantity,
 
                 name:
-                    `${item.productName} - ${item.variantName}`.substring(
-                        0,
-                        50
-                    ),
+                    formatProductName(
+                        item.productName,
+                        item.variantName
+                    ).substring(0, 50),
             })
         );
 

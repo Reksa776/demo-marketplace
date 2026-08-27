@@ -74,7 +74,7 @@ export async function PATCH(req: Request, { params }: RouteContext) {
     } catch (error) {
         console.error("ADMIN COMMISSION ACTION ERROR:", error);
         return NextResponse.json(
-            { success: false, message: error instanceof Error ? error.message : "Gagal memproses komisi." },
+            { success: false, message: "Gagal memproses komisi." },
             { status: 500 }
         );
     }

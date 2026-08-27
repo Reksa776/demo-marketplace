@@ -117,10 +117,7 @@ export async function GET(request: NextRequest) {
         return NextResponse.json(
             {
                 success: false,
-                message:
-                    error instanceof Error
-                        ? error.message
-                        : "Gagal mengambil data wilayah.",
+                message: "Gagal mengambil data wilayah.",
             },
             { status: 500 }
         );

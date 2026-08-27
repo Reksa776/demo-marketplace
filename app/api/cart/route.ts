@@ -271,14 +271,44 @@ export async function POST(
             });
 
         if (existingItem) {
-            const newQuantity =
-                existingItem.quantity +
-                quantity;
+            // LOW-1 FIX: Use atomic increment to prevent TOCTOU race condition.
+            // Atomic increment + stock check avoids the read→calculate→write gap
+            // where two concurrent requests could both read the same quantity
+            // and produce incorrect results.
+            const updated = await prisma.cartItem.updateMany({
+                where: {
+                    id: existingItem.id,
+                    cart: { userId: session.user.id },
+                },
+                data: {
+                    quantity: { increment: quantity },
+                },
+            });
 
-            if (
-                newQuantity >
-                variant.stock
-            ) {
+            if (updated.count === 0) {
+                return NextResponse.json(
+                    { message: "Item keranjang tidak ditemukan." },
+                    { status: 404 }
+                );
+            }
+
+            // Verify stock after atomic increment
+            const afterUpdate = await prisma.cartItem.findUnique({
+                where: { id: existingItem.id },
+                select: { quantity: true },
+            });
+
+            if (afterUpdate && afterUpdate.quantity > variant.stock) {
+                // Rollback the increment
+                await prisma.cartItem.updateMany({
+                    where: {
+                        id: existingItem.id,
+                        cart: { userId: session.user.id },
+                    },
+                    data: {
+                        quantity: { decrement: quantity },
+                    },
+                });
                 return NextResponse.json(
                     {
                         message: `Jumlah melebihi stok. Stok tersedia ${variant.stock}.`,
@@ -288,16 +318,6 @@ export async function POST(
                     }
                 );
             }
-
-            await prisma.cartItem.update({
-                where: {
-                    id: existingItem.id,
-                },
-
-                data: {
-                    quantity: newQuantity,
-                },
-            });
         } else {
             await prisma.cartItem.create({
                 data: {

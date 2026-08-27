@@ -518,6 +518,41 @@ export async function PATCH(req: Request, { params }: RouteContext) {
             const proofPath = body.proofFilePath;
             if (!proofPath || typeof proofPath !== "string") {
                 return NextResponse.json({ success: false, message: "proofFilePath wajib diisi." }, { status: 400 });
+
+            }
+
+            /* ==========================================
+             * VALIDATE PROOF FILE PATH
+             * ==========================================
+             *
+             * Prevent path traversal and arbitrary
+             * filesystem access.
+             */
+
+            const cleanPath = proofPath.trim();
+
+            // Must be a relative path within storage
+            if (
+                cleanPath.includes("..") ||
+                cleanPath.startsWith("/") ||
+                cleanPath.includes("\\") ||
+                cleanPath.includes("\0") ||
+                !cleanPath.startsWith("storage/uploads/")
+            ) {
+                return NextResponse.json(
+                    { success: false, message: "Path bukti tidak valid." },
+                    { status: 400 }
+                );
+            }
+
+            // Must end with supported extension
+            const validExtensions = [".jpg", ".jpeg", ".png", ".webp", ".pdf"];
+            const ext = cleanPath.toLowerCase().substring(cleanPath.lastIndexOf("."));
+            if (!validExtensions.includes(ext)) {
+                return NextResponse.json(
+                    { success: false, message: "Format file bukti tidak valid." },
+                    { status: 400 }
+                );
             }
 
             await prisma.affiliatePayout.update({
@@ -544,7 +579,7 @@ export async function PATCH(req: Request, { params }: RouteContext) {
     } catch (error: any) {
         console.error("ADMIN PAYOUT ACTION ERROR:", error);
         return NextResponse.json(
-            { success: false, message: error instanceof Error ? error.message : "Gagal memproses payout." },
+            { success: false, message: "Gagal memproses payout." },
             { status: 500 }
         );
     }

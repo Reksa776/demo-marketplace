@@ -200,22 +200,25 @@ export async function createRedirectPayment(
     );
     const timestamp = generateTimestamp();
 
-    console.log("========== IPAYMU DEBUG ==========");
-    console.log("VA:", va);
-    console.log("BASE URL:", baseUrl);
-    console.log("BODY:", body);
-    console.log("BODY LENGTH:", body.length);
-    console.log("BODY HASH:", bodyHash);
-    console.log("SIGNATURE:", signature);
-    console.log("TIMESTAMP:", timestamp);
-    console.log("==================================");
+    if (process.env.NODE_ENV !== "production") {
+        console.log("========== IPAYMU DEBUG ==========");
+        console.log("VA:", va);
+        console.log("BASE URL:", baseUrl);
+        console.log("BODY LENGTH:", body.length);
+        console.log("BODY HASH:", bodyHash);
+        console.log("SIGNATURE FIRST8:", signature.substring(0, 8));
+        console.log("TIMESTAMP:", timestamp);
+        console.log("==================================");
+    }
 
-    console.log("========== IPAYMU CREATE ==========");
-    console.log("URL:", `${baseUrl}/api/v2/payment/`);
-    console.log("AMOUNT:", request.amount);
-    console.log("REFERENCE:", request.referenceId);
-    console.log("METHOD:", request.paymentMethod);
-    console.log("CHANNEL:", request.paymentChannel);
+    if (process.env.NODE_ENV !== "production") {
+        console.log("========== IPAYMU CREATE ==========");
+        console.log("URL:", `${baseUrl}/api/v2/payment/`);
+        console.log("AMOUNT:", request.amount);
+        console.log("REFERENCE:", request.referenceId);
+        console.log("METHOD:", request.paymentMethod);
+        console.log("CHANNEL:", request.paymentChannel);
+    }
 
     const response = await fetch(
         `${baseUrl}/api/v2/payment/`,
@@ -235,12 +238,14 @@ export async function createRedirectPayment(
     const result: IpaymuResponse =
         await response.json();
 
-    console.log("IPAYMU RESPONSE:", {
-        Status: result.Status,
-        Message: result.Message,
-        HasUrl: !!result.Data?.Url,
-        SessionId: result.Data?.SessionId,
-    });
+    if (process.env.NODE_ENV !== "production") {
+        console.log("IPAYMU RESPONSE:", {
+            Status: result.Status,
+            Message: result.Message,
+            HasUrl: !!result.Data?.Url,
+            SessionId: result.Data?.SessionId,
+        });
+    }
 
     if (result.Status !== 200) {
         throw new Error(

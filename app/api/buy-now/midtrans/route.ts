@@ -493,24 +493,9 @@ export async function POST(
             })
         );
 
-        const message =
-            error instanceof Error
-                ? error.message
-                : "";
-
-        switch (message) {
-            case "NEXT_PUBLIC_APP_URL belum dikonfigurasi.":
-                return jsonError(
-                    "Konfigurasi aplikasi belum lengkap.",
-                    500
-                );
-
-            default:
-                return jsonError(
-                    message ||
-                        "Gagal membuat pembayaran Midtrans.",
-                    500
-                );
-        }
+        return jsonError(
+            "Gagal membuat pembayaran Midtrans.",
+            500
+        );
     }
 }

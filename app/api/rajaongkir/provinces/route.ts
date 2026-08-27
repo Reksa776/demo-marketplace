@@ -20,10 +20,7 @@ export async function GET() {
         return NextResponse.json(
             {
                 success: false,
-                message:
-                    error instanceof Error
-                        ? error.message
-                        : "Gagal mengambil provinsi.",
+                message: "Gagal mengambil provinsi.",
             },
             {
                 status: 500,

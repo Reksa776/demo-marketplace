@@ -527,10 +527,7 @@ export async function GET(request: Request) {
         return NextResponse.json(
             {
                 success: false,
-                message:
-                    error instanceof Error
-                        ? error.message
-                        : "Terjadi kesalahan saat mengambil destination RajaOngkir.",
+                message: "Terjadi kesalahan saat mengambil destination RajaOngkir.",
             },
             {
                 status: 500,

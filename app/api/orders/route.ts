@@ -282,7 +282,6 @@ export async function POST(
                 success: false,
 
                 message:
-                    error?.message ??
                     "Gagal membuat pesanan.",
             },
             {

@@ -101,9 +101,22 @@ export const {
                     });
 
                 /*
+                 * SECURITY: Constant-time response
+                 * to prevent user enumeration.
+                 * Always run verifyPassword even if
+                 * user not found, to ensure same
+                 * response time.
+                 */
+
+                /*
                  * User tidak ditemukan
                  */
                 if (!user) {
+                    // Run dummy verify to prevent timing attack
+                    await verifyPassword(
+                        password,
+                        "$2a$12$x dummy hash to prevent timing attack"
+                    );
                     return null;
                 }
 
@@ -114,6 +127,11 @@ export const {
                  * yang dibuat melalui OAuth/Google.
                  */
                 if (!user.password) {
+                    // Run dummy verify to prevent timing attack
+                    await verifyPassword(
+                        password,
+                        "$2a$12$x dummy hash to prevent timing attack"
+                    );
                     return null;
                 }
 
