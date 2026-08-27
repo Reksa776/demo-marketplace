@@ -470,6 +470,98 @@ describe("iPaymu Product Name Formatting", () => {
         expect(result).not.toMatch(/-\s*$/);
     });
 
+    test("formatProductName: long name truncated at 50 chars without variant", async () => {
+        const { formatProductName } = await import(
+            "@/lib/payment/ipaymu"
+        );
+
+        const name = formatProductName(
+            "Keripik kripik singkong bumbu rujak 1kg Mutiara Ab",
+            ""
+        );
+        const truncated = name.substring(0, 50);
+        expect(truncated).toBe(
+            "Keripik kripik singkong bumbu rujak 1kg Mutiara Ab"
+        );
+        expect(truncated).not.toMatch(/\s$/);
+        expect(truncated).not.toMatch(/-\s*$/);
+    });
+
+    test('formatProductName: long name Kripik Kue Kuping Gajah Cream 1KG Mutiara Abadi without variant', async () => {
+        const { formatProductName } = await import(
+            "@/lib/payment/ipaymu"
+        );
+
+        const name = formatProductName(
+            "Kripik Kue Kuping Gajah Cream 1KG Mutiara Abadi",
+            ""
+        );
+        expect(name).toBe(
+            "Kripik Kue Kuping Gajah Cream 1KG Mutiara Abadi"
+        );
+        expect(name).not.toMatch(/\s$/);
+        expect(name).not.toMatch(/-\s*$/);
+    });
+
+    test("formatProductName: 'Produk A' with variant '1 KG' produces 'Produk A - 1 KG'", async () => {
+        const { formatProductName } = await import(
+            "@/lib/payment/ipaymu"
+        );
+
+        expect(
+            formatProductName("Produk A", "1 KG")
+        ).toBe("Produk A - 1 KG");
+    });
+
+    test("formatProductName: 'Produk A' with whitespace-only variant '   ' returns 'Produk A'", async () => {
+        const { formatProductName } = await import(
+            "@/lib/payment/ipaymu"
+        );
+
+        expect(
+            formatProductName("Produk A", "   ")
+        ).toBe("Produk A");
+    });
+
+    test("formatProductName: productName with trailing space is trimmed", async () => {
+        const { formatProductName } = await import(
+            "@/lib/payment/ipaymu"
+        );
+
+        expect(
+            formatProductName("Produk A ", "Merah")
+        ).toBe("Produk A - Merah");
+
+        expect(
+            formatProductName("Produk A ", "")
+        ).toBe("Produk A");
+    });
+
+    test("formatProductName: never produces trailing separator in any scenario", async () => {
+        const { formatProductName } = await import(
+            "@/lib/payment/ipaymu"
+        );
+
+        // All these scenarios should NEVER produce "Product - "
+        const cases: [string, string | null | undefined][] = [
+            ["Product", ""],
+            ["Product", null],
+            ["Product", undefined],
+            ["Product", "  "],
+            ["Product ", ""],
+            [" Product ", null],
+        ];
+
+        for (const [name, variant] of cases) {
+            const result = formatProductName(
+                name,
+                variant
+            );
+            expect(result).not.toMatch(/-\s*$/);
+            expect(result).not.toMatch(/\s-\s*$/);
+        }
+    });
+
     test("formatProductName does not break signature generation", async () => {
         const { generateSignature, formatProductName } = await import(
             "@/lib/payment/ipaymu"

@@ -94,10 +94,11 @@ export function formatProductName(
     productName: string,
     variantName?: string | null
 ): string {
-    const trimmed = (variantName ?? "").trim();
-    return trimmed
-        ? `${productName} - ${trimmed}`
-        : productName;
+    const trimmedName = productName.trim();
+    const trimmedVariant = (variantName ?? "").trim();
+    return trimmedVariant
+        ? `${trimmedName} - ${trimmedVariant}`
+        : trimmedName;
 }
 
 /* ==========================================
