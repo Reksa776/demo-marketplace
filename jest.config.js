@@ -6,6 +6,7 @@ module.exports = {
         "^@/(.*)$": "<rootDir>/$1",
     },
     testMatch: [
+        "**/__tests__/ipaymu/*.test.ts",
         "**/__tests__/marketing/*.test.ts",
         "!**/__tests__/marketing/pricing-engine.test.ts",
         "**/__tests__/p0/*.test.ts",

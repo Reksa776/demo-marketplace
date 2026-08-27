@@ -370,10 +370,161 @@ describe("iPaymu Payment Method Mapping", () => {
 });
 
 /* ==========================================
+ * PRODUCT NAME FORMATTING
+ * ==========================================
+ *
+ * Regression tests for the trailing
+ * separator bug that caused iPaymu 401.
+ */
+
+describe("iPaymu Product Name Formatting", () => {
+    test("formatProductName returns 'Product - Variant' when variant is available", async () => {
+        const { formatProductName } = await import(
+            "@/lib/payment/ipaymu"
+        );
+
+        expect(
+            formatProductName("Produk A", "Merah")
+        ).toBe("Produk A - Merah");
+    });
+
+    test("formatProductName returns only productName when variant is empty string", async () => {
+        const { formatProductName } = await import(
+            "@/lib/payment/ipaymu"
+        );
+
+        expect(
+            formatProductName("Produk A", "")
+        ).toBe("Produk A");
+    });
+
+    test("formatProductName returns only productName when variant is null", async () => {
+        const { formatProductName } = await import(
+            "@/lib/payment/ipaymu"
+        );
+
+        expect(
+            formatProductName("Produk A", null)
+        ).toBe("Produk A");
+    });
+
+    test("formatProductName returns only productName when variant is undefined", async () => {
+        const { formatProductName } = await import(
+            "@/lib/payment/ipaymu"
+        );
+
+        expect(
+            formatProductName("Produk A")
+        ).toBe("Produk A");
+    });
+
+    test("formatProductName has no trailing whitespace", async () => {
+        const { formatProductName } = await import(
+            "@/lib/payment/ipaymu"
+        );
+
+        const result = formatProductName(
+            "Produk A",
+            ""
+        );
+        expect(result).not.toMatch(/\s$/);
+        expect(result).not.toMatch(/-\s*$/);
+    });
+
+    test("formatProductName has no trailing separator when variant is undefined", async () => {
+        const { formatProductName } = await import(
+            "@/lib/payment/ipaymu"
+        );
+
+        const result = formatProductName(
+            "Produk A"
+        );
+        expect(result).not.toMatch(/-\s*$/);
+    });
+
+    test("formatProductName handles long product names with variant", async () => {
+        const { formatProductName } = await import(
+            "@/lib/payment/ipaymu"
+        );
+
+        const result = formatProductName(
+            "Kripik Kue Kuping Gajah Cream 1KG Mutiara Abadi",
+            "Pedas"
+        );
+        expect(result).toBe(
+            "Kripik Kue Kuping Gajah Cream 1KG Mutiara Abadi - Pedas"
+        );
+    });
+
+    test("formatProductName handles long product name without variant", async () => {
+        const { formatProductName } = await import(
+            "@/lib/payment/ipaymu"
+        );
+
+        const result = formatProductName(
+            "Kripik Kue Kuping Gajah Cream 1KG Mutiara Abadi"
+        );
+        expect(result).toBe(
+            "Kripik Kue Kuping Gajah Cream 1KG Mutiara Abadi"
+        );
+        expect(result).not.toMatch(/-\s*$/);
+    });
+
+    test("formatProductName does not break signature generation", async () => {
+        const { generateSignature, formatProductName } = await import(
+            "@/lib/payment/ipaymu"
+        );
+
+        const name = formatProductName(
+            "Produk A",
+            ""
+        );
+        expect(name).toBe("Produk A");
+
+        // Signature should be deterministic for the same body
+        const body = JSON.stringify({
+            product: [name, "Biaya Pengiriman"],
+            qty: ["1", "1"],
+            price: ["10000", "5000"],
+            amount: 15000,
+        });
+
+        const sig = generateSignature(
+            body,
+            "1179000899",
+            "test-key"
+        );
+
+        // Same body → same signature
+        expect(
+            generateSignature(body, "1179000899", "test-key")
+        ).toBe(sig);
+    });
+});
+
+/* ==========================================
  * INTEGRATION WITH CHECKOUT FLOW
  * ========================================== */
 
 describe("iPaymu Checkout Integration", () => {
+    test("iPaymu buy-now route uses formatProductName (no trailing separator)", () => {
+        const route = readFile(
+            "app/api/buy-now/ipaymu/route.ts"
+        );
+
+        expect(route).toContain("formatProductName");
+        expect(route).not.toMatch(/\$\{item\.productName\} - \$\{item\.variantName\}/);
+    });
+
+    test("iPaymu cart route uses formatProductName (no trailing separator)", () => {
+        const route = readFile(
+            "app/api/payment/ipaymu/route.ts"
+        );
+
+        expect(route).toContain("formatProductName");
+        expect(route).not.toMatch(/\$\{item\.productName\} - \$\{item\.variantName\}/);
+    });
+
     test("iPaymu cart route uses createCheckoutOrder", () => {
         const route = readFile(
             "app/api/payment/ipaymu/route.ts"

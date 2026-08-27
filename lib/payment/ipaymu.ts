@@ -79,6 +79,28 @@ export function generateTimestamp(): string {
 }
 
 /* ==========================================
+ * PRODUCT DISPLAY NAME
+ * ==========================================
+ *
+ * Safely format product + variant name.
+ * If variantName is empty/null/undefined,
+ * return only productName.
+ *
+ * Prevents trailing " - " which changes the
+ * JSON body hash and causes iPaymu 401.
+ */
+
+export function formatProductName(
+    productName: string,
+    variantName?: string | null
+): string {
+    const trimmed = (variantName ?? "").trim();
+    return trimmed
+        ? `${productName} - ${trimmed}`
+        : productName;
+}
+
+/* ==========================================
  * TYPES
  * ========================================== */
 

@@ -12,6 +12,7 @@ import { rateLimiters } from "@/lib/rate-limit";
 
 import {
     createRedirectPayment,
+    formatProductName,
     IPAYMU_CONFIG,
 } from "@/lib/payment/ipaymu";
 
@@ -323,10 +324,10 @@ export async function POST(
 
         for (const item of result.checkoutItems) {
             products.push(
-                `${item.productName} - ${item.variantName}`.substring(
-                    0,
-                    50
-                )
+                formatProductName(
+                    item.productName,
+                    item.variantName
+                ).substring(0, 50)
             );
             qtys.push(String(item.quantity));
             prices.push(String(item.price));
@@ -374,10 +375,10 @@ export async function POST(
 
         const descriptions: string[] =
             result.checkoutItems.map((item) =>
-                `${item.productName} - ${item.variantName}`.substring(
-                    0,
-                    50
-                )
+                formatProductName(
+                    item.productName,
+                    item.variantName
+                ).substring(0, 50)
             );
 
         if (result.shippingCost > 0) {
