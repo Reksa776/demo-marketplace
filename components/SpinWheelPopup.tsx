@@ -165,6 +165,7 @@ export default function SpinWheelPopup({
 
     const [spinState, setSpinState] = useState<SpinState>("idle");
     const [reward, setReward] = useState<RewardResult | null>(null);
+    const [spinId, setSpinId] = useState<number | null>(null);
     const [rotation, setRotation] = useState(0);
     const spinTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -221,11 +222,17 @@ export default function SpinWheelPopup({
             }
 
             const rewardData: RewardResult = result.data.reward;
+            const spinIdData: number | undefined = result.data.spinId;
             setReward(rewardData);
+            if (spinIdData) {
+                setSpinId(spinIdData);
+            }
             console.log(
                 "[SpinWheel] reward received:",
                 rewardData.name,
-                rewardData.type
+                rewardData.type,
+                "spinId:",
+                spinIdData
             );
 
             // Map reward to segment index using rewards list
@@ -274,6 +281,27 @@ export default function SpinWheelPopup({
                 spinTimeoutRef.current = null;
             }
             setSpinState("result");
+
+            // Store spin reward in localStorage for checkout/buy-now to use
+            if (spinId && reward) {
+                const pendingRewards = JSON.parse(
+                    localStorage.getItem("spinWheelPendingRewards") || "[]"
+                );
+                pendingRewards.push({
+                    spinId,
+                    rewardId: reward.id,
+                    rewardName: reward.name,
+                    rewardType: reward.type,
+                    rewardValue: reward.value,
+                    maxDiscount: reward.maxDiscount,
+                    createdAt: new Date().toISOString(),
+                });
+                localStorage.setItem(
+                    "spinWheelPendingRewards",
+                    JSON.stringify(pendingRewards)
+                );
+                console.log("[SpinWheel] saved pending reward to localStorage:", spinId);
+            }
         }
     }
 

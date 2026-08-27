@@ -40,6 +40,7 @@ export async function POST() {
         return NextResponse.json({
             success: true,
             data: {
+                spinId: result.spinId,
                 reward: result.reward,
             },
         });

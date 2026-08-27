@@ -2320,7 +2320,31 @@ export async function rollbackCheckoutOrder(
                             },
                         },
                     });
-                }
+                }            }
+
+            /*
+             * ==========================================
+             * RESTORE SPIN WHEEL REWARD
+             * ==========================================
+             *
+             * If the order had a spin wheel reward applied,
+             * restore it to AVAILABLE so the user can reuse it.
+             */
+
+            const spinRecord =
+                await tx.spinWheelSpin.findUnique({
+                    where: { orderId: order.id },
+                });
+
+            if (spinRecord) {
+                await tx.spinWheelSpin.update({
+                    where: { id: spinRecord.id },
+                    data: {
+                        status: "AVAILABLE",
+                        usedAt: null,
+                        orderId: null,
+                    },
+                });
             }
 
             /*
@@ -2331,16 +2355,11 @@ export async function rollbackCheckoutOrder(
 
             await tx.order.update({
                 where: {
-                    id:
-                        order.id,
+                    id: order.id,
                 },
-
                 data: {
-                    status:
-                        "CANCELLED",
-
-                    paymentStatus:
-                        "FAILED",
+                    status: "CANCELLED",
+                    paymentStatus: "FAILED",
                 },
             });
 

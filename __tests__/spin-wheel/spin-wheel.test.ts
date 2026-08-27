@@ -77,6 +77,38 @@ test("spin catches P2002 for duplicate prevention", () => {
     assert(spinWheelCode.includes("P2002"), "Must catch P2002 unique constraint violation");
 });
 
+test("spin P2002 handler returns business error, not re-throws", () => {
+    // The P2002 catch must return { success: false, message: ... } not throw
+    assert(
+        spinWheelCode.includes('code === "P2002"') &&
+        spinWheelCode.includes('success: false'),
+        "P2002 handler must return success:false business error"
+    );
+});
+
+test("availableSpins uses existingSpins (not just usedSpins)", () => {
+    // Both checkEligibility and executeSpin must calculate
+    // availableSpins = totalMilestones - existingSpins
+    // to prevent unlimited spins when constraint is removed
+    const lines = spinWheelCode.split("\n");
+    const availLines = lines.filter(l => l.includes("availableSpins") && l.includes("totalMilestones"));
+    for (const line of availLines) {
+        assert(
+            line.includes("existingSpins"),
+            `availableSpins must use existingSpins, found: ${line.trim()}`
+        );
+    }
+});
+
+test("executeSpin does not have useless catch-rethrow", () => {
+    // The old code had: catch (err: any) { throw err; } which is pointless
+    // The new code catches P2002 and returns business error
+    assert(
+        !spinWheelCode.includes("catch (err: any) {\n            throw err;\n        }"),
+        "Must not have catch-rethrow pattern"
+    );
+});
+
 test("selectReward uses crypto for randomness", () => {
     assert(spinWheelCode.includes("crypto"), "selectReward must use crypto module");
 });
@@ -179,6 +211,86 @@ test("checkout links spin to order via orderId", () => {
 
 test("checkout logs SPIN_WHEEL_REWARD_APPLIED", () => {
     assert(checkoutCode.includes("SPIN_WHEEL_REWARD_APPLIED"), "Must log event");
+});
+
+test("executeSpin returns spinId in result", () => {
+    assert(spinWheelCode.includes("spinId: spinRecord.id"), "Must return spinId from executeSpin");
+});
+
+test("SpinResult type includes spinId field", () => {
+    assert(spinWheelCode.includes("spinId?: number"), "SpinResult must have spinId field");
+});
+
+test("rollbackCheckoutOrder restores SpinWheelSpin on payment failure", () => {
+    assert(
+        checkoutCode.includes('spinWheelSpin.findUnique') && 
+        checkoutCode.includes('status: "AVAILABLE"') &&
+        checkoutCode.includes('orderId: null'),
+        "Must restore SpinWheelSpin to AVAILABLE on rollback"
+    );
+});
+
+test("CheckoutPage sends spinWheelSpinId in COD payload", () => {
+    const checkoutPage = readFile("app/checkout/CheckoutPage.tsx");
+    assert(checkoutPage.includes("spinWheelSpinId: selectedSpinReward"), "Checkout must send spinWheelSpinId");
+});
+
+test("CheckoutPage sends spinWheelSpinId in iPaymu payload", () => {
+    const checkoutPage = readFile("app/checkout/CheckoutPage.tsx");
+    // Count occurrences - should be at least 2 (COD + iPaymu)
+    const matches = checkoutPage.match(/spinWheelSpinId: selectedSpinReward/g);
+    assert(matches && matches.length >= 2, "Checkout must send spinWheelSpinId in both COD and iPaymu payloads");
+});
+
+test("BuyNowPage sends spinWheelSpinId in COD payload", () => {
+    const buyNowPage = readFile("app/buy-now/BuyNowPage.tsx");
+    assert(buyNowPage.includes("spinWheelSpinId: selectedSpinReward"), "BuyNow must send spinWheelSpinId");
+});
+
+test("BuyNowPage sends spinWheelSpinId in iPaymu payload", () => {
+    const buyNowPage = readFile("app/buy-now/BuyNowPage.tsx");
+    const matches = buyNowPage.match(/spinWheelSpinId: selectedSpinReward/g);
+    assert(matches && matches.length >= 2, "BuyNow must send spinWheelSpinId in both COD and iPaymu payloads");
+});
+
+test("CheckoutPage loads pending spin rewards from localStorage", () => {
+    const checkoutPage = readFile("app/checkout/CheckoutPage.tsx");
+    assert(
+        checkoutPage.includes('spinWheelPendingRewards') && checkoutPage.includes('localStorage'),
+        "Checkout must load spin rewards from localStorage"
+    );
+});
+
+test("BuyNowPage loads pending spin rewards from localStorage", () => {
+    const buyNowPage = readFile("app/buy-now/BuyNowPage.tsx");
+    assert(
+        buyNowPage.includes('spinWheelPendingRewards') && buyNowPage.includes('localStorage'),
+        "BuyNow must load spin rewards from localStorage"
+    );
+});
+
+test("SpinWheelPopup stores spinId in localStorage after spin", () => {
+    const popup = readFile("components/SpinWheelPopup.tsx");
+    assert(
+        popup.includes('spinWheelPendingRewards') && popup.includes('localStorage.setItem'),
+        "SpinWheelPopup must store reward in localStorage"
+    );
+});
+
+test("CheckoutPage clears localStorage on COD success", () => {
+    const checkoutPage = readFile("app/checkout/CheckoutPage.tsx");
+    assert(
+        checkoutPage.includes('localStorage.removeItem("spinWheelPendingRewards")'),
+        "Checkout must clear localStorage on success"
+    );
+});
+
+test("BuyNowPage clears localStorage on COD success", () => {
+    const buyNowPage = readFile("app/buy-now/BuyNowPage.tsx");
+    assert(
+        buyNowPage.includes('localStorage.removeItem("spinWheelPendingRewards")'),
+        "BuyNow must clear localStorage on success"
+    );
 });
 
 // ==========================================

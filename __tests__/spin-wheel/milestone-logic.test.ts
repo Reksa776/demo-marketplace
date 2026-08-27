@@ -50,7 +50,7 @@ interface MilestoneResult {
 function calculateMilestones(
     totalPaidSpend: number,
     minimumSpend: number,
-    usedSpins: number, // count of USED spins only
+    existingSpins: number, // count of ALL spins (AVAILABLE + USED)
     maxSpinsPerUser: number // 0 or Infinity = no cap
 ): MilestoneResult {
     const totalMilestones =
@@ -58,10 +58,12 @@ function calculateMilestones(
             ? Math.floor(totalPaidSpend / minimumSpend)
             : 0;
 
-    // Available = milestones earned - used spins
+    // Available = milestones earned - spins created (AVAILABLE + USED)
+    // This ensures creating a spin immediately consumes a milestone,
+    // preventing unlimited spins when unique constraint is removed.
     const availableSpins = Math.max(
         0,
-        totalMilestones - usedSpins
+        totalMilestones - existingSpins
     );
 
     // Optional campaign cap (0 or 1 means no cap)
@@ -71,7 +73,7 @@ function calculateMilestones(
 
     const spinsRemaining = Math.min(
         availableSpins,
-        Math.max(0, maxSpinsCap - usedSpins)
+        Math.max(0, maxSpinsCap - existingSpins)
     );
 
     const spendingProgress =
@@ -183,15 +185,48 @@ testCase("CASE 9: Repeated GET does not create spins (read-only)", () => {
 
 // CASE 10: Concurrent POST semantics
 testCase("CASE 10: Concurrent POST semantics — no double-consume", () => {
-    // Two simultaneous spins: both see usedSpins=0 → both get 1 available
+    // Two simultaneous spins: both see existingSpins=0 → both get 1 available
     // In reality, DB transaction prevents double-consume
     const r1 = calculateMilestones(100000, MIN_SPEND, 0, MAX_SPINS);
     const r2 = calculateMilestones(100000, MIN_SPEND, 0, MAX_SPINS);
     assertEqual(r1.spinsRemaining, 1, "request 1 sees 1 spin");
     assertEqual(r2.spinsRemaining, 1, "request 2 sees 1 spin");
-    // After transaction: usedSpins=1 → no more available
+    // After transaction: existingSpins=1 → no more available
     const rAfter = calculateMilestones(100000, MIN_SPEND, 1, MAX_SPINS);
     assertEqual(rAfter.spinsRemaining, 0, "after consume: 0 spins");
+});
+
+// CASE 11: Creating spin consumes milestone (prevents unlimited spins)
+testCase("CASE 11: 1 milestone + 1 AVAILABLE spin → 0 remaining", () => {
+    // User has 1 milestone, created 1 spin (AVAILABLE, not yet USED)
+    // OLD logic (usedSpins): availableSpins = 1 - 0 = 1 (BUG: unlimited!)
+    // NEW logic (existingSpins): availableSpins = 1 - 1 = 0 (CORRECT)
+    const r = calculateMilestones(100000, MIN_SPEND, 1, MAX_SPINS);
+    assertEqual(r.totalMilestones, 1, "totalMilestones");
+    assertEqual(r.spinsRemaining, 0, "spinsRemaining (1 milestone - 1 created = 0)");
+});
+
+testCase("CASE 12: 2 milestones + 1 AVAILABLE spin → 1 remaining", () => {
+    const r = calculateMilestones(200000, MIN_SPEND, 1, MAX_SPINS);
+    assertEqual(r.totalMilestones, 2, "totalMilestones");
+    assertEqual(r.spinsRemaining, 1, "spinsRemaining (2 milestones - 1 created = 1)");
+});
+
+testCase("CASE 13: 3 milestones + 3 AVAILABLE spins → 0 remaining", () => {
+    const r = calculateMilestones(300000, MIN_SPEND, 3, MAX_SPINS);
+    assertEqual(r.totalMilestones, 3, "totalMilestones");
+    assertEqual(r.spinsRemaining, 0, "spinsRemaining (all milestones consumed)");
+});
+
+testCase("CASE 14: Race condition — 2 concurrent spins on 1 milestone", () => {
+    // Both requests see existingSpins=0, both create → existingSpins=2
+    // But milestone=1, so only 1 should be allowed
+    // The second spin creation would be blocked by P2002 or availableSpins check
+    const r1 = calculateMilestones(100000, MIN_SPEND, 0, MAX_SPINS);
+    assertEqual(r1.spinsRemaining, 1, "request 1: 1 available");
+    // After both create: existingSpins=2, but only 1 milestone
+    const rAfter = calculateMilestones(100000, MIN_SPEND, 2, MAX_SPINS);
+    assertEqual(rAfter.spinsRemaining, 0, "after race: 0 available (over-consumed)");
 });
 
 console.log("\nB. Spending Progression Examples:");

@@ -25,6 +25,7 @@ export type EligibilityResult = {
 
 export type SpinResult = {
     success: boolean;
+    spinId?: number;
     reward?: {
         id: number;
         name: string;
@@ -131,10 +132,12 @@ export async function checkEligibility(
             ? Math.floor(totalPaidSpend / minimumSpend)
             : 0;
 
-    // Available spins = milestones earned - spins consumed (USED)
+    // Available spins = milestones earned - spins created (AVAILABLE + USED)
+    // Using existingSpins (not usedSpins) ensures creating a spin
+    // immediately consumes a milestone, preventing unlimited spins.
     const availableSpins = Math.max(
         0,
-        totalMilestones - usedSpins
+        totalMilestones - existingSpins
     );
 
     // Optional campaign cap (maxSpinsPerUser > 1 means cap is active)
@@ -391,10 +394,12 @@ export async function executeSpin(
             },
         });
 
-        // Available spins = milestones earned - used spins
+        // Available spins = milestones earned - spins created (AVAILABLE + USED)
+        // Using existingSpins ensures creating a spin immediately consumes
+        // a milestone, preventing unlimited spins via race conditions.
         const availableSpins = Math.max(
             0,
-            totalMilestones - usedSpins
+            totalMilestones - existingSpins
         );
 
         // Optional campaign cap
@@ -428,8 +433,9 @@ export async function executeSpin(
         }
 
         // Create spin record
+        let spinRecord: { id: number };
         try {
-            await tx.spinWheelSpin.create({
+            spinRecord = await tx.spinWheelSpin.create({
                 data: {
                     campaignId: campaign.id,
                     userId,
@@ -444,6 +450,16 @@ export async function executeSpin(
                 },
             });
         } catch (err: any) {
+            // P2002 = unique constraint violation (race condition safety net)
+            // This should rarely happen after the constraint was removed,
+            // but handles edge cases where concurrent requests slip through.
+            if (err?.code === "P2002") {
+                return {
+                    success: false,
+                    message:
+                        "Anda sudah melakukan spin pada campaign ini.",
+                };
+            }
             throw err;
         }
 
@@ -457,6 +473,7 @@ export async function executeSpin(
 
         return {
             success: true,
+            spinId: spinRecord.id,
             reward,
         };
     });

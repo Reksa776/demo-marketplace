@@ -366,6 +366,19 @@ export default function BuyNowPage({
     const [voucherLoading, setVoucherLoading] =
         useState(false);
 
+    // Spin Wheel reward state
+    type PendingSpinReward = {
+        spinId: number;
+        rewardId: number;
+        rewardName: string;
+        rewardType: string;
+        rewardValue: number;
+        maxDiscount: number | null;
+        createdAt: string;
+    };
+    const [pendingSpinRewards, setPendingSpinRewards] = useState<PendingSpinReward[]>([]);
+    const [selectedSpinReward, setSelectedSpinReward] = useState<number | null>(null);
+
     /*
      * =====================================================
      * BUY NOW DATA
@@ -1324,6 +1337,21 @@ export default function BuyNowPage({
         loadBuyNow();
         loadProvinces();
 
+        // Load pending spin wheel rewards from localStorage
+        try {
+            const stored = localStorage.getItem("spinWheelPendingRewards");
+            if (stored) {
+                const rewards: PendingSpinReward[] = JSON.parse(stored);
+                const now = Date.now();
+                const valid = rewards.filter(
+                    (r) => now - new Date(r.createdAt).getTime() < 30 * 24 * 60 * 60 * 1000
+                );
+                setPendingSpinRewards(valid);
+            }
+        } catch {
+            // ignore parse errors
+        }
+
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [
         productId,
@@ -2145,6 +2173,7 @@ export default function BuyNowPage({
                                 voucherCode:
                                     appliedVoucherCode ||
                                     null,
+                                spinWheelSpinId: selectedSpinReward,
                             }),
                     }
                 );
@@ -2178,6 +2207,9 @@ export default function BuyNowPage({
             toast.success(
                 "Pesanan berhasil dibuat."
             );
+
+            // Clear used spin wheel reward from localStorage
+            localStorage.removeItem("spinWheelPendingRewards");
 
             window.location.href =
                 `/checkout/success?order=${encodeURIComponent(
@@ -2291,6 +2323,7 @@ export default function BuyNowPage({
                                 voucherCode:
                                     appliedVoucherCode ||
                                     null,
+                                spinWheelSpinId: selectedSpinReward,
                             }),
                     }
                 );
@@ -2335,6 +2368,9 @@ export default function BuyNowPage({
              * pembayaran iPaymu untuk menyelesaikan
              * transaksi.
              */
+
+            // Clear used spin wheel reward from localStorage
+            localStorage.removeItem("spinWheelPendingRewards");
 
             window.location.href =
                 paymentData.paymentUrl;
@@ -3777,6 +3813,47 @@ export default function BuyNowPage({
                                         </span>
                                     </div>
                                 )}
+
+                            {/* SPIN WHEEL REWARD SELECTION */}
+                            {pendingSpinRewards.length > 0 && (
+                                <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
+                                    <div className="text-sm font-semibold text-amber-800">
+                                        🎡 Reward Spin Wheel
+                                    </div>
+                                    <div className="mt-2 space-y-2">
+                                        {pendingSpinRewards.map((r) => (
+                                            <label
+                                                key={r.spinId}
+                                                className={`flex cursor-pointer items-center gap-3 rounded-xl border p-3 transition ${
+                                                    selectedSpinReward === r.spinId
+                                                        ? "border-amber-500 bg-amber-100"
+                                                        : "border-gray-200 bg-white hover:border-amber-300"
+                                                }`}
+                                            >
+                                                <input
+                                                    type="radio"
+                                                    name="spinReward"
+                                                    checked={selectedSpinReward === r.spinId}
+                                                    onChange={() => setSelectedSpinReward(r.spinId)}
+                                                    className="accent-amber-500"
+                                                />
+                                                <div className="flex-1">
+                                                    <div className="text-sm font-semibold text-gray-900">
+                                                        {r.rewardName}
+                                                    </div>
+                                                    <div className="text-xs text-gray-500">
+                                                        {r.rewardType === "FIXED" && `Rp ${r.rewardValue.toLocaleString("id-ID")} OFF`}
+                                                        {r.rewardType === "PERCENTAGE" && `Diskon ${r.rewardValue}%${r.maxDiscount ? ` (maks Rp ${r.maxDiscount.toLocaleString("id-ID")})` : ""}`}
+                                                        {r.rewardType === "FREE_SHIPPING" && "Gratis Ongkir"}
+                                                        {r.rewardType === "CASHBACK" && `Cashback Rp ${r.rewardValue.toLocaleString("id-ID")}`}
+                                                        {r.rewardType === "ZONK" && "Zonk"}
+                                                    </div>
+                                                </div>
+                                            </label>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
 
                             <div className="border-t pt-4">
                                 <div className="flex justify-between gap-4">
