@@ -188,12 +188,26 @@ export async function createRedirectPayment(
     }
 
     const body = JSON.stringify(request);
+    const bodyHash = crypto
+        .createHash("sha256")
+        .update(body)
+        .digest("hex");
     const signature = generateSignature(
         body,
         va,
         apiKey
     );
     const timestamp = generateTimestamp();
+
+    console.log("========== IPAYMU DEBUG ==========");
+    console.log("VA:", va);
+    console.log("BASE URL:", baseUrl);
+    console.log("BODY:", body);
+    console.log("BODY LENGTH:", body.length);
+    console.log("BODY HASH:", bodyHash);
+    console.log("SIGNATURE:", signature);
+    console.log("TIMESTAMP:", timestamp);
+    console.log("==================================");
 
     console.log("========== IPAYMU CREATE ==========");
     console.log("URL:", `${baseUrl}/api/v2/payment/`);
