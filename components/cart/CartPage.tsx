@@ -386,9 +386,11 @@ export default function CartPage() {
 
                 <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
 
+                    {/* LEFT COLUMN: Select All + Items */}
+                    <div>
                     {/* SELECT ALL */}
                     {items.length > 0 && (
-                        <div className="flex items-center gap-3">
+                        <div className="mb-4 flex items-center gap-3">
                             <label className="flex cursor-pointer items-center gap-2">
                                 <input
                                     type="checkbox"
@@ -438,7 +440,7 @@ export default function CartPage() {
                                                 : "border-gray-100"
                                     }`}
                                 >
-                                    <div className="flex gap-4">
+                                    <div className="flex gap-3 sm:gap-4">
 
                                         {/* CHECKBOX */}
                                         <div className="flex shrink-0 items-start pt-1">
@@ -452,7 +454,7 @@ export default function CartPage() {
                                         </div>
 
                                         {/* IMAGE */}
-                                        <div className="relative h-24 w-24 shrink-0 overflow-hidden rounded-xl bg-gray-100">
+                                        <div className="relative h-20 w-20 shrink-0 overflow-hidden rounded-xl bg-gray-100 sm:h-24 sm:w-24">
                                             {image ? (
                                                 <img
                                                     src={image}
@@ -624,6 +626,7 @@ export default function CartPage() {
                                 </div>
                             );
                         })}
+                    </div>
                     </div>
 
                     {/* SUMMARY */}
