@@ -530,12 +530,12 @@ export async function failRefund(
                 return { ok: true };
             }
 
-            // CAS: PROCESSING → FAILED
+            // CAS: PENDING/PROCESSING → FAILED
             const affectedRows = await tx.$executeRaw`
                 UPDATE \`refund\`
                 SET status = 'FAILED'
                 WHERE id = ${refundId}
-                  AND status = 'PROCESSING'
+                  AND status IN ('PENDING', 'PROCESSING')
             `;
 
             if (affectedRows === 0) {
@@ -615,4 +615,70 @@ export async function findRefundByOrderId(orderId: number) {
             amount: true,
         },
     });
+}
+
+/* ==========================================
+ * WEBHOOK REFUND TRANSITION
+ * ==========================================
+ *
+ * CAS-protected transition for webhook refund processing.
+ *
+ * Used by Midtrans and iPaymu webhook handlers.
+ * Handles the case where a user-initiated refund is PENDING
+ * and the provider confirms the refund before admin approval.
+ *
+ * CAS: PENDING → PROCESSING only if current status is PENDING.
+ * If CAS fails (affectedRows = 0), re-read current status:
+ *   - PROCESSING: admin already approved → proceed to completion
+ *   - COMPLETED: already done → return ok
+ *   - FAILED: admin rejected → return no-op
+ *   - PENDING: impossible (CAS would have succeeded)
+ *
+ * @returns { status: string, shouldComplete: boolean }
+ *   shouldComplete = true → caller should call executeRefundCompletion()
+ *   shouldComplete = false → refund is terminal, caller should return ok
+ */
+export async function transitionRefundForWebhook(
+    refundId: number,
+    providerRef?: string
+): Promise<{ status: string; shouldComplete: boolean }> {
+    // CAS: PENDING → PROCESSING
+    const affectedRows = await prisma.$executeRaw`
+        UPDATE \`refund\`
+        SET status = 'PROCESSING',
+            processedBy = 'PROVIDER_AUTO',
+            providerRef = COALESCE(${providerRef || null}, providerRef)
+        WHERE id = ${refundId}
+          AND status = 'PENDING'
+    `;
+
+    if (affectedRows > 0) {
+        // CAS succeeded → now PROCESSING → proceed to completion
+        return { status: "PROCESSING", shouldComplete: true };
+    }
+
+    // CAS failed → re-read current status
+    const refund = await prisma.refund.findUnique({
+        where: { id: refundId },
+        select: { status: true },
+    });
+
+    if (!refund) {
+        return { status: "NOT_FOUND", shouldComplete: false };
+    }
+
+    switch (refund.status) {
+        case "PROCESSING":
+            // Admin already approved → proceed to completion
+            return { status: "PROCESSING", shouldComplete: true };
+        case "COMPLETED":
+            // Already done → idempotent no-op
+            return { status: "COMPLETED", shouldComplete: false };
+        case "FAILED":
+            // Admin rejected → do NOT complete
+            return { status: "FAILED", shouldComplete: false };
+        default:
+            // Unknown state → do NOT complete
+            return { status: refund.status, shouldComplete: false };
+    }
 }

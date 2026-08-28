@@ -539,6 +539,28 @@ export async function POST(
             }
 
             /*
+             * CAS-PROTECTED TRANSITION + COMPLETION:
+             * transitionRefundForWebhook handles:
+             * 1. CAS: PENDING → PROCESSING (prevents resurrection)
+             * 2. Re-read on CAS failure (handles concurrent admin actions)
+             * 3. Returns shouldComplete flag for safe delegation
+             */
+            const { transitionRefundForWebhook } = await import(
+                "@/lib/refund"
+            );
+            const transition = await transitionRefundForWebhook(
+                existingRefund.id,
+                refundedRef || undefined
+            );
+
+            if (!transition.shouldComplete) {
+                return json({
+                    success: true,
+                    message: `Refund already ${transition.status} (idempotent).`
+                });
+            }
+
+            /*
              * EXECUTE REFUND COMPLETION:
              * Shared function handles CAS, stock, voucher,
              * affiliate, spin-wheel, and audit logging.

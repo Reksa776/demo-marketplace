@@ -126,7 +126,7 @@ export default function AdminRefundsPage() {
         loadRefunds(1);
     }, []);
 
-    async function handleRefundAction(refundId: number, orderId: number, action: "complete" | "reject") {
+    async function handleRefundAction(refundId: number, orderId: number, action: "approve" | "complete" | "reject") {
         try {
             setProcessingAction(refundId);
 
@@ -359,7 +359,7 @@ export default function AdminRefundsPage() {
                                                                 handleRefundAction(
                                                                     refund.id,
                                                                     refund.orderId,
-                                                                    "complete"
+                                                                    "approve"
                                                                 )
                                                             }
                                                             disabled={processingAction === refund.id}

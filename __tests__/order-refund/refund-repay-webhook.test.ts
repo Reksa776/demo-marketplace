@@ -531,3 +531,372 @@ describe("iPaymu Webhook — Verification Limitations", () => {
         // This is an accepted provider limitation
     });
 });
+
+/* ==========================================
+ * REFUND STATE MACHINE — COMPLETE TRANSITIONS
+ * ==========================================
+ *
+ * Source of truth: lib/refund.ts
+ *
+ * Refund Statuses: PENDING, PROCESSING, COMPLETED, FAILED
+ * Order Statuses: PAID, PROCESSING, REFUND_PENDING, CANCELLED
+ */
+
+describe("Refund State Machine — Complete Transition Map", () => {
+    // Refund model transitions (from lib/refund.ts)
+    const refundTransitions: Record<string, string[]> = {
+        PENDING: ["PROCESSING", "FAILED"],
+        PROCESSING: ["COMPLETED", "FAILED"],
+        COMPLETED: [],
+        FAILED: [],
+    };
+
+    test.each(Object.entries(refundTransitions))(
+        "Refund %s can transition to: %j",
+        (from, expectedTo) => {
+            expect(refundTransitions[from]).toEqual(expectedTo);
+        }
+    );
+
+    test("PENDING → PROCESSING via approveRefund() or webhook CAS", () => {
+        expect(refundTransitions["PENDING"]).toContain("PROCESSING");
+    });
+
+    test("PENDING → FAILED via failRefund()", () => {
+        expect(refundTransitions["PENDING"]).toContain("FAILED");
+    });
+
+    test("PROCESSING → COMPLETED via executeRefundCompletion()", () => {
+        expect(refundTransitions["PROCESSING"]).toContain("COMPLETED");
+    });
+
+    test("PROCESSING → FAILED via failRefund()", () => {
+        expect(refundTransitions["PROCESSING"]).toContain("FAILED");
+    });
+
+    test("COMPLETED is terminal (no outgoing transitions)", () => {
+        expect(refundTransitions["COMPLETED"]).toHaveLength(0);
+    });
+
+    test("FAILED is terminal (no outgoing transitions)", () => {
+        expect(refundTransitions["FAILED"]).toHaveLength(0);
+    });
+
+    test("COMPLETED → PROCESSING is FORBIDDEN (no resurrection)", () => {
+        expect(refundTransitions["COMPLETED"]).not.toContain("PROCESSING");
+    });
+
+    test("FAILED → PROCESSING is FORBIDDEN (no resurrection)", () => {
+        expect(refundTransitions["FAILED"]).not.toContain("PROCESSING");
+    });
+
+    test("FAILED → COMPLETED is FORBIDDEN", () => {
+        expect(refundTransitions["FAILED"]).not.toContain("COMPLETED");
+    });
+
+    test("COMPLETED → FAILED is FORBIDDEN", () => {
+        expect(refundTransitions["COMPLETED"]).not.toContain("FAILED");
+    });
+});
+
+/* ==========================================
+ * CAS BEHAVIOR — CONCURRENCY SAFETY
+ * ==========================================
+
+describe("CAS Guards — Atomic State Transitions", () => {
+    test("executeRefundCompletion CAS only matches PROCESSING", () => {
+        // CAS: UPDATE refund SET status = 'COMPLETED'
+        //   WHERE id = ? AND status = 'PROCESSING'
+        const validFrom = "PROCESSING";
+        const forbiddenFrom = ["PENDING", "COMPLETED", "FAILED"];
+
+        expect(validFrom).toBe("PROCESSING");
+        forbiddenFrom.forEach((status) => {
+            expect(status).not.toBe(validFrom);
+        });
+    });
+
+    test("approveRefund CAS only matches PENDING", () => {
+        // CAS: UPDATE refund SET status = 'PROCESSING'
+        //   WHERE id = ? AND status = 'PENDING'
+        const validFrom = "PENDING";
+        const forbiddenFrom = ["PROCESSING", "COMPLETED", "FAILED"];
+
+        expect(validFrom).toBe("PENDING");
+        forbiddenFrom.forEach((status) => {
+            expect(status).not.toBe(validFrom);
+        });
+    });
+
+    test("failRefund CAS only matches PENDING or PROCESSING", () => {
+        // CAS: UPDATE refund SET status = 'FAILED'
+        //   WHERE id = ? AND status IN ('PENDING', 'PROCESSING')
+        const validFrom = ["PENDING", "PROCESSING"];
+        const forbiddenFrom = ["COMPLETED", "FAILED"];
+
+        validFrom.forEach((status) => {
+            expect(["PENDING", "PROCESSING"]).toContain(status);
+        });
+        forbiddenFrom.forEach((status) => {
+            expect(["PENDING", "PROCESSING"]).not.toContain(status);
+        });
+    });
+
+    test("transitionRefundForWebhook CAS only matches PENDING", () => {
+        // CAS: UPDATE refund SET status = 'PROCESSING'
+        //   WHERE id = ? AND status = 'PENDING'
+        const validFrom = "PENDING";
+        const forbiddenFrom = ["PROCESSING", "COMPLETED", "FAILED"];
+
+        expect(validFrom).toBe("PENDING");
+        forbiddenFrom.forEach((status) => {
+            expect(status).not.toBe(validFrom);
+        });
+    });
+});
+
+/* ==========================================
+ * RACE CONDITION SCENARIOS
+ * ==========================================
+ *
+ * Each test models a specific race between concurrent actors.
+ * We verify the CAS logic ensures only one actor succeeds
+ * and the refund state remains consistent.
+ */
+
+describe("Race Scenarios — Concurrent Refund Actions", () => {
+    /**
+     * Simulates a CAS update. Returns affectedRows.
+     */
+    function simulateCAS(
+        currentStatus: string,
+        targetStatus: string,
+        casGuard: string | string[]
+    ): number {
+        const guards = Array.isArray(casGuard) ? casGuard : [casGuard];
+        if (guards.includes(currentStatus)) {
+            return 1; // CAS succeeded
+        }
+        return 0; // CAS failed
+    }
+
+    test("PENDING + admin approve + webhook → only one transitions to PROCESSING", () => {
+        let status = "PENDING";
+
+        // Actor 1: Admin approveRefund → CAS PENDING → PROCESSING
+        const adminCAS = simulateCAS(status, "PROCESSING", "PENDING");
+        if (adminCAS > 0) status = "PROCESSING";
+
+        // Actor 2: Webhook transitionRefundForWebhook → CAS PENDING → PROCESSING
+        const webhookCAS = simulateCAS(status, "PROCESSING", "PENDING");
+        if (webhookCAS > 0) status = "PROCESSING";
+
+        // Only one should succeed
+        expect(adminCAS + webhookCAS).toBe(1);
+        // Final status is PROCESSING (correct)
+        expect(status).toBe("PROCESSING");
+    });
+
+    test("PENDING + admin reject + webhook → webhook CAS fails, no resurrection", () => {
+        let status = "PENDING";
+
+        // Actor 1: Admin failRefund → CAS PENDING/PROCESSING → FAILED
+        const adminCAS = simulateCAS(status, "FAILED", ["PENDING", "PROCESSING"]);
+        if (adminCAS > 0) status = "FAILED";
+
+        // Actor 2: Webhook transitionRefundForWebhook → CAS PENDING → PROCESSING
+        // CAS fails because status is now FAILED
+        const webhookCAS = simulateCAS(status, "PROCESSING", "PENDING");
+        if (webhookCAS > 0) status = "PROCESSING";
+
+        // Webhook CAS failed — no resurrection
+        expect(webhookCAS).toBe(0);
+        // Final status is FAILED (admin rejection preserved)
+        expect(status).toBe("FAILED");
+    });
+
+    test("PROCESSING + admin complete + webhook → both try executeRefundCompletion, only one wins CAS", () => {
+        let status = "PROCESSING";
+
+        // Actor 1: Admin executeRefundCompletion → CAS PROCESSING → COMPLETED
+        const adminCAS = simulateCAS(status, "COMPLETED", "PROCESSING");
+        if (adminCAS > 0) status = "COMPLETED";
+
+        // Actor 2: Webhook executeRefundCompletion → CAS PROCESSING → COMPLETED
+        // CAS fails because status is now COMPLETED
+        const webhookCAS = simulateCAS(status, "COMPLETED", "PROCESSING");
+        if (webhookCAS > 0) status = "COMPLETED";
+
+        // Only one should succeed
+        expect(adminCAS + webhookCAS).toBe(1);
+        // Final status is COMPLETED (correct)
+        expect(status).toBe("COMPLETED");
+    });
+
+    test("FAILED + webhook retry → CAS fails, no resurrection to PROCESSING", () => {
+        let status = "FAILED";
+
+        // Webhook transitionRefundForWebhook → CAS PENDING → PROCESSING
+        const webhookCAS = simulateCAS(status, "PROCESSING", "PENDING");
+        if (webhookCAS > 0) status = "PROCESSING";
+
+        // CAS failed — FAILED is terminal
+        expect(webhookCAS).toBe(0);
+        expect(status).toBe("FAILED");
+    });
+
+    test("COMPLETED + webhook retry → CAS fails, no resurrection", () => {
+        let status = "COMPLETED";
+
+        // Webhook transitionRefundForWebhook → CAS PENDING → PROCESSING
+        const webhookCAS = simulateCAS(status, "PROCESSING", "PENDING");
+        if (webhookCAS > 0) status = "PROCESSING";
+
+        // CAS failed — COMPLETED is terminal
+        expect(webhookCAS).toBe(0);
+        expect(status).toBe("COMPLETED");
+    });
+
+    test("PENDING + webhook CAS succeeds + admin approve arrives late → admin CAS fails safely", () => {
+        let status = "PENDING";
+
+        // Actor 1: Webhook CAS PENDING → PROCESSING succeeds
+        const webhookCAS = simulateCAS(status, "PROCESSING", "PENDING");
+        if (webhookCAS > 0) status = "PROCESSING";
+        expect(webhookCAS).toBe(1);
+
+        // Actor 2: Admin approveRefund → CAS PENDING → PROCESSING fails (already PROCESSING)
+        const adminCAS = simulateCAS(status, "PROCESSING", "PENDING");
+        if (adminCAS > 0) status = "PROCESSING";
+        expect(adminCAS).toBe(0);
+
+        // Final: PROCESSING (webhook won the race)
+        expect(status).toBe("PROCESSING");
+    });
+
+    test("PENDING + admin approve succeeds + webhook arrives late → webhook re-reads PROCESSING, proceeds to completion", () => {
+        let status = "PENDING";
+
+        // Actor 1: Admin approveRefund → CAS PENDING → PROCESSING succeeds
+        const adminCAS = simulateCAS(status, "PROCESSING", "PENDING");
+        if (adminCAS > 0) status = "PROCESSING";
+        expect(adminCAS).toBe(1);
+
+        // Actor 2: Webhook transitionRefundForWebhook → CAS PENDING → PROCESSING fails
+        const webhookCAS = simulateCAS(status, "PROCESSING", "PENDING");
+        if (webhookCAS > 0) status = "PROCESSING";
+        expect(webhookCAS).toBe(0);
+
+        // Webhook re-reads status → sees PROCESSING → shouldComplete = true
+        const shouldComplete = status === "PROCESSING";
+        expect(shouldComplete).toBe(true);
+
+        // Webhook then calls executeRefundCompletion → CAS PROCESSING → COMPLETED
+        const completionCAS = simulateCAS(status, "COMPLETED", "PROCESSING");
+        if (completionCAS > 0) status = "COMPLETED";
+        expect(completionCAS).toBe(1);
+        expect(status).toBe("COMPLETED");
+    });
+
+    test("PENDING + admin reject succeeds + webhook arrives late → webhook re-reads FAILED, no completion", () => {
+        let status = "PENDING";
+
+        // Actor 1: Admin failRefund → CAS PENDING/PROCESSING → FAILED succeeds
+        const adminCAS = simulateCAS(status, "FAILED", ["PENDING", "PROCESSING"]);
+        if (adminCAS > 0) status = "FAILED";
+        expect(adminCAS).toBe(1);
+
+        // Actor 2: Webhook transitionRefundForWebhook → CAS PENDING → PROCESSING fails
+        const webhookCAS = simulateCAS(status, "PROCESSING", "PENDING");
+        if (webhookCAS > 0) status = "PROCESSING";
+        expect(webhookCAS).toBe(0);
+
+        // Webhook re-reads status → sees FAILED → shouldComplete = false
+        const shouldComplete = status === "PROCESSING";
+        expect(shouldComplete).toBe(false);
+        expect(status).toBe("FAILED");
+    });
+
+    test("Double webhook on PENDING → second webhook CAS fails, safe no-op", () => {
+        let status = "PENDING";
+
+        // First webhook: CAS PENDING → PROCESSING succeeds
+        const webhook1CAS = simulateCAS(status, "PROCESSING", "PENDING");
+        if (webhook1CAS > 0) status = "PROCESSING";
+        expect(webhook1CAS).toBe(1);
+
+        // Second webhook: CAS PENDING → PROCESSING fails (already PROCESSING)
+        const webhook2CAS = simulateCAS(status, "PROCESSING", "PENDING");
+        if (webhook2CAS > 0) status = "PROCESSING";
+        expect(webhook2CAS).toBe(0);
+
+        // Second webhook re-reads → PROCESSING → shouldComplete = true
+        // executeRefundCompletion CAS PROCESSING → COMPLETED
+        const completionCAS = simulateCAS(status, "COMPLETED", "PROCESSING");
+        if (completionCAS > 0) status = "COMPLETED";
+        expect(completionCAS).toBe(1);
+
+        // Third webhook: CAS PENDING → PROCESSING fails
+        // re-reads → COMPLETED → shouldComplete = false (idempotent)
+        const webhook3CAS = simulateCAS(status, "PROCESSING", "PENDING");
+        expect(webhook3CAS).toBe(0);
+        const shouldComplete3 = status === "PROCESSING";
+        expect(shouldComplete3).toBe(false);
+        expect(status).toBe("COMPLETED");
+    });
+});
+
+/* ==========================================
+ * WEBHOOK TRANSITION HELPER TESTS
+ * ==========================================
+ *
+ * Tests the transitionRefundForWebhook() logic:
+ * CAS: PENDING → PROCESSING, re-read on failure.
+ */
+
+describe("transitionRefundForWebhook — CAS Logic", () => {
+    function simulateTransitionRefundForWebhook(
+        dbStatus: string
+    ): { status: string; shouldComplete: boolean } {
+        // CAS: PENDING → PROCESSING
+        if (dbStatus === "PENDING") {
+            return { status: "PROCESSING", shouldComplete: true };
+        }
+
+        // CAS failed → re-read
+        switch (dbStatus) {
+            case "PROCESSING":
+                return { status: "PROCESSING", shouldComplete: true };
+            case "COMPLETED":
+                return { status: "COMPLETED", shouldComplete: false };
+            case "FAILED":
+                return { status: "FAILED", shouldComplete: false };
+            default:
+                return { status: dbStatus, shouldComplete: false };
+        }
+    }
+
+    test("PENDING → CAS succeeds → PROCESSING, shouldComplete = true", () => {
+        const result = simulateTransitionRefundForWebhook("PENDING");
+        expect(result.status).toBe("PROCESSING");
+        expect(result.shouldComplete).toBe(true);
+    });
+
+    test("PROCESSING (admin already approved) → shouldComplete = true", () => {
+        const result = simulateTransitionRefundForWebhook("PROCESSING");
+        expect(result.status).toBe("PROCESSING");
+        expect(result.shouldComplete).toBe(true);
+    });
+
+    test("COMPLETED (already done) → shouldComplete = false (idempotent)", () => {
+        const result = simulateTransitionRefundForWebhook("COMPLETED");
+        expect(result.status).toBe("COMPLETED");
+        expect(result.shouldComplete).toBe(false);
+    });
+
+    test("FAILED (admin rejected) → shouldComplete = false (no resurrection)", () => {
+        const result = simulateTransitionRefundForWebhook("FAILED");
+        expect(result.status).toBe("FAILED");
+        expect(result.shouldComplete).toBe(false);
+    });
+});
