@@ -123,6 +123,7 @@ export async function POST(request: Request) {
             variantId,
             quantity,
             spinWheelSpinId,
+            selectedCartItemIds,
         } = body;
 
         /* ==========================================
@@ -245,6 +246,10 @@ export async function POST(request: Request) {
                 typeof spinWheelSpinId === "number"
                     ? spinWheelSpinId
                     : null,
+
+            selectedCartItemIds: mode === "CART" && Array.isArray(selectedCartItemIds)
+                ? selectedCartItemIds.map(Number).filter((n: number) => Number.isInteger(n) && n > 0)
+                : undefined,
         });
 
         createdOrderId = result.order.id;

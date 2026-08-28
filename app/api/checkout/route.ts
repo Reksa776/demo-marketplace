@@ -1,10 +1,10 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { resolveBatchPrices } from "@/lib/marketing/batch-pricing";
 import type { CartStockStatus } from "@/lib/cart-validation";
 
-export async function GET() {
+export async function GET(request: NextRequest) {
     try {
         const session = await auth();
 
@@ -22,6 +22,43 @@ export async function GET() {
         }
 
         const userId = session.user.id;
+
+        // ==========================================
+        // SELECTED CART ITEM IDs
+        // ==========================================
+
+        const selectedParam =
+            request.nextUrl.searchParams.get(
+                "selectedCartItemIds"
+            );
+
+        let selectedCartItemIds: number[] | null =
+            null;
+
+        if (selectedParam) {
+            try {
+                const parsed =
+                    JSON.parse(selectedParam);
+                if (
+                    Array.isArray(parsed) &&
+                    parsed.length > 0
+                ) {
+                    selectedCartItemIds = [
+                        ...new Set(
+                            parsed
+                                .map(Number)
+                                .filter(
+                                    (n) =>
+                                        Number.isInteger(n) &&
+                                        n > 0
+                                )
+                        ),
+                    ];
+                }
+            } catch {
+                // Invalid JSON — treat as no selection
+            }
+        }
 
         // ==========================================
         // CART
@@ -133,12 +170,41 @@ export async function GET() {
         }
 
         // ==========================================
+        // FILTER BY SELECTED IDS
+        // ==========================================
+
+        let filteredItems = cart.items;
+
+        if (selectedCartItemIds) {
+            filteredItems = cart.items.filter(
+                (item) =>
+                    selectedCartItemIds!.includes(
+                        item.id
+                    )
+            );
+
+            if (
+                filteredItems.length === 0
+            ) {
+                return NextResponse.json({
+                    success: false,
+                    message:
+                        "Tidak ada item keranjang yang dipilih.",
+                },
+                    {
+                        status: 400,
+                    }
+                );
+            }
+        }
+
+        // ==========================================
         // BATCH MARKETING PRICING
         // ==========================================
 
         const pricingResults =
             await resolveBatchPrices(
-                cart.items.map((item) => ({
+                filteredItems.map((item) => ({
                     productId: item.productId,
                     variantId: item.variantId,
                     originalPrice: Number(
@@ -162,9 +228,9 @@ export async function GET() {
         // ==========================================
         // BATCH: Flash sale stock for all variants
         // ==========================================
-        const variantIds = [
-            ...new Set(cart.items.map((item) => item.variantId)),
-        ];
+    const variantIds = [
+        ...new Set(filteredItems.map((item) => item.variantId)),
+    ];
 
         const flashSales = await prisma.flashSale.findMany({
             where: {
@@ -186,7 +252,7 @@ export async function GET() {
         // ITEMS (with marketing prices + stock status)
         // ==========================================
 
-        const items = cart.items.map(
+        const items = filteredItems.map(
             (item) => {
                 const pricing =
                     pricingMap.get(

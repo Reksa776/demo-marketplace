@@ -134,6 +134,7 @@ export async function POST(
             quantity,
 
             spinWheelSpinId,
+            selectedCartItemIds,
         } = body;
 
         /*
@@ -273,6 +274,10 @@ export async function POST(
                     affiliateCode,
 
                     spinWheelSpinId: typeof spinWheelSpinId === "number" ? spinWheelSpinId : null,
+
+                    selectedCartItemIds: mode === "CART" && Array.isArray(selectedCartItemIds)
+                        ? selectedCartItemIds.map(Number).filter((n: number) => Number.isInteger(n) && n > 0)
+                        : undefined,
                 }
             );
 

@@ -302,9 +302,7 @@ export async function POST(
                         return;
                     }
 
-                    settled = true;
-
-                    /* Clear cart ONLY for cart checkout orders */
+                    settled = true;                    /* Clear cart ONLY for cart checkout orders */
                     if (
                         existingOrder.orderNumber.startsWith(
                             "PAY-CART-"
@@ -321,14 +319,27 @@ export async function POST(
                             );
 
                         if (cart) {
-                            await tx.cartItem.deleteMany(
-                                {
+                            // ==========================================
+                            // SELECTIVE CART CLEANUP
+                            // ==========================================
+                            // Only remove cart items that became
+                            // OrderItems. Unselected items stay.
+                            const orderItems = await tx.orderItem.findMany({
+                                where: { orderId: existingOrder.id },
+                                select: { variantId: true },
+                            });
+                            const orderedVariantIds = orderItems
+                                .map((oi) => oi.variantId)
+                                .filter((v): v is number => v !== null);
+
+                            if (orderedVariantIds.length > 0) {
+                                await tx.cartItem.deleteMany({
                                     where: {
-                                        cartId:
-                                            cart.id,
+                                        cartId: cart.id,
+                                        variantId: { in: orderedVariantIds },
                                     },
-                                }
-                            );
+                                });
+                            }
                         }
                     }
                 }

@@ -94,6 +94,14 @@ export type CreateCheckoutInput = {
     productId?: unknown;
     variantId?: unknown;
     quantity?: unknown;
+
+    /**
+     * Selected cart item IDs for selective checkout.
+     * Only cart items whose IDs are in this array
+     * will be processed. If not provided, all cart
+     * items are processed (backward compatible).
+     */
+    selectedCartItemIds?: number[];
 };
 
 export type CreatedCheckout = {
@@ -1071,9 +1079,56 @@ export async function createCheckoutOrder(
                 cartId =
                     cart.id;
 
+                // ==========================================
+                // SELECTIVE CHECKOUT FILTER
+                // ==========================================
+                // If selectedCartItemIds provided,
+                // only process those items.
+                // Validate ownership: selected IDs must
+                // belong to this user's cart.
+
+                let cartItemsToProcess = cart.items;
+
+                if (
+                    input.selectedCartItemIds &&
+                    input.selectedCartItemIds.length > 0
+                ) {
+                    const selectedSet = new Set(
+                        input.selectedCartItemIds
+                    );
+
+                    cartItemsToProcess = cart.items.filter(
+                        (item) =>
+                            selectedSet.has(item.id)
+                    );
+
+                    if (
+                        cartItemsToProcess.length === 0
+                    ) {
+                        throw new Error(
+                            "Tidak ada item keranjang yang dipilih atau item tidak valid."
+                        );
+                    }
+
+                    if (
+                        cartItemsToProcess.length !==
+                        input.selectedCartItemIds.length
+                    ) {
+                        logCheckoutEvent(
+                            "SELECTED_ITEMS_FILTERED",
+                            {
+                                requested:
+                                    input.selectedCartItemIds.length,
+                                matched:
+                                    cartItemsToProcess.length,
+                            }
+                        );
+                    }
+                }
+
                 for (
                     const item of
-                        cart.items
+                        cartItemsToProcess
                 ) {
                     const quantity =
                         Number(
@@ -1773,10 +1828,27 @@ export async function createCheckoutOrder(
                     "COD" &&
                 cartId !== null
             ) {
+                // ==========================================
+                // SELECTIVE CART CLEANUP
+                // ==========================================
+                // Only remove cart items that became
+                // OrderItems. Unselected items stay.
+
+                const processedVariantIds = new Set(
+                    checkoutItems.map(
+                        (item) => item.variantId
+                    )
+                );
+
                 await tx.cartItem.deleteMany(
                     {
                         where: {
                             cartId,
+                            variantId: {
+                                in: Array.from(
+                                    processedVariantIds
+                                ),
+                            },
                         },
                     }
                 );
@@ -2486,16 +2558,19 @@ export async function cancelOwnPendingOrder(
     });
 
     return { ok: true };
-}
-
-/*
+}/*
  * ==========================================
  * CLEAR CART
  * ==========================================
+ *
+ * If orderId provided, only removes cart items
+ * that became OrderItems (selective cleanup).
+ * If no orderId, removes all cart items.
  */
 
 export async function clearCart(
-    userId: string
+    userId: string,
+    orderId?: number
 ) {
     const cart =
         await prisma.cart.findUnique(
@@ -2510,10 +2585,28 @@ export async function clearCart(
         return;
     }
 
-    await prisma.cartItem.deleteMany({
-        where: {
-            cartId:
-                cart.id,
-        },
-    });
+    if (orderId) {
+        const orderItems = await prisma.orderItem.findMany({
+            where: { orderId },
+            select: { variantId: true },
+        });
+        const orderedVariantIds = orderItems
+            .map((oi) => oi.variantId)
+            .filter((v): v is number => v !== null);
+
+        if (orderedVariantIds.length > 0) {
+            await prisma.cartItem.deleteMany({
+                where: {
+                    cartId: cart.id,
+                    variantId: { in: orderedVariantIds },
+                },
+            });
+        }
+    } else {
+        await prisma.cartItem.deleteMany({
+            where: {
+                cartId: cart.id,
+            },
+        });
+    }
 }

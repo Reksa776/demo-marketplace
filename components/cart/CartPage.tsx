@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
     FiArrowLeft,
     FiMinus,
@@ -49,6 +49,7 @@ export default function CartPage() {
     const [cart, setCart] = useState<Cart | null>(null);
     const [loading, setLoading] = useState(true);
     const [updatingId, setUpdatingId] = useState<number | null>(null);
+    const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
 
     async function loadCart() {
         try {
@@ -94,9 +95,9 @@ export default function CartPage() {
             return;
         }
 
-        if (quantity > item.stock) {
+        if (quantity > item.availableStock) {
             toast.error(
-                `Stok tersedia hanya ${item.stock}.`
+                `Stok tersedia hanya ${item.availableStock}.`
             );
 
             return;
@@ -182,6 +183,109 @@ export default function CartPage() {
         }
     }
 
+    // ==========================================
+    // SELECTION HELPERS
+    // ==========================================
+
+    const items = cart?.items ?? [];
+    const validItems = items.filter(
+        (item) => item.stockStatus === "OK"
+    );
+    const allValidSelected =
+        validItems.length > 0 &&
+        validItems.every((item) =>
+            selectedIds.has(item.id)
+        );
+    const someValidSelected =
+        validItems.some((item) =>
+            selectedIds.has(item.id)
+        ) && !allValidSelected;
+
+    const handleToggleSelect = useCallback(
+        (itemId: number) => {
+            setSelectedIds((prev) => {
+                const next = new Set(prev);
+                if (next.has(itemId)) {
+                    next.delete(itemId);
+                } else {
+                    next.add(itemId);
+                }
+                return next;
+            });
+        },
+        []
+    );
+
+    const handleSelectAll = useCallback(() => {
+        if (allValidSelected) {
+            // Deselect all
+            setSelectedIds(new Set());
+        } else {
+            // Select all valid items
+            setSelectedIds(
+                new Set(validItems.map((i) => i.id))
+            );
+        }
+    }, [allValidSelected, validItems]);
+
+    // Initialize selection: all valid items selected by default
+    // Reconcile: remove invalid items from selection on cart reload
+    useEffect(() => {
+        if (!cart) return;
+
+        const validIds = new Set(
+            cart.items
+                .filter(
+                    (item) =>
+                        item.stockStatus === "OK"
+                )
+                .map((item) => item.id)
+        );
+
+        setSelectedIds((prev) => {
+            if (prev.size === 0) {
+                // First load: select all valid items
+                return new Set(validIds);
+            }
+
+            // Reconcile: keep only items that are
+            // still in cart AND still valid
+            const reconciled = new Set(
+                [...prev].filter((id) =>
+                    validIds.has(id)
+                )
+            );
+
+            // Only update if something changed
+            if (
+                reconciled.size === prev.size &&
+                [...reconciled].every((id) =>
+                    prev.has(id)
+                )
+            ) {
+                return prev;
+            }
+
+            return reconciled;
+        });
+    }, [cart]);
+
+    // Persist selection for checkout page
+    useEffect(() => {
+        if (selectedIds.size > 0) {
+            localStorage.setItem(
+                "selectedCartItemIds",
+                JSON.stringify(
+                    Array.from(selectedIds)
+                )
+            );
+        } else {
+            localStorage.removeItem(
+                "selectedCartItemIds"
+            );
+        }
+    }, [selectedIds]);
+
     if (loading) {
         return (
             <main className="min-h-screen bg-gray-50">
@@ -203,7 +307,6 @@ export default function CartPage() {
         );
     }
 
-    const items = cart?.items ?? [];
     const invalidCount = cart?.invalidCount ?? 0;
     const hasInvalidItems = invalidCount > 0;
 
@@ -211,16 +314,22 @@ export default function CartPage() {
      * Subtotal uses effectivePrice (marketing-adjusted),
      * NOT the raw variant price.
      */
-    const subtotal = items.reduce(
-        (total, item) => {
-            return (
-                total +
-                item.price *
-                item.quantity
-            );
-        },
-        0
-    );
+    const subtotal = items
+        .filter((item) => selectedIds.has(item.id))
+        .reduce(
+            (total, item) => {
+                return (
+                    total +
+                    item.price *
+                    item.quantity
+                );
+            },
+            0
+        );
+
+    const selectedCount = items.filter(
+        (item) => selectedIds.has(item.id)
+    ).length;
 
     if (items.length === 0) {
         return (
@@ -277,6 +386,32 @@ export default function CartPage() {
 
                 <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
 
+                    {/* SELECT ALL */}
+                    {items.length > 0 && (
+                        <div className="flex items-center gap-3">
+                            <label className="flex cursor-pointer items-center gap-2">
+                                <input
+                                    type="checkbox"
+                                    checked={allValidSelected}
+                                    ref={(el) => {
+                                        if (el) el.indeterminate = someValidSelected;
+                                    }}
+                                    onChange={handleSelectAll}
+                                    disabled={validItems.length === 0}
+                                    className="h-4 w-4 rounded border-gray-300 text-rose-600 focus:ring-rose-500"
+                                />
+                                <span className="text-sm font-medium text-gray-700">
+                                    Pilih Semua
+                                </span>
+                            </label>
+                            {selectedCount > 0 && (
+                                <span className="text-xs text-gray-400">
+                                    ({selectedCount} dipilih)
+                                </span>
+                            )}
+                        </div>
+                    )}
+
                     {/* ITEMS */}
                     <div className="space-y-4">
                         {items.map((item) => {
@@ -289,16 +424,32 @@ export default function CartPage() {
                             const itemTotal = price * item.quantity;
                             const image = item.image;
 
+                            const isInvalid = item.stockStatus !== "OK";
+                            const isSelected = selectedIds.has(item.id);
+
                             return (
                                 <div
                                     key={item.id}
                                     className={`rounded-2xl border bg-white p-4 shadow-sm ${
-                                        item.stockStatus !== "OK"
+                                        isInvalid
                                             ? "border-amber-200"
-                                            : "border-gray-100"
+                                            : isSelected
+                                                ? "border-rose-200"
+                                                : "border-gray-100"
                                     }`}
                                 >
                                     <div className="flex gap-4">
+
+                                        {/* CHECKBOX */}
+                                        <div className="flex shrink-0 items-start pt-1">
+                                            <input
+                                                type="checkbox"
+                                                checked={isSelected}
+                                                disabled={isInvalid}
+                                                onChange={() => handleToggleSelect(item.id)}
+                                                className="h-4 w-4 rounded border-gray-300 text-rose-600 focus:ring-rose-500 disabled:cursor-not-allowed disabled:opacity-40"
+                                            />
+                                        </div>
 
                                         {/* IMAGE */}
                                         <div className="relative h-24 w-24 shrink-0 overflow-hidden rounded-xl bg-gray-100">
@@ -316,22 +467,25 @@ export default function CartPage() {
                                             )}
                                         </div>
 
-                                        {/* CONTENT */}
-                                        <div className="min-w-0 flex-1">
+                                        {/* CONTENT */}                                            <div className="min-w-0 flex-1">
 
-                                            <div className="flex justify-between gap-3">
-                                                <div>
-                                                    <Link
-                                                        href={`/products/${item.productSlug}`}
-                                                        className="line-clamp-2 text-sm font-semibold text-gray-900 hover:text-rose-600"
-                                                    >
-                                                        {item.productName}
-                                                    </Link>
+                                                <div className="flex justify-between gap-3">
+                                                    <div>
+                                                        <Link
+                                                            href={`/products/${item.productSlug}`}
+                                                            className={`line-clamp-2 text-sm font-semibold hover:text-rose-600 ${
+                                                                isInvalid
+                                                                    ? "text-gray-400"
+                                                                    : "text-gray-900"
+                                                            }`}
+                                                        >
+                                                            {item.productName}
+                                                        </Link>
 
-                                                    <p className="mt-1 text-xs text-gray-500">
-                                                        Varian:{" "}
-                                                        {item.variantName}
-                                                    </p>
+                                                        <p className="mt-1 text-xs text-gray-500">
+                                                            Varian:{" "}
+                                                            {item.variantName}
+                                                        </p>
 
                                                     {item.flashSaleName && (
                                                         <p className="mt-0.5 text-xs font-medium text-rose-500">
@@ -435,7 +589,8 @@ export default function CartPage() {
                                                         type="button"
                                                         disabled={
                                                             item.quantity >=
-                                                            item.stock ||
+                                                            item.availableStock ||
+                                                            isInvalid ||
                                                             updatingId ===
                                                             item.id
                                                         }
@@ -482,7 +637,7 @@ export default function CartPage() {
 
                             <div className="flex justify-between text-sm">
                                 <span className="text-gray-500">
-                                    Subtotal
+                                    Subtotal ({selectedCount} produk)
                                 </span>
 
                                 <span className="font-medium text-gray-900">
@@ -518,28 +673,33 @@ export default function CartPage() {
                                 </div>
                             </div>
 
-                            {hasInvalidItems ? (
+                            {selectedCount === 0 && (
                                 <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
                                     <p className="text-sm font-medium text-amber-800">
-                                        ⚠️ {invalidCount} produk memiliki stok tidak mencukupi.
-                                    </p>
-                                    <p className="mt-1 text-xs text-amber-600">
-                                        Kurangi jumlah atau hapus item sebelum checkout.
+                                        Pilih minimal satu produk untuk checkout.
                                     </p>
                                 </div>
-                            ) : null}
+                            )}
+
+                            {hasInvalidItems && selectedCount > 0 && (
+                                <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+                                    <p className="text-sm font-medium text-amber-800">
+                                        ⚠️ {invalidCount} produk tidak bisa dipilih (stok habis/tidak mencukupi).
+                                    </p>
+                                </div>
+                            )}
 
                             <Link
                                 href="/checkout"
                                 className={`flex h-12 w-full items-center justify-center rounded-xl px-4 text-sm font-semibold text-white transition ${
-                                    hasInvalidItems
+                                    selectedCount === 0
                                         ? "cursor-not-allowed bg-gray-300"
                                         : "bg-rose-600 hover:bg-rose-700"
                                 }`}
                                 onClick={(e) => {
-                                    if (hasInvalidItems) {
+                                    if (selectedCount === 0) {
                                         e.preventDefault();
-                                        toast.error("Hapus atau kurangi item yang stoknya tidak mencukupi terlebih dahulu.");
+                                        toast.error("Pilih minimal satu produk untuk checkout.");
                                     }
                                 }}
                             >

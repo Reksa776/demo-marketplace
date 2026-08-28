@@ -962,15 +962,33 @@ export default function CheckoutPage() {
      * ==========================================
      * LOAD CHECKOUT
      * ==========================================
-     */
-
-    async function loadCheckout() {
+     */    async function loadCheckout() {
         try {
             setLoading(true);
 
+            // Read selectedCartItemIds from localStorage
+            let selectedParam = "";
+            try {
+                const stored = localStorage.getItem(
+                    "selectedCartItemIds"
+                );
+                if (stored) {
+                    const parsed = JSON.parse(stored);
+                    if (
+                        Array.isArray(parsed) &&
+                        parsed.length > 0
+                    ) {
+                        selectedParam =
+                            `?selectedCartItemIds=${encodeURIComponent(stored)}`;
+                    }
+                }
+            } catch {
+                // ignore
+            }
+
             const response =
                 await fetch(
-                    "/api/checkout",
+                    `/api/checkout${selectedParam}`,
                     {
                         cache: "no-store",
                     }
@@ -982,8 +1000,7 @@ export default function CheckoutPage() {
             if (!response.ok) {
                 router.push("/cart")
                 throw new Error(
-                    result.message ||
-                    "Gagal mengambil checkout."
+                    result.message || "Gagal mengambil checkout."
                 );
             }
 
@@ -1508,6 +1525,29 @@ export default function CheckoutPage() {
     const [creatingOrder, setCreatingOrder] =
         useState(false);
 
+    function getSelectedCartItemIds(): number[] {
+        try {
+            const stored = localStorage.getItem(
+                "selectedCartItemIds"
+            );
+            if (stored) {
+                const parsed = JSON.parse(stored);
+                if (Array.isArray(parsed)) {
+                    return parsed
+                        .map(Number)
+                        .filter(
+                            (n: number) =>
+                                Number.isInteger(n) &&
+                                n > 0
+                        );
+                }
+            }
+        } catch {
+            // ignore
+        }
+        return [];
+    }
+
     async function createOrder() {
         if (creatingOrder) {
             return;
@@ -1517,10 +1557,11 @@ export default function CheckoutPage() {
             return;
         }
 
-        // Pre-check: reject if any item has insufficient stock
-        if (data && data.invalidCount > 0) {
+        // Pre-check: reject if no items selected
+        const selectedIds = getSelectedCartItemIds();
+        if (selectedIds.length === 0) {
             toast.error(
-                "Ada item dengan stok tidak mencukupi. Kembali ke keranjang untuk memperbaiki."
+                "Pilih minimal satu produk untuk checkout."
             );
             return;
         }
@@ -1600,6 +1641,7 @@ export default function CheckoutPage() {
                                     "COD",
                                 voucherCode: appliedVoucherCode || null,
                                 spinWheelSpinId: selectedSpinReward,
+                                selectedCartItemIds: getSelectedCartItemIds(),
                             }),
                         }
                     );
@@ -1657,9 +1699,7 @@ export default function CheckoutPage() {
              * Creates order + payment via iPaymu,
              * then redirects customer to iPaymu
              * payment page.
-             */
-
-            const paymentResponse =
+             */            const paymentResponse =
                 await fetch(
                     "/api/payment/ipaymu",
                     {
@@ -1676,11 +1716,11 @@ export default function CheckoutPage() {
 
                             shipping:
                                 selectedShipping,
-
                             paymentMethod:
                                 paymentMethod,
                             voucherCode: appliedVoucherCode || null,
                             spinWheelSpinId: selectedSpinReward,
+                            selectedCartItemIds: getSelectedCartItemIds(),
                         }),
                     }
                 );
@@ -3012,11 +3052,22 @@ export default function CheckoutPage() {
                         {data && data.invalidCount > 0 && (
                             <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
                                 <p className="text-sm font-medium text-amber-800">
-                                    ⚠️ {data.invalidCount} produk memiliki stok tidak mencukupi.
+                                    ⚠️ {data.invalidCount} produk tidak dipilih karena stok tidak mencukupi.
                                 </p>
-                                <p className="mt-1 text-xs text-amber-600">
-                                    Kembali ke keranjang untuk mengurangi jumlah atau menghapus item.
+                            </div>
+                        )}
+
+                        {data && data.items.length === 0 && (
+                            <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+                                <p className="text-sm font-medium text-amber-800">
+                                    Pilih minimal satu produk untuk checkout.
                                 </p>
+                                <a
+                                    href="/cart"
+                                    className="mt-2 inline-block text-xs font-medium text-amber-700 underline hover:text-amber-900"
+                                >
+                                    Buka Keranjang →
+                                </a>
                             </div>
                         )}
 
@@ -3027,7 +3078,7 @@ export default function CheckoutPage() {
                                 creatingOrder ||
                                 !address ||
                                 !selectedShipping ||
-                                (data ? data.invalidCount > 0 : false)
+                                (data ? data.items.length === 0 : true)
                             }
                             className="mt-6 w-full rounded-xl bg-rose-600 px-5 py-3 font-semibold text-white transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:bg-gray-300"
                         >
@@ -3037,8 +3088,8 @@ export default function CheckoutPage() {
                                     ? "Pilih Alamat"
                                     : !selectedShipping
                                         ? "Pilih Pengiriman"
-                                        : (data && data.invalidCount > 0)
-                                            ? "Stok Tidak Mencukupi"
+                                        : (data && data.items.length === 0)
+                                            ? "Pilih Produk"
                                             : "Buat Pesanan"}
                         </button>
 
