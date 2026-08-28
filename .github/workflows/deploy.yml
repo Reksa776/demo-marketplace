@@ -9,7 +9,7 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
 
-    
+
     steps:
       - name: Deploy to VPS
         uses: appleboy/ssh-action@v1.2.2
@@ -18,28 +18,40 @@ jobs:
           username: ${{ secrets.VPS_NAME }}
           key: ${{ secrets.VPS_SSH_KEY }}
 
-          script: |
-            set -e
+script: |
+  set -e
 
-            cd ~/demo-marketplace
+  export NVM_DIR="$HOME/.nvm"
 
-            echo "=== Update source code ==="
-            git fetch origin
-            git reset --hard origin/main
+  if [ -s "$NVM_DIR/nvm.sh" ]; then
+    source "$NVM_DIR/nvm.sh"
+  fi
 
-            echo "=== Install dependencies ==="
-            npm ci
+  nvm use 20
 
-            echo "=== Prisma generate ==="
-            npx prisma generate
+  echo "=== Node version ==="
+  node -v
+  npm -v
 
-            echo "=== Prisma migration ==="
-            npx prisma migrate deploy
+  cd ~/demo-marketplace
 
-            echo "=== Build application ==="
-            npm run build
+  echo "=== Update source code ==="
+  git fetch origin
+  git reset --hard origin/main
 
-            echo "=== Restart application ==="
-            pm2 reload toko
+  echo "=== Install dependencies ==="
+  npm ci
 
-            echo "=== DEPLOY SUCCESS ==="
+  echo "=== Prisma generate ==="
+  npx prisma generate
+
+  echo "=== Prisma migration ==="
+  npx prisma migrate deploy
+
+  echo "=== Build application ==="
+  npm run build
+
+  echo "=== Restart application ==="
+  pm2 reload toko
+
+  echo "=== DEPLOY SUCCESS ==="
