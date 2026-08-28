@@ -39,6 +39,7 @@ model User {
 
   // Spin Wheel relations
   spinWheelSpins SpinWheelSpin[]
+  @@map("user")
 }
 
 model Account {
@@ -58,6 +59,7 @@ model Account {
 
   @@unique([provider, providerAccountId])
   @@index([userId], map: "Account_userId_fkey")
+  @@map("account")
 }
 
 model Session {
@@ -68,6 +70,7 @@ model Session {
   user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId], map: "Session_userId_fkey")
+  @@map("session")
 }
 
 model VerificationToken {
@@ -76,6 +79,7 @@ model VerificationToken {
   expires    DateTime
 
   @@unique([identifier, token])
+  @@map("verificationtoken")
 }
 
 model Product {
@@ -104,6 +108,7 @@ model Product {
   affiliateClicks  AffiliateClick[]
 
   @@index([isArchived])
+  @@map("product")
 }
 
 model ProductVariant {
@@ -126,6 +131,7 @@ model ProductVariant {
   bulkDiscounts  BulkDiscount[]
 
   @@index([productId])
+  @@map("productvariant")
 }
 
 model Cart {
@@ -135,6 +141,7 @@ model Cart {
   updatedAt DateTime   @updatedAt
   user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
   items     CartItem[]
+  @@map("cart")
 }
 
 model CartItem {
@@ -152,6 +159,7 @@ model CartItem {
   @@unique([cartId, variantId])
   @@index([productId])
   @@index([variantId])
+  @@map("cartitem")
 }
 
 model UserAddress {
@@ -188,6 +196,7 @@ model UserAddress {
   @@index([districtId])
   @@index([villageId])
   @@index([rajaOngkirDestinationId])
+  @@map("useraddress")
 }
 
 model Order {
@@ -240,6 +249,7 @@ model Order {
   @@index([paymentStatus])
   @@index([createdAt])
   @@index([trackingNumber])
+  @@map("order")
 }
 
 model OrderItem {
@@ -259,6 +269,7 @@ model OrderItem {
   @@index([orderId])
   @@index([productId])
   @@index([variantId])
+  @@map("orderitem")
 }
 
 model StoreSetting {
@@ -286,6 +297,7 @@ model StoreSetting {
   districtId              Int?
   provinceId              Int?
   subdistrictId           Int?
+  @@map("storesetting")
 }
 
 model Province {
@@ -295,6 +307,7 @@ model Province {
   addresses UserAddress[]
 
   @@index([name])
+  @@map("province")
 }
 
 model Regency {
@@ -307,6 +320,7 @@ model Regency {
 
   @@index([provinceId])
   @@index([name])
+  @@map("regency")
 }
 
 model District {
@@ -319,6 +333,7 @@ model District {
 
   @@index([regencyId])
   @@index([name])
+  @@map("district")
 }
 
 model Village {
@@ -332,6 +347,7 @@ model Village {
   @@index([districtId])
   @@index([name])
   @@index([postalCode])
+  @@map("village")
 }
 
 model RajaOngkirRegion {
@@ -348,6 +364,7 @@ model RajaOngkirRegion {
   postalCode    String?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
+  @@map("rajaongkirregion")
 }
 
 model Voucher {
@@ -396,6 +413,7 @@ model Voucher {
   userUsages           VoucherUserUsage[]
 
   @@index([isActive])
+  @@map("voucher")
 }
 
 // ==========================================
@@ -479,6 +497,7 @@ model Notification {
   @@index([status])
   @@index([channel])
   @@index([notificationType])
+  @@map("notification")
 }
 
 // ==========================================
@@ -519,6 +538,7 @@ model Campaign {
 
   @@index([status])
   @@index([startAt, endAt])
+  @@map("campaign")
 }
 
 model CampaignProduct {
@@ -531,6 +551,7 @@ model CampaignProduct {
   @@unique([campaignId, productId])
   @@index([campaignId])
   @@index([productId])
+  @@map("campaignproduct")
 }
 
 model CampaignCategory {
@@ -541,6 +562,7 @@ model CampaignCategory {
 
   @@unique([campaignId, category])
   @@index([campaignId])
+  @@map("campaigncategory")
 }
 
 enum CampaignType {
@@ -584,6 +606,7 @@ model ProductDiscount {
   @@index([productId])
   @@index([variantId])
   @@index([isActive, startAt, endAt])
+  @@map("productdiscount")
 }
 
 // ------------------------------------------
@@ -615,6 +638,7 @@ model FlashSale {
   @@unique([variantId])
   @@index([isActive, startAt, endAt])
   @@index([variantId])
+  @@map("flashsale")
 }
 
 model FlashSalePurchase {
@@ -631,6 +655,7 @@ model FlashSalePurchase {
   @@unique([flashSaleId, userId])
   @@index([flashSaleId])
   @@index([userId])
+  @@map("flashsalepurchase")
 }
 
 // ------------------------------------------
@@ -655,6 +680,7 @@ model Promotion {
 
   @@index([placement, isActive])
   @@index([startAt, endAt])
+  @@map("promotion")
 }
 
 enum PromotionPlacement {
@@ -680,6 +706,7 @@ model VoucherProduct {
   @@unique([voucherId, productId])
   @@index([voucherId])
   @@index([productId])
+  @@map("voucherproduct")
 }
 
 // ------------------------------------------
@@ -694,6 +721,7 @@ model VoucherCategory {
 
   @@unique([voucherId, category])
   @@index([voucherId])
+  @@map("vouchercategory")
 }
 
 // ------------------------------------------
@@ -712,6 +740,7 @@ model VoucherUserUsage {
   @@unique([voucherId, userId])
   @@index([voucherId])
   @@index([userId])
+  @@map("voucheruserusage")
 }
 
 // ==========================================
@@ -742,6 +771,7 @@ model BulkDiscount {
   @@index([productId])
   @@index([variantId])
   @@index([isActive, startAt, endAt])
+  @@map("bulkdiscount")
 }
 
 // ==========================================
@@ -767,6 +797,7 @@ model ShippingDiscount {
 
   @@index([isActive, startAt, endAt])
   @@index([code])
+  @@map("shippingdiscount")
 }
 
 // ==========================================
@@ -798,6 +829,7 @@ model Broadcast {
   @@index([type])
   @@index([status])
   @@index([createdAt])
+  @@map("broadcast")
 }
 
 enum BroadcastType {
@@ -855,6 +887,7 @@ model AffiliateProfile {
   payouts     AffiliatePayout[]
 
   @@index([status])
+  @@map("affiliateprofile")
 }
 
 enum AffiliateStatus {
@@ -891,6 +924,7 @@ model AffiliateKyc {
   updatedAt DateTime @updatedAt
 
   affiliate AffiliateProfile @relation(fields: [affiliateId], references: [id], onDelete: Cascade)
+  @@map("affiliatekyc")
 }
 
 // ------------------------------------------
@@ -914,6 +948,7 @@ model AffiliateClick {
   @@index([code])
   @@index([sessionId])
   @@index([createdAt])
+  @@map("affiliateclick")
 }
 
 // ------------------------------------------
@@ -940,6 +975,7 @@ model AffiliateConversion {
 
   @@index([affiliateId])
   @@index([status])
+  @@map("affiliateconversion")
 }
 
 enum AffiliateConversionStatus {
@@ -988,6 +1024,7 @@ model AffiliatePayout {
   @@index([affiliateId])
   @@index([status])
   @@index([providerTransactionId])
+  @@map("affiliatepayout")
 }
 
 enum AffiliatePayoutStatus {
@@ -1017,6 +1054,7 @@ model AdminAuditLog {
   @@index([entityType, entityId])
   @@index([action])
   @@index([createdAt])
+  @@map("adminauditlog")
 }
 
 // ==========================================
@@ -1041,6 +1079,7 @@ model SpinWheelCampaign {
 
   @@index([isActive])
   @@index([startAt, endAt])
+  @@map("spinwheelcampaign")
 }
 
 model SpinWheelReward {
@@ -1062,6 +1101,7 @@ model SpinWheelReward {
 
   @@index([campaignId])
   @@index([isActive])
+  @@map("spinwheelreward")
 }
 
 model SpinWheelSpin {
@@ -1084,6 +1124,7 @@ model SpinWheelSpin {
   @@index([campaignId])
   @@index([userId])
   @@index([status])
+  @@map("spinwheelspin")
 }
 
 enum SpinWheelRewardType {
@@ -1121,6 +1162,7 @@ model Refund {
 
   @@index([status])
   @@index([createdAt])
+  @@map("refund")
 }
 
 enum RefundStatus {
