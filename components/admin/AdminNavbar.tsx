@@ -37,6 +37,7 @@ import {
     FiArrowRight,
     FiHeart,
     FiDisc,
+    FiRefreshCw,
 } from "react-icons/fi";
 import { useState } from "react";
 
@@ -73,6 +74,11 @@ const menuItems: NavItem[] = [
         label: "Orderan",
         href: "/admin/orders",
         icon: FiShoppingBag,
+    },
+    {
+        label: "Refund",
+        href: "/admin/refunds",
+        icon: FiRefreshCw,
     },
     {
         label: "Marketing",

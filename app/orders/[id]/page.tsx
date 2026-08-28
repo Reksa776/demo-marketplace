@@ -476,12 +476,16 @@ export default function OrderDetailPage() {
                                             "Siap! Mengarahkan ke halaman pembayaran..."
                                         );
 
-                                        // Redirect to payment page
-                                        window.location.href =
-                                            "/checkout/payment-finish?payment=" +
-                                            encodeURIComponent(
-                                                result.data.orderNumber
-                                            );
+                                        // Redirect to payment gateway if URL available
+                                        if (
+                                            result.data.redirectUrl
+                                        ) {
+                                            window.location.href =
+                                                result.data.redirectUrl;
+                                        } else {
+                                            // Fallback: reload order to show updated state
+                                            loadOrder();
+                                        }
                                     } catch (error) {
                                         toast.error(
                                             error instanceof Error
