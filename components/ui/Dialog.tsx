@@ -87,7 +87,7 @@ export function DialogProvider({ children }: { children: ReactNode }) {
     const cancelRef = useRef<HTMLButtonElement>(null);
     const backdropRef = useRef<HTMLDivElement>(null);
 
-    // Focus management: focus input or cancel button when dialog opens
+    // Focus management: focus input or confirm button when dialog opens
     useEffect(() => {
         if (state.open) {
             // Small delay to ensure DOM is ready
@@ -261,83 +261,83 @@ export function DialogProvider({ children }: { children: ReactNode }) {
 
     const vs = variantStyles[state.variant];
 
-    if (!state.open) return <>{children}</>;
-
     return (
         <DialogContext.Provider value={ctx}>
             {children}
 
-            {/* BACKDROP + MODAL */}
-            <div
-                ref={backdropRef}
-                onClick={handleBackdropClick}
-                className="fixed inset-0 z-[9998] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
-                role="dialog"
-                aria-modal="true"
-                aria-labelledby="dialog-title"
-                aria-describedby="dialog-message"
-            >
-                <div className="w-full max-w-md rounded-2xl bg-white shadow-2xl">
-                    {/* HEADER */}
-                    <div className="flex items-start gap-4 p-6 pb-0">
-                        <div
-                            className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${vs.iconBg}`}
-                        >
-                            <span className="text-lg">{vs.icon}</span>
-                        </div>
-                        <div className="min-w-0 flex-1">
-                            <h2
-                                id="dialog-title"
-                                className="text-base font-semibold text-gray-900"
+            {/* DIALOG MODAL — only renders when open */}
+            {state.open && (
+                <div
+                    ref={backdropRef}
+                    onClick={handleBackdropClick}
+                    className="fixed inset-0 z-[9998] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
+                    role="dialog"
+                    aria-modal="true"
+                    aria-labelledby="dialog-title"
+                    aria-describedby="dialog-message"
+                >
+                    <div className="w-full max-w-md rounded-2xl bg-white shadow-2xl">
+                        {/* HEADER */}
+                        <div className="flex items-start gap-4 p-6 pb-0">
+                            <div
+                                className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${vs.iconBg}`}
                             >
-                                {state.title}
-                            </h2>
-                            <p
-                                id="dialog-message"
-                                className="mt-1 text-sm text-gray-600"
-                            >
-                                {state.message}
-                            </p>
+                                <span className="text-lg">{vs.icon}</span>
+                            </div>
+                            <div className="min-w-0 flex-1">
+                                <h2
+                                    id="dialog-title"
+                                    className="text-base font-semibold text-gray-900"
+                                >
+                                    {state.title}
+                                </h2>
+                                <p
+                                    id="dialog-message"
+                                    className="mt-1 text-sm text-gray-600"
+                                >
+                                    {state.message}
+                                </p>
+                            </div>
                         </div>
-                    </div>
 
-                    {/* INPUT (prompt only) */}
-                    {state.type === "prompt" && (
-                        <div className="px-6 pt-4">
-                            <input
-                                ref={inputRef}
-                                type="text"
-                                value={state.inputValue}
-                                onChange={handleInputChange}
-                                onKeyDown={handleInputKeyDown}
-                                placeholder={state.inputPlaceholder}
-                                className="w-full rounded-xl border border-gray-300 px-4 py-2.5 text-sm text-gray-900 placeholder-gray-400 transition focus:border-rose-500 focus:outline-none focus:ring-1 focus:ring-rose-500"
-                            />
-                        </div>
-                    )}
+                        {/* INPUT (prompt only) */}
+                        {state.type === "prompt" && (
+                            <div className="px-6 pt-4">
+                                <input
+                                    ref={inputRef}
+                                    type="text"
+                                    value={state.inputValue}
+                                    onChange={handleInputChange}
+                                    onKeyDown={handleInputKeyDown}
+                                    placeholder={state.inputPlaceholder}
+                                    className="w-full rounded-xl border border-gray-300 px-4 py-2.5 text-sm text-gray-900 placeholder-gray-400 transition focus:border-rose-500 focus:outline-none focus:ring-1 focus:ring-rose-500"
+                                />
+                            </div>
+                        )}
 
-                    {/* BUTTONS */}
-                    <div className="flex justify-end gap-3 p-6 pt-4">
-                        {state.type !== "alert" && (
+                        {/* BUTTONS */}
+                        <div className="flex justify-end gap-3 p-6 pt-4">
                             <button
                                 ref={cancelRef}
                                 type="button"
                                 onClick={handleCancel}
-                                className="rounded-xl border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-400 focus:ring-offset-2"
+                                className={`rounded-xl px-4 py-2 text-sm font-semibold transition focus:outline-none focus:ring-2 focus:ring-offset-2 ${state.type === "alert" ? vs.confirmBtn : "border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 focus:ring-gray-400"}`}
                             >
-                                {state.cancelText}
+                                {state.type === "alert" ? state.confirmText : state.cancelText}
                             </button>
-                        )}
-                        <button
-                            type="button"
-                            onClick={handleConfirm}
-                            className={`rounded-xl px-4 py-2 text-sm font-semibold transition focus:outline-none focus:ring-2 focus:ring-offset-2 ${vs.confirmBtn}`}
-                        >
-                            {state.confirmText}
-                        </button>
+                            {state.type !== "alert" && (
+                                <button
+                                    type="button"
+                                    onClick={handleConfirm}
+                                    className={`rounded-xl px-4 py-2 text-sm font-semibold transition focus:outline-none focus:ring-2 focus:ring-offset-2 ${vs.confirmBtn}`}
+                                >
+                                    {state.confirmText}
+                                </button>
+                            )}
+                        </div>
                     </div>
                 </div>
-            </div>
+            )}
         </DialogContext.Provider>
     );
 }
@@ -346,18 +346,36 @@ export function DialogProvider({ children }: { children: ReactNode }) {
  * HOOK
  * ========================================== */
 
-const noopAlert = async () => {};
-const noopConfirm = async () => false;
-const noopPrompt = async () => null;
-const fallbackCtx: DialogContextValue = {
-    alert: noopAlert,
-    confirm: noopConfirm,
-    prompt: noopPrompt,
-};
-
 export function useDialog(): DialogContextValue {
     const ctx = useContext(DialogContext);
-    // During SSR/SSG, context is null — return safe fallback
-    // since dialog functions are only called by user interactions
-    return ctx ?? fallbackCtx;
+    if (!ctx) {
+        // During SSR/SSG, context may be null because client components
+        // are rendered without the full provider tree. Return a fallback
+        // that opens native browser dialogs as a safety net.
+        // On the client, DialogProvider provides the real context.
+        if (typeof window === "undefined") {
+            return {
+                alert: async (opts) => {
+                    window.alert(opts.message);
+                },
+                confirm: async (opts) => {
+                    return window.confirm(opts.message);
+                },
+                prompt: async (opts) => {
+                    return window.prompt(opts.message, opts.defaultValue);
+                },
+            };
+        }
+        // On the client, this means DialogProvider is missing — error clearly
+        console.error(
+            "useDialog() called on client but DialogContext is null. " +
+                "Ensure <DialogProvider> wraps this component in app/layout.tsx."
+        );
+        return {
+            alert: async () => {},
+            confirm: async () => false,
+            prompt: async () => null,
+        };
+    }
+    return ctx;
 }
