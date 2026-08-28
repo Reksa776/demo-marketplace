@@ -165,7 +165,7 @@ export async function POST(request: Request) {
                     // CAS: PROCESSING → PAID
                     await prisma.$transaction(async (tx) => {
                         const affectedRows = await tx.$executeRaw`
-                            UPDATE AffiliatePayout
+                            UPDATE affiliatepayout
                             SET status = 'PAID',
                                 paidAt = IFNULL(paidAt, CURRENT_TIMESTAMP),
                                 providerStatus = 'success'
@@ -185,7 +185,7 @@ export async function POST(request: Request) {
                     const failStatus = statusResult.status;
                     await prisma.$transaction(async (tx) => {
                         await tx.$executeRaw`
-                            UPDATE AffiliatePayout
+                            UPDATE affiliatepayout
                             SET status = ${failStatus},
                                 failedAt = IFNULL(failedAt, CURRENT_TIMESTAMP),
                                 failureReason = ${statusResult.message || `Reconciled: ${failStatus}`},

@@ -264,7 +264,7 @@ export async function reserveFlashSaleStock(
 ) {
     // Atomic update with stock condition
     const affectedRows = await tx.$executeRaw`
-        UPDATE FlashSale
+        UPDATE flashsale
         SET saleStock = saleStock - ${quantity},
             soldCount = soldCount + ${quantity}
         WHERE id = ${flashSaleId}

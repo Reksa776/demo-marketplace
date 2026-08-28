@@ -328,7 +328,7 @@ export async function createWithdrawalRequest(
              * transaction commits/rolls back.
              */
             await tx.$queryRaw`
-                SELECT id FROM \`AffiliateProfile\`
+                SELECT id FROM \`affiliateprofile\`
                 WHERE id = ${affiliateId}
                 FOR UPDATE
             `;
@@ -421,7 +421,7 @@ export async function settleCommissionsForPayout(
         const locked = await tx.$queryRaw<
             Array<{ id: number; affiliateId: number }>
         >`
-            SELECT id, affiliateId FROM \`AffiliatePayout\`
+            SELECT id, affiliateId FROM \`affiliatepayout\`
             WHERE id = ${payoutId} AND status = 'PAID'
             FOR UPDATE
         `;

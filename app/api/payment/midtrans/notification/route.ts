@@ -347,7 +347,7 @@ export async function POST(
             await prisma.$transaction(async (tx) => {
                 const affectedRows =
                     await tx.$executeRaw`
-                    UPDATE \`Order\`
+                    UPDATE \`order\`
                     SET status = 'PAID',
                         paymentStatus = 'PAID',
                         paidAt = IFNULL(paidAt, CURRENT_TIMESTAMP),
@@ -446,7 +446,7 @@ export async function POST(
 
             const pendingAffected =
                 await prisma.$executeRaw`
-                UPDATE \`Order\`
+                UPDATE \`order\`
                 SET status = 'PENDING',
                     paymentStatus = 'PENDING',
                     paymentReference = ${pendingRef}
@@ -487,7 +487,7 @@ export async function POST(
 
                     const affectedRows =
                         await tx.$executeRaw`
-                        UPDATE \`Order\`
+                        UPDATE \`order\`
                         SET status = 'CANCELLED',
                             paymentStatus = 'EXPIRED',
                             paymentReference = ${expiredRef}
@@ -570,7 +570,7 @@ export async function POST(
 
                     const affectedRows =
                         await tx.$executeRaw`
-                        UPDATE \`Order\`
+                        UPDATE \`order\`
                         SET status = 'CANCELLED',
                             paymentStatus = 'FAILED',
                             paymentReference = ${failedRef}

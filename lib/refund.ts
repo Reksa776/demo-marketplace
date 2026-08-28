@@ -165,7 +165,7 @@ export async function createRefundRequest(
             // - Race condition (concurrent requests)
 
             const affectedRows = await tx.$executeRaw`
-                UPDATE \`Order\`
+                UPDATE \`order\`
                 SET status = 'REFUND_PENDING'
                 WHERE id = ${orderId}
                   AND status IN ('PAID', 'PROCESSING')
@@ -272,7 +272,7 @@ export async function approveRefund(
 
             // CAS: PENDING → PROCESSING
             const affectedRows = await tx.$executeRaw`
-                UPDATE \`Refund\`
+                UPDATE \`refund\`
                 SET status = 'PROCESSING',
                     processedBy = ${adminId}
                 WHERE id = ${refundId}
@@ -384,7 +384,7 @@ export async function executeRefundCompletion(
             // ==========================================
 
             const affectedRows = await tx.$executeRaw`
-                UPDATE \`Refund\`
+                UPDATE \`refund\`
                 SET status = 'COMPLETED',
                     providerRef = COALESCE(${providerRef || null}, providerRef)
                 WHERE id = ${refundId}
@@ -408,7 +408,7 @@ export async function executeRefundCompletion(
             // Other statuses remain unchanged.
 
             await tx.$executeRaw`
-                UPDATE \`Order\`
+                UPDATE \`order\`
                 SET paymentStatus = 'REFUNDED',
                     status = IF(status = 'REFUND_PENDING', 'CANCELLED', status)
                 WHERE id = ${refund.orderId}
@@ -532,7 +532,7 @@ export async function failRefund(
 
             // CAS: PROCESSING → FAILED
             const affectedRows = await tx.$executeRaw`
-                UPDATE \`Refund\`
+                UPDATE \`refund\`
                 SET status = 'FAILED'
                 WHERE id = ${refundId}
                   AND status = 'PROCESSING'
@@ -544,7 +544,7 @@ export async function failRefund(
 
             // Revert order status from REFUND_PENDING back to PAID
             await tx.$executeRaw`
-                UPDATE \`Order\`
+                UPDATE \`order\`
                 SET status = 'PAID'
                 WHERE id = ${refund.orderId}
                   AND status = 'REFUND_PENDING'

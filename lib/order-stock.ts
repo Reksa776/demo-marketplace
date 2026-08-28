@@ -58,7 +58,7 @@ export async function releaseStockAndVoucherForOrder(
         if (isFlashSale) {
             // Flash sale: restore flash-sale stock
             await tx.$executeRaw`
-                UPDATE FlashSale
+                UPDATE flashsale
                 SET saleStock = saleStock + ${item.quantity},
                     soldCount = GREATEST(0, soldCount - ${item.quantity})
                 WHERE variantId = ${item.variantId}
@@ -83,7 +83,7 @@ export async function releaseStockAndVoucherForOrder(
         // Restore sold count for both types
         if (item.productId !== null) {
             await tx.$executeRaw`
-                UPDATE Product
+                UPDATE product
                 SET sold = GREATEST(0, sold - ${item.quantity})
                 WHERE id = ${item.productId}
             `;

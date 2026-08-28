@@ -55,7 +55,7 @@ export async function GET(req: Request, { params }: RouteContext) {
         const chartClicks = await prisma.$queryRaw<Array<{ date: Date; count: bigint }>>(
             Prisma.sql`
                 SELECT DATE(cl.\`createdAt\`) as date, COUNT(*) as count
-                FROM \`AffiliateClick\` cl
+                FROM \`affiliateclick\` cl
                 WHERE cl.\`affiliateId\` = ${affiliateId}
                   AND cl.\`createdAt\` >= DATE_SUB(NOW(), INTERVAL 90 DAY)
                 GROUP BY DATE(cl.\`createdAt\`)
@@ -70,7 +70,7 @@ export async function GET(req: Request, { params }: RouteContext) {
                        COUNT(*) as count,
                        COALESCE(SUM(c.\`orderSubtotal\`), 0) as sales,
                        COALESCE(SUM(c.\`commissionAmount\`), 0) as commission
-                FROM \`AffiliateConversion\` c
+                FROM \`affiliateconversion\` c
                 WHERE c.\`affiliateId\` = ${affiliateId}
                   AND c.\`createdAt\` >= DATE_SUB(NOW(), INTERVAL 90 DAY)
                 GROUP BY DATE(c.\`createdAt\`)

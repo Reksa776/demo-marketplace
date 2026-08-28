@@ -333,7 +333,7 @@ export async function GET(request: Request) {
             >(
                 Prisma.sql`
                     SELECT DATE(cl.\`createdAt\`) AS date, COUNT(*) AS count
-                    FROM \`AffiliateClick\` cl
+                    FROM \`affiliateclick\` cl
                     WHERE cl.\`affiliateId\` = ${affiliateId}
                     ${clickDateFilterSql}
                     GROUP BY DATE(cl.\`createdAt\`)
@@ -355,7 +355,7 @@ export async function GET(request: Request) {
                            COUNT(*) AS count,
                            COALESCE(SUM(c.\`orderSubtotal\`), 0) AS sales,
                            COALESCE(SUM(c.\`commissionAmount\`), 0) AS commission
-                    FROM \`AffiliateConversion\` c
+                    FROM \`affiliateconversion\` c
                     WHERE c.\`affiliateId\` = ${affiliateId}
                     ${dateFilterSql}
                     GROUP BY DATE(c.\`createdAt\`)

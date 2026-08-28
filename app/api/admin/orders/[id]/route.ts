@@ -489,7 +489,7 @@ export async function PATCH(
             if (status === "CANCELLED" && previousStatus !== "CANCELLED") {
                 // CAS: atomically set status to CANCELLED
                 const casAffected = await tx.$executeRaw`
-                    UPDATE \`Order\`
+                    UPDATE \`order\`
                     SET status = 'CANCELLED'
                     WHERE id = ${orderId}
                       AND status != 'CANCELLED'

@@ -129,7 +129,7 @@ export async function PATCH(req: Request, { params }: RouteContext) {
                 // Provider confirms success — finalize PAID
                 await prisma.$transaction(async (tx) => {
                     const affectedRows = await tx.$executeRaw`
-                        UPDATE AffiliatePayout
+                        UPDATE affiliatepayout
                         SET status = 'PAID',
                             paidAt = IFNULL(paidAt, CURRENT_TIMESTAMP),
                             providerStatus = 'success'
@@ -168,7 +168,7 @@ export async function PATCH(req: Request, { params }: RouteContext) {
 
                 await prisma.$transaction(async (tx) => {
                     const affectedRows = await tx.$executeRaw`
-                        UPDATE AffiliatePayout
+                        UPDATE affiliatepayout
                         SET status = ${failStatus},
                             failedAt = IFNULL(failedAt, CURRENT_TIMESTAMP),
                             failureReason = ${statusResult.message || `Provider status: ${failStatus}`},
@@ -238,7 +238,7 @@ export async function PATCH(req: Request, { params }: RouteContext) {
             // Lock and transition: PENDING → PROCESSING
             await prisma.$transaction(async (tx) => {
                 const locked = await tx.$queryRaw<Array<{ id: number; status: string }>>`
-                    SELECT id, status FROM AffiliatePayout
+                    SELECT id, status FROM affiliatepayout
                     WHERE id = ${payoutId} AND status = 'PENDING'
                     FOR UPDATE
                 `;
@@ -287,7 +287,7 @@ export async function PATCH(req: Request, { params }: RouteContext) {
                 if (disbursementResult.status === "SUCCESS") {
                     await prisma.$transaction(async (tx) => {
                         const affectedRows = await tx.$executeRaw`
-                            UPDATE AffiliatePayout
+                            UPDATE affiliatepayout
                             SET status = 'PAID',
                                 paidAt = IFNULL(paidAt, CURRENT_TIMESTAMP),
                                 providerStatus = 'success'
@@ -467,7 +467,7 @@ export async function PATCH(req: Request, { params }: RouteContext) {
             // CAS: PROCESSING → PAID (prevent double-confirm)
             await prisma.$transaction(async (tx) => {
                 const affectedRows = await tx.$executeRaw`
-                    UPDATE AffiliatePayout
+                    UPDATE affiliatepayout
                     SET status = 'PAID',
                         paidAt = IFNULL(paidAt, CURRENT_TIMESTAMP),
                         proofFilePath = ${proofFilePath}

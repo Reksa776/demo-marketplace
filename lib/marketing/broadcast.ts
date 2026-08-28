@@ -614,7 +614,7 @@ export async function sendBroadcast(
 
     // Atomically set status to SENDING (CAS: only if DRAFT or SCHEDULED)
     const affectedRows = await prisma.$executeRaw`
-        UPDATE Broadcast
+        UPDATE broadcast
         SET status = 'SENDING'
         WHERE id = ${broadcastId}
           AND status IN ('DRAFT', 'SCHEDULED')

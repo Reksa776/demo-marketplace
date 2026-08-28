@@ -173,7 +173,7 @@ export async function incrementVoucherUsage(
     voucherId: number
 ): Promise<boolean> {
     const updated = await tx.$executeRaw`
-        UPDATE Voucher
+        UPDATE voucher
         SET usedCount = usedCount + 1
         WHERE id = ${voucherId}
           AND isActive = true

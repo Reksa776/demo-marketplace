@@ -125,7 +125,7 @@ async function reReserveStockForOrder(
         if (flashSale && flashSale.isActive) {
             // Flash sale: re-reserve flash sale stock
             const affectedRows = await tx.$executeRaw`
-                UPDATE FlashSale
+                UPDATE flashsale
                 SET saleStock = saleStock - ${item.quantity},
                     soldCount = soldCount + ${item.quantity}
                 WHERE id = ${flashSale.id}
@@ -350,7 +350,7 @@ export async function processRepayment(
             // - Race with concurrent webhook
 
             const affectedRows = await tx.$executeRaw`
-                UPDATE \`Order\`
+                UPDATE \`order\`
                 SET status = 'PENDING',
                     paymentStatus = 'PENDING',
                     paymentMethod = ${paymentMethod}

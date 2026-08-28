@@ -1509,7 +1509,7 @@ export async function createCheckoutOrder(
                     const affectedRows =
                         await tx
                             .$executeRaw`
-                            UPDATE FlashSale
+                            UPDATE flashsale
                             SET saleStock = saleStock - ${item.quantity},
                                 soldCount = soldCount + ${item.quantity}
                             WHERE id = ${fsId}
@@ -1985,7 +1985,7 @@ export async function rollbackCheckoutOrder(
              */
             const affectedRows =
                 await tx.$executeRaw`
-                UPDATE \`Order\`
+                UPDATE \`order\`
                 SET status = 'CANCELLED',
                     paymentStatus = 'FAILED'
                 WHERE id = ${orderId}
@@ -2201,7 +2201,7 @@ export async function rollbackCheckoutOrder(
                      * negative soldCount and saleStock inflation.
                      */
                     await tx.$executeRaw`
-                        UPDATE FlashSale
+                        UPDATE flashsale
                         SET saleStock = saleStock + ${item.quantity},
                             soldCount = soldCount - ${item.quantity}
                         WHERE id = ${flashSale.id}
@@ -2256,7 +2256,7 @@ export async function rollbackCheckoutOrder(
                  * BUG #3 FIX: Use GREATEST to prevent negative sold.
                  */
                 await tx.$executeRaw`
-                    UPDATE Product
+                    UPDATE product
                     SET sold = GREATEST(0, sold - ${item.quantity})
                     WHERE id = ${item.productId}
                 `;

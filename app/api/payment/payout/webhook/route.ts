@@ -156,7 +156,7 @@ export async function POST(request: Request) {
                  * ========================================== */
 
                 const affectedRows = await tx.$executeRaw`
-                    UPDATE AffiliatePayout
+                    UPDATE affiliatepayout
                     SET status = 'PAID',
                         paidAt = IFNULL(paidAt, CURRENT_TIMESTAMP),
                         providerTransactionId = COALESCE(${payload.id}, providerTransactionId),
@@ -206,7 +206,7 @@ export async function POST(request: Request) {
                  * ========================================== */
 
                 const affectedRows = await tx.$executeRaw`
-                    UPDATE AffiliatePayout
+                    UPDATE affiliatepayout
                     SET status = 'FAILED',
                         failedAt = IFNULL(failedAt, CURRENT_TIMESTAMP),
                         failureReason = ${payload.failure_reason || payload.failure_code || newStatus || "Unknown"},
