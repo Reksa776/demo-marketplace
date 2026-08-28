@@ -22,7 +22,7 @@ jobs:
 
             cd ~/demo-marketplace
 
-            echo "=== Pull latest code ==="
+            echo "=== Update source code ==="
             git fetch origin
             git reset --hard origin/main
 
@@ -38,7 +38,7 @@ jobs:
             echo "=== Build application ==="
             npm run build
 
-            echo "=== Restart PM2 ==="
-            pm2 reload demo-marketplace
+            echo "=== Restart application ==="
+            pm2 reload toko
 
             echo "=== DEPLOY SUCCESS ==="
