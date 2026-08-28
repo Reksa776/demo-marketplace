@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import { FiShoppingCart } from "react-icons/fi";
+import { useDialog } from "@/components/ui/Dialog";
 
 type BulkDiscount = {
     id: number; name: string; productId: number; variantId: number | null;
@@ -73,8 +74,10 @@ export default function AdminBulkDiscountsPage() {
         } catch (e) { setError(e instanceof Error ? e.message : "Terjadi kesalahan."); } finally { setSaving(false); }
     }
 
+    const dialog = useDialog();
+
     async function handleDelete(item: BulkDiscount) {
-        if (!window.confirm(`Hapus "${item.name}"?`)) return;
+        if (!(await dialog.confirm({ title: "Hapus", message: `Hapus "${item.name}"?`, variant: "danger", confirmText: "Hapus" }))) return;
         try { setDeletingId(item.id); const r = await fetch(`/api/admin/bulk-discounts/${item.id}`, { method: "DELETE" }); const res = await readJson(r); if (!r.ok || !res.success) throw new Error(res.message); setSuccess("Berhasil dihapus."); await load(); } catch (e) { setError(e instanceof Error ? e.message : "Gagal menghapus."); } finally { setDeletingId(null); }
     }
 

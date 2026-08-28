@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import { FiTarget, FiPlus, FiTrash2, FiZap } from "react-icons/fi";
+import { useDialog } from "@/components/ui/Dialog";
 
 type Reward = {
     id?: number;
@@ -262,8 +263,10 @@ export default function AdminSpinWheelPage() {
         }
     }
 
+    const dialog = useDialog();
+
     async function handleDelete(item: Campaign) {
-        if (!window.confirm(`Hapus campaign "${item.name}"?`)) return;
+        if (!(await dialog.confirm({ title: "Hapus Campaign", message: `Hapus campaign "${item.name}"?`, variant: "danger", confirmText: "Hapus" }))) return;
         try {
             setError(""); setSuccess("");
             const response = await fetch(`/api/admin/spin-wheel/campaigns/${item.id}`, { method: "DELETE" });

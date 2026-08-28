@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import { FiZap } from "react-icons/fi";
+import { useDialog } from "@/components/ui/Dialog";
 
 type FlashSale = {
     id: number;
@@ -193,8 +194,10 @@ export default function AdminFlashSalesPage() {
         }
     }
 
+    const dialog = useDialog();
+
     async function handleDelete(item: FlashSale) {
-        const confirmed = window.confirm(`Hapus flash sale "${item.name}"?\n\nTindakan ini tidak bisa dibatalkan.`);
+        const confirmed = await dialog.confirm({ title: "Hapus Flash Sale", message: `Hapus flash sale "${item.name}"?\n\nTindakan ini tidak bisa dibatalkan.`, variant: "danger", confirmText: "Hapus" });
         if (!confirmed) return;
 
         try {

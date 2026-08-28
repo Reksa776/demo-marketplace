@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useSession } from "next-auth/react";
 import { motion, AnimatePresence } from "framer-motion";
+import toast from "react-hot-toast";
 
 // =========================================
 // TYPES
@@ -213,7 +214,7 @@ export default function SpinWheelPopup({
 
             if (!result.success || !result.data?.reward) {
                 console.log("[SpinWheel] spin failed:", result.message);
-                alert(
+                toast.error(
                     result.message ||
                         "Gagal melakukan spin. Silakan coba lagi."
                 );
@@ -267,7 +268,7 @@ export default function SpinWheelPopup({
             }, SPIN_TIMEOUT_MS);
         } catch (err) {
             console.log("[SpinWheel] spin request failed:", err);
-            alert("Terjadi kesalahan. Silakan coba lagi.");
+            toast.error("Terjadi kesalahan. Silakan coba lagi.");
             setSpinState("idle");
         }
     }

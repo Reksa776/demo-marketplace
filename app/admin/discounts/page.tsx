@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import { FiPercent } from "react-icons/fi";
+import { useDialog } from "@/components/ui/Dialog";
 
 type Discount = {
     id: number; productId: number; variantId: number | null;
@@ -70,8 +71,10 @@ export default function AdminDiscountsPage() {
         } catch (e) { setError(e instanceof Error ? e.message : "Terjadi kesalahan."); } finally { setSaving(false); }
     }
 
+    const dialog = useDialog();
+
     async function handleDelete(item: Discount) {
-        if (!window.confirm("Hapus diskon ini?")) return;
+        if (!(await dialog.confirm({ title: "Hapus Diskon", message: "Hapus diskon ini?", variant: "danger", confirmText: "Hapus" }))) return;
         try { setDeletingId(item.id); const r = await fetch(`/api/admin/discounts/${item.id}`, { method: "DELETE" }); const res = await readJson(r); if (!r.ok || !res.success) throw new Error(res.message); setSuccess("Berhasil dihapus."); await load(); } catch (e) { setError(e instanceof Error ? e.message : "Gagal menghapus."); } finally { setDeletingId(null); }
     }
 

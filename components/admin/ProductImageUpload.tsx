@@ -7,6 +7,7 @@ import {
     FiUpload,
     FiX,
 } from "react-icons/fi";
+import toast from "react-hot-toast";
 
 type Props = {
     value: string;
@@ -65,7 +66,7 @@ export default function ProductImageUpload({
         } catch (error) {
             console.error(error);
 
-            alert(
+            toast.error(
                 error instanceof Error
                     ? error.message
                     : "Upload gagal"

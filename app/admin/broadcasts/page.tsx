@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import { FiMail, FiEye } from "react-icons/fi";
+import { useDialog } from "@/components/ui/Dialog";
 
 type Broadcast = {
     id: number; name: string; type: string; channel: string; subject: string | null;
@@ -67,15 +68,17 @@ export default function AdminBroadcastsPage() {
         } catch (e) { setError(e instanceof Error ? e.message : "Terjadi kesalahan."); } finally { setSaving(false); }
     }
 
+    const dialog = useDialog();
+
     async function handleDelete(item: Broadcast) {
-        if (!window.confirm(`Hapus "${item.name}"?`)) return;
+        if (!(await dialog.confirm({ title: "Hapus Broadcast", message: `Hapus "${item.name}"?`, variant: "danger", confirmText: "Hapus" }))) return;
         try { setDeletingId(item.id); const r = await fetch(`/api/admin/broadcasts/${item.id}`, { method: "DELETE" }); const res = await readJson(r); if (!r.ok || !res.success) throw new Error(res.message); setSuccess("Berhasil dihapus."); await load(); } catch (e) { setError(e instanceof Error ? e.message : "Gagal menghapus."); } finally { setDeletingId(null); }
     }
 
     const [sendingId, setSendingId] = useState<number | null>(null);
 
     async function handleSend(item: Broadcast) {
-        if (!window.confirm(`Kirim broadcast "${item.name}" ke ${item.audienceCount} orang?\n\nTindakan ini tidak bisa dibatalkan.`)) return;
+        if (!(await dialog.confirm({ title: "Kirim Broadcast", message: `Kirim broadcast "${item.name}" ke ${item.audienceCount} orang?\n\nTindakan ini tidak bisa dibatalkan.`, variant: "warning", confirmText: "Kirim" }))) return;
         try {
             setSendingId(item.id); setError(""); setSuccess("");
             const r = await fetch(`/api/admin/broadcasts/${item.id}/send`, { method: "POST" });

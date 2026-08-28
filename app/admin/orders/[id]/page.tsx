@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import toast from "react-hot-toast";
+import { useDialog } from "@/components/ui/Dialog";
 
 type Order = {
     id: number;
@@ -122,6 +123,7 @@ function getStatusStyle(status: string) {
 
 export default function AdminOrderDetailPage() {
     const params = useParams();
+    const dialog = useDialog();
 
     const [tracking, setTracking] =
         useState<TrackingData | null>(null);
@@ -1065,7 +1067,7 @@ export default function AdminOrderDetailPage() {
 
                                         <button
                                             onClick={async () => {
-                                                const reason = prompt("Alasan penolakan refund:");
+                                                const reason = await dialog.prompt({ title: "Alasan Penolakan", message: "Alasan penolakan refund:", placeholder: "Masukkan alasan...", required: true });
                                                 if (reason === null) return;
 
                                                 try {

@@ -3,6 +3,7 @@ import "./globals.css";
 import { Toaster } from "react-hot-toast";
 import AuthProvider from "@/components/providers/AuthProvider";
 import AnalyticsProvider from "@/components/analytics/AnalyticsProvider";
+import { DialogProvider } from "@/components/ui/Dialog";
 import Footer from "@/components/Footer";
 
 export default function RootLayout({
@@ -16,6 +17,7 @@ export default function RootLayout({
 
         <AuthProvider>
           <AnalyticsProvider />
+          <DialogProvider>
 
           {children}
 
@@ -28,6 +30,7 @@ export default function RootLayout({
             }}
           />
 
+          </DialogProvider>
         </AuthProvider>
 
       </body>

@@ -5,6 +5,8 @@ import {
     useEffect,
     useState,
 } from "react";
+import toast from "react-hot-toast";
+import { useDialog } from "@/components/ui/Dialog";
 
 type VoucherType =
     | "PERCENTAGE"
@@ -558,20 +560,26 @@ export default function AdminVouchersPage() {
         }
     }
 
+    const dialog = useDialog();
+
     async function handleDelete(
         voucher: Voucher
     ) {
         if (voucher.usedCount > 0) {
-            window.alert(
-                "Voucher ini sudah pernah digunakan. Nonaktifkan voucher saja."
-            );
+            await dialog.alert({
+                title: "Tidak Bisa Dihapus",
+                message: "Voucher ini sudah pernah digunakan. Nonaktifkan voucher saja.",
+                variant: "warning",
+            });
             return;
         }
 
-        const confirmed =
-            window.confirm(
-                `Hapus voucher "${voucher.code}"?\n\nTindakan ini tidak bisa dibatalkan.`
-            );
+        const confirmed = await dialog.confirm({
+            title: "Hapus Voucher",
+            message: `Hapus voucher "${voucher.code}"?\n\nTindakan ini tidak bisa dibatalkan.`,
+            variant: "danger",
+            confirmText: "Hapus",
+        });
 
         if (!confirmed) return;
 

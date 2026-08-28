@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import { FiTruck } from "react-icons/fi";
+import { useDialog } from "@/components/ui/Dialog";
 
 type ShippingDiscount = {
     id: number; name: string; code: string | null; type: string; value: string | number;
@@ -57,8 +58,10 @@ export default function AdminShippingDiscountsPage() {
         } catch (e) { setError(e instanceof Error ? e.message : "Terjadi kesalahan."); } finally { setSaving(false); }
     }
 
+    const dialog = useDialog();
+
     async function handleDelete(item: ShippingDiscount) {
-        if (!window.confirm(`Hapus "${item.name}"?`)) return;
+        if (!(await dialog.confirm({ title: "Hapus", message: `Hapus "${item.name}"?`, variant: "danger", confirmText: "Hapus" }))) return;
         try { setDeletingId(item.id); const r = await fetch(`/api/admin/shipping-discounts/${item.id}`, { method: "DELETE" }); const res = await readJson(r); if (!r.ok || !res.success) throw new Error(res.message); setSuccess("Berhasil dihapus."); await load(); } catch (e) { setError(e instanceof Error ? e.message : "Gagal menghapus."); } finally { setDeletingId(null); }
     }
 

@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import toast from "react-hot-toast";
+import { useDialog } from "@/components/ui/Dialog";
 import Link from "next/link";
 import { FiArrowLeft, FiDollarSign, FiShoppingBag, FiMousePointer, FiTarget, FiEdit, FiCheck } from "react-icons/fi";
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
@@ -46,6 +47,7 @@ const statusClass: Record<string, string> = {
 };
 
 export default function AdminAffiliateDetail({ id }: { id: string }) {
+    const dialog = useDialog();
     const [data, setData] = useState<DetailData | null>(null);
     const [loading, setLoading] = useState(true);
     const [editingRate, setEditingRate] = useState(false);
@@ -332,7 +334,7 @@ export default function AdminAffiliateDetail({ id }: { id: string }) {
                 <div className="mt-3 flex flex-wrap gap-2">
                     {profile.status !== "SUSPENDED" && (
                         <button onClick={async () => {
-                            if (!confirm(`Suspend affiliate ${profile.name}?`)) return;
+                            if (!(await dialog.confirm({ title: "Suspend Affiliate", message: `Suspend affiliate ${profile.name}?`, variant: "danger", confirmText: "Suspend" }))) return;
                             try {
                                 setSaving(true);
                                 const res = await fetch(`/api/admin/affiliate/${id}`, {
@@ -350,7 +352,7 @@ export default function AdminAffiliateDetail({ id }: { id: string }) {
                     )}
                     {profile.status === "SUSPENDED" && (
                         <button onClick={async () => {
-                            if (!confirm(`Activate affiliate ${profile.name}?`)) return;
+                            if (!(await dialog.confirm({ title: "Activate Affiliate", message: `Activate affiliate ${profile.name}?`, variant: "info", confirmText: "Activate" }))) return;
                             try {
                                 setSaving(true);
                                 const res = await fetch(`/api/admin/affiliate/${id}`, {

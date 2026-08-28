@@ -7,6 +7,7 @@ import {
     useState,
 } from "react";
 import toast from "react-hot-toast";
+import { useDialog } from "@/components/ui/Dialog";
 type OrderItem = {
     id: number;
     productId: number;
@@ -184,6 +185,7 @@ function getStatusClass(status: string) {
 
 export default function OrderDetailPage() {
     const params = useParams();
+    const dialog = useDialog();
     const [tracking, setTracking] =
         useState<any>(null);
 
@@ -507,9 +509,12 @@ export default function OrderDetailPage() {
                             <button
                                 onClick={async () => {
                                     if (
-                                        !confirm(
-                                            "Ajukan permintaan refund untuk pesanan ini?"
-                                        )
+                                        !(await dialog.confirm({
+                                            title: "Minta Refund",
+                                            message: "Ajukan permintaan refund untuk pesanan ini?",
+                                            variant: "warning",
+                                            confirmText: "Ya, Ajukan",
+                                        }))
                                     ) {
                                         return;
                                     }
@@ -572,9 +577,12 @@ export default function OrderDetailPage() {
                             <button
                                 onClick={async () => {
                                     if (
-                                        !confirm(
-                                            "Batalkan pesanan ini?"
-                                        )
+                                        !(await dialog.confirm({
+                                            title: "Batalkan Pesanan",
+                                            message: "Batalkan pesanan ini?",
+                                            variant: "danger",
+                                            confirmText: "Ya, Batalkan",
+                                        }))
                                     ) {
                                         return;
                                     }

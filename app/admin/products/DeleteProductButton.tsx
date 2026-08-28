@@ -3,6 +3,8 @@
 import { useState } from "react";
 import { FiTrash2 } from "react-icons/fi";
 import { useRouter } from "next/navigation";
+import toast from "react-hot-toast";
+import { useDialog } from "@/components/ui/Dialog";
 
 export default function DeleteProductButton({
     productId,
@@ -12,14 +14,18 @@ export default function DeleteProductButton({
     productName: string;
 }) {
     const router = useRouter();
+    const dialog = useDialog();
 
     const [loading, setLoading] =
         useState(false);
 
     async function handleDelete() {
-        const confirmed = window.confirm(
-    `Hapus produk "${productName}"?\n\nJika produk ini punya history pesanan, produk akan diarsipkan (disembunyikan dari katalog) alih-alih dihapus permanen.`
-);
+        const confirmed = await dialog.confirm({
+            title: "Hapus Produk",
+            message: `Hapus produk "${productName}"?\n\nJika produk ini punya history pesanan, produk akan diarsipkan (disembunyikan dari katalog) alih-alih dihapus permanen.`,
+            variant: "danger",
+            confirmText: "Hapus",
+        });
 
         if (!confirmed) {
             return;
@@ -75,10 +81,7 @@ export default function DeleteProductButton({
                 );
             }
 
-            alert(
-                data.message ||
-                "Produk berhasil dihapus."
-            );
+            toast.success(data.message || "Produk berhasil dihapus.");
 
             router.refresh();
         } catch (error) {
@@ -87,7 +90,7 @@ export default function DeleteProductButton({
                 error
             );
 
-            alert(
+            toast.error(
                 error instanceof Error
                     ? error.message
                     : "Gagal menghapus produk."

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import toast from "react-hot-toast";
+import { useDialog } from "@/components/ui/Dialog";
 import {
     FiMapPin,
     FiPlus,
@@ -89,10 +90,15 @@ export default function AddressesPage() {
         }
     }
 
+    const dialog = useDialog();
+
     async function handleDelete(address: Address) {
-        const confirmed = window.confirm(
-            `Hapus alamat "${address.label || address.recipientName}"?\n\n${address.isDefault ? "Alamat ini adalah alamat utama. Alamat lain akan ditetapkan sebagai alamat utama." : ""}`
-        );
+        const confirmed = await dialog.confirm({
+            title: "Hapus Alamat",
+            message: `Hapus alamat "${address.label || address.recipientName}"?\n\n${address.isDefault ? "Alamat ini adalah alamat utama. Alamat lain akan ditetapkan sebagai alamat utama." : ""}`,
+            variant: "danger",
+            confirmText: "Hapus",
+        });
 
         if (!confirmed) return;
 

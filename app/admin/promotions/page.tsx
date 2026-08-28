@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import { FiImage } from "react-icons/fi";
 import ProductImageUpload from "@/components/admin/ProductImageUpload";
+import { useDialog } from "@/components/ui/Dialog";
 
 type Promotion = {
     id: number;
@@ -131,8 +132,10 @@ export default function AdminPromotionsPage() {
         } catch (err) { setError(err instanceof Error ? err.message : "Terjadi kesalahan."); } finally { setSaving(false); }
     }
 
+    const dialog = useDialog();
+
     async function handleDelete(item: Promotion) {
-        if (!window.confirm(`Hapus promosi "${item.title}"?`)) return;
+        if (!(await dialog.confirm({ title: "Hapus Promosi", message: `Hapus promosi "${item.title}"?`, variant: "danger", confirmText: "Hapus" }))) return;
         try {
             setDeletingId(item.id); setError(""); setSuccess("");
             const response = await fetch(`/api/admin/promotions/${item.id}`, { method: "DELETE" });

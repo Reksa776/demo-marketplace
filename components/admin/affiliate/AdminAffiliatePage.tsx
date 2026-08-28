@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import toast from "react-hot-toast";
+import { useDialog } from "@/components/ui/Dialog";
 import Link from "next/link";
 
 /* ==========================================
@@ -193,13 +194,18 @@ export default function AdminAffiliatePage() {
      * APPROVE
      * ========================================== */
 
+    const dialog = useDialog();
+
     async function handleApprove(
         application: Application
     ) {
         if (
-            !confirm(
-                `Setujui pengajuan dari ${application.user?.name ?? "user ini"}?`
-            )
+            !(await dialog.confirm({
+                title: "Setujui Pengajuan",
+                message: `Setujui pengajuan dari ${application.user?.name ?? "user ini"}?`,
+                variant: "info",
+                confirmText: "Setujui",
+            }))
         ) {
             return;
         }

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import toast from "react-hot-toast";
 import {
     FiArrowLeft,
     FiDownload,
@@ -174,7 +175,7 @@ export default function AdminReportsPage() {
                 error
             );
 
-            alert(
+            toast.error(
                 error instanceof Error
                     ? error.message
                     : "Gagal download laporan."

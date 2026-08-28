@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import toast from "react-hot-toast";
+import { useDialog } from "@/components/ui/Dialog";
 
 type Refund = {
     id: number;
@@ -126,29 +127,39 @@ export default function AdminRefundsPage() {
         loadRefunds(1);
     }, []);
 
+    const dialog = useDialog();
+
     async function handleRefundAction(refundId: number, orderId: number, action: "approve" | "complete" | "reject") {
         try {
             setProcessingAction(refundId);
 
+            const confirmTitle =
+                action === "complete"
+                    ? "Selesaikan Refund"
+                    : action === "approve"
+                      ? "Setujui Refund"
+                      : "Tolak Refund";
             const confirmMessage =
                 action === "complete"
                     ? "Tandai refund sebagai selesai?"
-                    : "Tolak refund ini?";
+                    : action === "approve"
+                      ? "Setujui refund ini?"
+                      : "Tolak refund ini?";
 
-            if (!confirm(confirmMessage)) {
+            if (!(await dialog.confirm({ title: confirmTitle, message: confirmMessage, variant: action === "reject" ? "danger" : "warning", confirmText: action === "reject" ? "Tolak" : "Ya" }))) {
                 setProcessingAction(null);
                 return;
             }
 
             let providerRef: string | undefined;
             if (action === "complete") {
-                const input = prompt("Masukkan provider reference ID (opsional):");
+                const input = await dialog.prompt({ title: "Provider Reference", message: "Masukkan provider reference ID (opsional):", placeholder: "Ref ID", required: false });
                 providerRef = input || undefined;
             }
 
             let reason: string | undefined;
             if (action === "reject") {
-                const input = prompt("Alasan penolakan:");
+                const input = await dialog.prompt({ title: "Alasan Penolakan", message: "Alasan penolakan:", placeholder: "Masukkan alasan...", required: true });
                 if (!input) {
                     setProcessingAction(null);
                     return;

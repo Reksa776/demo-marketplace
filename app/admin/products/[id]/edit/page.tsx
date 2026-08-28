@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
+import toast from "react-hot-toast";
 import {
     FiArrowLeft,
     FiPlus,
@@ -169,9 +170,7 @@ export default function EditProductPage() {
 
     function removeVariant(index: number) {
         if (variants.length <= 1) {
-            alert(
-                "Produk minimal harus memiliki satu variant."
-            );
+            toast.error("Produk minimal harus memiliki satu variant.");
 
             return;
         }
@@ -239,10 +238,7 @@ export default function EditProductPage() {
                 );
             }
 
-            alert(
-                data.message ||
-                    "Produk berhasil diperbarui."
-            );
+            toast.success(data.message || "Produk berhasil diperbarui.");
 
             router.push(
                 "/admin/products"

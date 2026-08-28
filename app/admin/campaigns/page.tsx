@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import { FiTarget } from "react-icons/fi";
+import { useDialog } from "@/components/ui/Dialog";
 
 type Campaign = {
     id: number;
@@ -146,8 +147,10 @@ export default function AdminCampaignsPage() {
         } catch (err) { setError(err instanceof Error ? err.message : "Terjadi kesalahan."); } finally { setSaving(false); }
     }
 
+    const dialog = useDialog();
+
     async function handleDelete(item: Campaign) {
-        if (!window.confirm(`Hapus kampanye "${item.name}"?`)) return;
+        if (!(await dialog.confirm({ title: "Hapus Kampanye", message: `Hapus kampanye "${item.name}"?`, variant: "danger", confirmText: "Hapus" }))) return;
         try {
             setDeletingId(item.id); setError(""); setSuccess("");
             const response = await fetch(`/api/admin/campaigns/${item.id}`, { method: "DELETE" });
