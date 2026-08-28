@@ -16,6 +16,7 @@ jobs:
           host: ${{ secrets.VPSBIZNET }}
           username: ${{ secrets.VPS_NAME }}
           key: ${{ secrets.VPS_SSH_KEY }}
+          port: 22
 
           script: |
             set -e
@@ -25,29 +26,14 @@ jobs:
 
             nvm use 24
 
-            echo "=== Node version ==="
+            echo "=== Node Version ==="
             node -v
             npm -v
 
+            echo "=== Starting deployment ==="
+
             cd ~/demo-marketplace
 
-            echo "=== Update source code ==="
-            git fetch origin
-            git reset --hard origin/main
+            ./deploy.sh
 
-            echo "=== Install dependencies ==="
-            npm ci
-
-            echo "=== Prisma generate ==="
-            npx prisma generate
-
-            echo "=== Prisma migration ==="
-            npx prisma migrate deploy
-
-            echo "=== Build application ==="
-            npm run build
-
-            echo "=== Restart application ==="
-            pm2 reload toko
-
-            echo "=== DEPLOY SUCCESS ==="
+            echo "=== Deployment finished ==="
