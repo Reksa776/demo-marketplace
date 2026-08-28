@@ -39,6 +39,13 @@ export type AuditAction =
     | "ORDER_STATUS_CHANGED"
     | "ORDER_CANCELLED"
     | "ORDER_REFUNDED"
+    // Refund
+    | "REFUND_REQUESTED"
+    | "REFUND_APPROVED"
+    | "REFUND_COMPLETED"
+    | "REFUND_FAILED"
+    // Repayment
+    | "REPAYMENT_INITIATED"
     // System
     | "AFFILIATE_COMMISSION_AUTO_CANCELLED";
 
@@ -47,6 +54,7 @@ export type EntityType =
     | "AffiliateConversion"
     | "AffiliatePayout"
     | "Order"
+    | "Refund"
     | "System";
 
 interface AuditLogParams {

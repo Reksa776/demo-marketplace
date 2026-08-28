@@ -4,9 +4,8 @@ import {
 } from "next/server";
 
 import { prisma } from "@/lib/prisma";
-import {
-    releaseStockAndVoucherForOrder,
-} from "@/lib/order-stock";
+import { releaseStockAndVoucherForOrder } from "@/lib/order-stock";
+import { executeRefundCompletion } from "@/lib/refund";
 
 import {
     isSuccessNotification,
@@ -475,11 +474,83 @@ export async function POST(
                 message:
                     "Payment failure processed.",
             });
+        }        /* ==========================================
+         * REFUND
+         * ==========================================
+         *
+         * iPaymu refund notification handling.
+         * Mirrors Midtrans refund handler.
+         */
+
+        const isRefunded =
+            body.Status === "refund" ||
+            (typeof body.status === "string" &&
+                body.status.toLowerCase() === "refund") ||
+            (typeof body.status_code === "string" &&
+                body.status_code.toLowerCase() === "refund") ||
+            (typeof body.settlement_status === "string" &&
+                body.settlement_status.toLowerCase() === "refunded");
+
+        if (isRefunded) {
+            const refundedRef =
+                body.TransactionId ||
+                body.PaymentId ||
+                body.payment_id ||
+                body.trx_id ||
+                null;
+
+            /*
+             * FIND OR CREATE REFUND RECORD:
+             * - If user-initiated refund exists → use it
+             * - If provider-initiated (no existing record) → create one
+             */
+            let existingRefund = await prisma.refund.findUnique({
+                where: { orderId: existingOrder.id },
+                select: { id: true, status: true },
+            });
+
+            if (!existingRefund) {
+                /*
+                 * Provider-initiated refund (not user-requested).
+                 * Create a Refund record for tracking.
+                 * Amount is SERVER-AUTHORITATIVE: order.total from DB.
+                 */
+                const newRefund = await prisma.refund.create({
+                    data: {
+                        orderId: existingOrder.id,
+                        amount: existingOrder.total,
+                        status: "PROCESSING",
+                        requestedBy: "PROVIDER",
+                        providerRef: refundedRef || undefined,
+                    },
+                });
+                existingRefund = { id: newRefund.id, status: "PROCESSING" };
+            }
+
+            /*
+             * EXECUTE REFUND COMPLETION:
+             * Shared function handles CAS, stock, voucher,
+             * affiliate, spin-wheel, and audit logging.
+             * Idempotent: duplicate webhooks return safe no-op.
+             */
+            const result = await executeRefundCompletion(
+                existingRefund.id,
+                refundedRef || undefined,
+                "IPAYMU_WEBHOOK"
+            );
+
+            return json({
+                success: true,
+                message: result.ok
+                    ? "Refund processed, stock and voucher restored."
+                    : "Refund already processed (idempotent)."
+            });
         }
 
         /* ==========================================
          * UNHANDLED STATUS
-         * ========================================== */
+         * ==========================================
+         */
 
         console.log(
             "IPAYMU UNHANDLED STATUS:",

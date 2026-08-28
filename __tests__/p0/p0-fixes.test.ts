@@ -72,34 +72,34 @@ describe("P0-2: Refund Stock Release", () => {
         expect(webhookCode).toContain('import { releaseStockAndVoucherForOrder } from "@/lib/order-stock"');
     });
 
-    test("Refund handler calls releaseStockAndVoucherForOrder", () => {
+    test("Refund handler uses shared executeRefundCompletion()", () => {
         const refundHandlerIdx = webhookCode.indexOf("if (\n            isRefunded");
         const unhandledIdx = webhookCode.indexOf("UNHANDLED STATUS");
         expect(refundHandlerIdx).toBeGreaterThan(0);
         const refundSection = webhookCode.substring(refundHandlerIdx, unhandledIdx);
-        expect(refundSection).toContain("releaseStockAndVoucherForOrder");
+        expect(refundSection).toContain("executeRefundCompletion");
     });
 
-    test("Refund handler uses CAS UPDATE (atomic idempotency)", () => {
+    test("Refund handler finds or creates Refund record before completion", () => {
         const refundHandlerIdx = webhookCode.indexOf("if (\n            isRefunded");
         const unhandledIdx = webhookCode.indexOf("UNHANDLED STATUS");
         const refundSection = webhookCode.substring(refundHandlerIdx, unhandledIdx);
-        expect(refundSection).toContain("$executeRaw");
-        expect(refundSection).toContain("paymentStatus = 'REFUNDED'");
+        expect(refundSection).toContain("refund.findUnique");
+        expect(refundSection).toContain("refund.create");
     });
 
-    test("Refund handler checks affectedRows (idempotency guard)", () => {
+    test("Refund handler passes source identifier for audit trail", () => {
         const refundHandlerIdx = webhookCode.indexOf("if (\n            isRefunded");
         const unhandledIdx = webhookCode.indexOf("UNHANDLED STATUS");
         const refundSection = webhookCode.substring(refundHandlerIdx, unhandledIdx);
-        expect(refundSection).toContain("refundSettled");
+        expect(refundSection).toContain("MIDTRANS_WEBHOOK");
     });
 
-    test("Refund handler cancels affiliate commission", () => {
+    test("Refund handler is idempotent (checks result.ok)", () => {
         const refundHandlerIdx = webhookCode.indexOf("if (\n            isRefunded");
         const unhandledIdx = webhookCode.indexOf("UNHANDLED STATUS");
         const refundSection = webhookCode.substring(refundHandlerIdx, unhandledIdx);
-        expect(refundSection).toContain("cancelCommissionForOrder");
+        expect(refundSection).toContain("result.ok");
     });
 
     test("Expire handler uses releaseStockAndVoucherForOrder", () => {

@@ -16,6 +16,7 @@ const allowedStatuses = [
     "SHIPPED",
     "COMPLETED",
     "CANCELLED",
+    "REFUND_PENDING",
 ];
 
 /*
@@ -451,12 +452,13 @@ export async function PATCH(
          * Once CANCELLED, cannot change.
          */
         const validTransitions: Record<string, string[]> = {
-            PENDING:     ["PAID", "PROCESSING", "CANCELLED"],
-            PAID:        ["PROCESSING", "SHIPPED", "COMPLETED", "CANCELLED"],
-            PROCESSING:  ["SHIPPED", "COMPLETED", "CANCELLED"],
-            SHIPPED:     ["COMPLETED"],
-            COMPLETED:   [],
-            CANCELLED:   [],
+            PENDING:          ["PAID", "PROCESSING", "CANCELLED"],
+            PAID:             ["PROCESSING", "SHIPPED", "COMPLETED", "CANCELLED"],
+            PROCESSING:       ["SHIPPED", "COMPLETED", "CANCELLED"],
+            SHIPPED:          ["COMPLETED"],
+            COMPLETED:        [],
+            CANCELLED:        [],
+            REFUND_PENDING:   ["CANCELLED"],
         };
 
         const allowed = validTransitions[order.status];

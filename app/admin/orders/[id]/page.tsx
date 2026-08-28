@@ -1011,6 +1011,115 @@ export default function AdminOrderDetailPage() {
                                 </p>
                             </div>
                         </div>
+
+                        {/* REFUND MANAGEMENT */}
+                        {order.status === "REFUND_PENDING" && (
+                            <div className="mt-5 rounded-xl border border-orange-200 bg-orange-50">
+                                <div className="border-b border-orange-200 px-5 py-4">
+                                    <h2 className="text-sm font-semibold text-orange-800">
+                                        🔄 Refund Pending
+                                    </h2>
+                                    <p className="mt-0.5 text-xs text-orange-600">
+                                        Pelanggan meminta refund
+                                    </p>
+                                </div>
+
+                                <div className="space-y-3 px-5 py-5">
+                                    <p className="text-sm text-orange-700">
+                                        Total: {rupiah(order.total)}
+                                    </p>
+
+                                    <div className="flex gap-3">
+                                        <button
+                                            onClick={async () => {
+                                                try {
+                                                    const response = await fetch(
+                                                        `/api/admin/orders/${order.id}/refund`,
+                                                        {
+                                                            method: "PATCH",
+                                                            headers: {
+                                                                "Content-Type": "application/json",
+                                                            },
+                                                            body: JSON.stringify({ action: "approve" }),
+                                                        }
+                                                    );
+
+                                                    const result = await response.json();
+
+                                                    if (!response.ok || !result.success) {
+                                                        throw new Error(result.message || "Gagal menyetujui refund.");
+                                                    }
+
+                                                    toast.success("Refund disetujui.");
+                                                    await loadOrder();
+                                                } catch (error) {
+                                                    toast.error(
+                                                        error instanceof Error ? error.message : "Gagal menyetujui refund."
+                                                    );
+                                                }
+                                            }}
+                                            className="flex-1 rounded-lg bg-green-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-green-700"
+                                        >
+                                            ✓ Setujui
+                                        </button>
+
+                                        <button
+                                            onClick={async () => {
+                                                const reason = prompt("Alasan penolakan refund:");
+                                                if (reason === null) return;
+
+                                                try {
+                                                    const response = await fetch(
+                                                        `/api/admin/orders/${order.id}/refund`,
+                                                        {
+                                                            method: "PATCH",
+                                                            headers: {
+                                                                "Content-Type": "application/json",
+                                                            },
+                                                            body: JSON.stringify({ action: "reject", reason: reason || "Ditolak oleh admin" }),
+                                                        }
+                                                    );
+
+                                                    const result = await response.json();
+
+                                                    if (!response.ok || !result.success) {
+                                                        throw new Error(result.message || "Gagal menolak refund.");
+                                                    }
+
+                                                    toast.success("Refund ditolak.");
+                                                    await loadOrder();
+                                                } catch (error) {
+                                                    toast.error(
+                                                        error instanceof Error ? error.message : "Gagal menolak refund."
+                                                    );
+                                                }
+                                            }}
+                                            className="flex-1 rounded-lg border border-red-300 bg-white px-4 py-2.5 text-sm font-medium text-red-600 hover:bg-red-50"
+                                        >
+                                            ✕ Tolak
+                                        </button>
+                                    </div>
+
+                                    <p className="text-[11px] text-orange-500">
+                                        Setelah menyetujui, proses refund melalui dashboard Midtrans/iPaymu.
+                                    </p>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* COMPLETED REFUND INFO */}
+                        {(order.status === "CANCELLED" && order.paymentStatus === "REFUNDED") && (
+                            <div className="mt-5 rounded-xl border border-green-200 bg-green-50">
+                                <div className="px-5 py-4">
+                                    <h2 className="text-sm font-semibold text-green-800">
+                                        ✓ Refund Selesai
+                                    </h2>
+                                    <p className="mt-0.5 text-xs text-green-600">
+                                        Pesanan ini telah direfund
+                                    </p>
+                                </div>
+                            </div>
+                        )}
                     </aside>
                 </div>
             </div>

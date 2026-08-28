@@ -58,17 +58,23 @@ function statusLabel(status: string) {
         case "PENDING":
             return "Menunggu diproses";
 
+        case "PAID":
+            return "Sudah dibayar";
+
         case "PROCESSING":
             return "Sedang diproses";
 
         case "SHIPPED":
             return "Dikirim";
 
-        case "DELIVERED":
+        case "COMPLETED":
             return "Selesai";
 
         case "CANCELLED":
             return "Dibatalkan";
+
+        case "REFUND_PENDING":
+            return "Refund diproses";
 
         default:
             return status;

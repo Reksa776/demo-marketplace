@@ -232,6 +232,9 @@ model Order {
   // Spin Wheel relation (optional)
   spinWheelSpin SpinWheelSpin?
 
+  // Refund relation (optional)
+  refund Refund?
+
   @@index([userId])
   @@index([status])
   @@index([paymentStatus])
@@ -424,6 +427,7 @@ enum Order_status {
   SHIPPED
   COMPLETED
   CANCELLED
+  REFUND_PENDING
 }
 
 enum Order_paymentStatus {
@@ -1095,4 +1099,33 @@ enum SpinWheelSpinStatus {
   USED
   EXPIRED
   CANCELLED
+}
+
+// ==========================================
+// REFUND SYSTEM
+// ==========================================
+
+model Refund {
+  id          Int          @id @default(autoincrement())
+  orderId     Int          @unique
+  amount      Decimal      @db.Decimal(12, 2)
+  reason      String?      @db.Text
+  status      RefundStatus @default(PENDING)
+  requestedBy String       // userId or "ADMIN"
+  processedBy String?      // admin userId who approved/processed
+  providerRef String?      // provider refund transaction reference
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Restrict)
+
+  @@index([status])
+  @@index([createdAt])
+}
+
+enum RefundStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
 }

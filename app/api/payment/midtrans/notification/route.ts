@@ -641,73 +641,63 @@ export async function POST(
             isRefunded
         ) {
             /*
-             * REFUND GUARD (T2-2 FIX):
-             * Only process refund for orders that are currently PAID.
-             * Ignore refund for CANCELLED/PENDING/FAILED orders.
-             */
-            /*
-             * P0 FIX: CAS update + stock release for refunds.
+             * REFUND WEBHOOK HANDLER
              *
-             * The paymentStatus = 'PAID' guard outside the transaction
-             * is a fast-path filter. The CAS UPDATE inside the
-             * transaction prevents double-processing: if two refund
-             * webhooks arrive concurrently, only one will see
-             * affectedRows > 0 and restore stock.
+             * Uses shared executeRefundCompletion() for consistent
+             * refund processing across admin and webhook paths.
+             *
+             * Steps:
+             * 1. Find or create Refund record
+             * 2. Call executeRefundCompletion() (CAS + restore)
              */
             const refundedRef = body.transaction_id || existingOrder.paymentReference;
 
-            let refundSettled = false;
-
-            await prisma.$transaction(async (tx) => {
-                const affectedRows = await tx.$executeRaw`
-                    UPDATE \`Order\`
-                    SET paymentStatus = 'REFUNDED',
-                        paymentReference = COALESCE(${refundedRef}, paymentReference)
-                    WHERE id = ${existingOrder.id}
-                      AND paymentStatus = 'PAID'
-                `;
-
-                if (affectedRows === 0) {
-                    /*
-                     * Already REFUNDED (duplicate webhook → idempotent)
-                     * or not PAID (should not happen given outer guard,
-                     * but defense-in-depth).
-                     */
-                    return;
-                }
-
-                refundSettled = true;
-
-                /*
-                 * RELEASE STOCK:
-                 * A refunded order should not keep reserved inventory.
-                 * Uses conditional updates (GREATEST, saleStock >= qty)
-                 * to prevent double-restoring if stock was already
-                 * released by a concurrent handler.
-                 */
-                await releaseStockAndVoucherForOrder(
-                    tx,
-                    existingOrder.id
-                );
-
-                /*
-                 * AFFILIATE COMMISSION CANCELLATION:
-                 * Cancel commission when order is refunded.
-                 * Only PENDING/APPROVED commissions are cancelled.
-                 * PAID commissions require manual admin review.
-                 */
-                const { cancelCommissionForOrder } =
-                    await import("@/lib/affiliate/cancel-commission");
-                await cancelCommissionForOrder(
-                    tx,
-                    existingOrder.id,
-                    "ORDER_REFUNDED"
-                );
+            /*
+             * FIND OR CREATE REFUND RECORD:
+             * - If user-initiated refund exists → use it
+             * - If provider-initiated (no existing record) → create one
+             */
+            let existingRefund = await prisma.refund.findUnique({
+                where: { orderId: existingOrder.id },
+                select: { id: true, status: true },
             });
+
+            if (!existingRefund) {
+                /*
+                 * Provider-initiated refund (not user-requested).
+                 * Create a Refund record for tracking.
+                 * Amount is SERVER-AUTHORITATIVE: order.total from DB.
+                 */
+                const newRefund = await prisma.refund.create({
+                    data: {
+                        orderId: existingOrder.id,
+                        amount: existingOrder.total,
+                        status: "PROCESSING",
+                        requestedBy: "PROVIDER",
+                        providerRef: refundedRef || undefined,
+                    },
+                });
+                existingRefund = { id: newRefund.id, status: "PROCESSING" };
+            }
+
+            /*
+             * EXECUTE REFUND COMPLETION:
+             * Shared function handles CAS, stock, voucher,
+             * affiliate, spin-wheel, and audit logging.
+             * Idempotent: duplicate webhooks return safe no-op.
+             */
+            const { executeRefundCompletion } = await import(
+                "@/lib/refund"
+            );
+            const result = await executeRefundCompletion(
+                existingRefund.id,
+                refundedRef || undefined,
+                "MIDTRANS_WEBHOOK"
+            );
 
             return json({
                 success: true,
-                message: refundSettled
+                message: result.ok
                     ? "Refund processed, stock and voucher restored."
                     : "Refund already processed (idempotent).",
             });

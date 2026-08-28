@@ -134,6 +134,7 @@ function getStatusLabel(status: string) {
         SHIPPED: "Sedang Dikirim",
         COMPLETED: "Selesai",
         CANCELLED: "Dibatalkan",
+        REFUND_PENDING: "Refund Diproses",
     };
 
     return (
@@ -172,6 +173,9 @@ function getStatusClass(status: string) {
         case "PAID":
         case "PROCESSING":
             return "bg-yellow-100 text-yellow-700";
+
+        case "REFUND_PENDING":
+            return "bg-orange-100 text-orange-700";
 
         default:
             return "bg-gray-100 text-gray-700";
@@ -420,6 +424,196 @@ export default function OrderDetailPage() {
                                 order.status
                             )}
                         </span>
+                    </div>
+
+                    {/* ACTION BUTTONS */}
+                    <div className="mt-4 flex flex-wrap gap-3">
+                        {/* BAYAR LAGI — for failed/expired/pending payment */}
+                        {(
+                            (order.paymentStatus === "FAILED" ||
+                                order.paymentStatus === "EXPIRED" ||
+                                (order.paymentStatus === "PENDING" &&
+                                    order.status === "PENDING")) &&
+                            order.status !== "COMPLETED" &&
+                            order.status !== "SHIPPED" &&
+                            order.status !== "REFUND_PENDING"
+                        ) && (
+                            <button
+                                onClick={async () => {
+                                    try {
+                                        const response = await fetch(
+                                            `/api/orders/${order.id}/repay`,
+                                            {
+                                                method: "POST",
+                                                headers: {
+                                                    "Content-Type":
+                                                        "application/json",
+                                                },
+                                                body: JSON.stringify({
+                                                    paymentMethod:
+                                                        order.paymentMethod ===
+                                                        "COD"
+                                                            ? "BANK_TRANSFER"
+                                                            : order.paymentMethod,
+                                                }),
+                                            }
+                                        );
+
+                                        const result =
+                                            await response.json();
+
+                                        if (
+                                            !response.ok ||
+                                            !result.success
+                                        ) {
+                                            throw new Error(
+                                                result.message ||
+                                                    "Gagal memproses pembayaran ulang."
+                                            );
+                                        }
+
+                                        toast.success(
+                                            "Siap! Mengarahkan ke halaman pembayaran..."
+                                        );
+
+                                        // Redirect to payment page
+                                        window.location.href =
+                                            "/checkout/payment-finish?payment=" +
+                                            encodeURIComponent(
+                                                result.data.orderNumber
+                                            );
+                                    } catch (error) {
+                                        toast.error(
+                                            error instanceof Error
+                                                ? error.message
+                                                : "Gagal memproses pembayaran ulang."
+                                        );
+                                    }
+                                }}
+                                className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white hover:bg-blue-700"
+                            >
+                                💳 Bayar Lagi
+                            </button>
+                        )}
+
+                        {/* MINTA REFUND — for paid orders */}
+                        {order.paymentStatus === "PAID" &&
+                            (order.status === "PAID" ||
+                                order.status === "PROCESSING") && (
+                            <button
+                                onClick={async () => {
+                                    if (
+                                        !confirm(
+                                            "Ajukan permintaan refund untuk pesanan ini?"
+                                        )
+                                    ) {
+                                        return;
+                                    }
+
+                                    try {
+                                        const response = await fetch(
+                                            `/api/orders/${order.id}/refund`,
+                                            {
+                                                method: "POST",
+                                                headers: {
+                                                    "Content-Type":
+                                                        "application/json",
+                                                },
+                                                body: JSON.stringify({}),
+                                            }
+                                        );
+
+                                        const result =
+                                            await response.json();
+
+                                        if (
+                                            !response.ok ||
+                                            !result.success
+                                        ) {
+                                            throw new Error(
+                                                result.message ||
+                                                    "Gagal mengajukan refund."
+                                            );
+                                        }
+
+                                        toast.success(
+                                            "Permintaan refund berhasil diajukan!"
+                                        );
+
+                                        loadOrder();
+                                    } catch (error) {
+                                        toast.error(
+                                            error instanceof Error
+                                                ? error.message
+                                                : "Gagal mengajukan refund."
+                                        );
+                                    }
+                                }}
+                                className="inline-flex items-center gap-2 rounded-xl border border-red-300 bg-white px-5 py-3 text-sm font-semibold text-red-600 hover:bg-red-50"
+                            >
+                                🔄 Minta Refund
+                            </button>
+                        )}
+
+                        {/* REFUND PENDING STATUS */}
+                        {order.status === "REFUND_PENDING" && (
+                            <div className="inline-flex items-center gap-2 rounded-xl bg-yellow-50 px-5 py-3 text-sm font-semibold text-yellow-700">
+                                ⏳ Refund sedang diproses...
+                            </div>
+                        )}
+
+                        {/* CANCEL BUTTON — for pending unpaid orders */}
+                        {order.paymentStatus === "PENDING" &&
+                            order.status === "PENDING" && (
+                            <button
+                                onClick={async () => {
+                                    if (
+                                        !confirm(
+                                            "Batalkan pesanan ini?"
+                                        )
+                                    ) {
+                                        return;
+                                    }
+
+                                    try {
+                                        const response = await fetch(
+                                            `/api/orders/${order.id}/cancel`,
+                                            {
+                                                method: "POST",
+                                            }
+                                        );
+
+                                        const result =
+                                            await response.json();
+
+                                        if (
+                                            !response.ok ||
+                                            !result.success
+                                        ) {
+                                            throw new Error(
+                                                result.message ||
+                                                    "Gagal membatalkan pesanan."
+                                            );
+                                        }
+
+                                        toast.success(
+                                            "Pesanan berhasil dibatalkan."
+                                        );
+
+                                        loadOrder();
+                                    } catch (error) {
+                                        toast.error(
+                                            error instanceof Error
+                                                ? error.message
+                                                : "Gagal membatalkan pesanan."
+                                        );
+                                    }
+                                }}
+                                className="inline-flex items-center gap-2 rounded-xl border border-gray-300 bg-white px-5 py-3 text-sm font-semibold text-gray-600 hover:bg-gray-50"
+                            >
+                                ✕ Batalkan Pesanan
+                            </button>
+                        )}
                     </div>
                 </div>
 

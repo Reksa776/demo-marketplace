@@ -68,10 +68,12 @@ function date(value: string) {
 function statusLabel(status: string) {
     switch (status) {
         case "PENDING": return "Pending";
+        case "PAID": return "Dibayar";
         case "PROCESSING": return "Diproses";
         case "SHIPPED": return "Dikirim";
         case "COMPLETED": return "Selesai";
         case "CANCELLED": return "Dibatalkan";
+        case "REFUND_PENDING": return "Refund Diproses";
         default: return status;
     }
 }
@@ -79,10 +81,12 @@ function statusLabel(status: string) {
 function statusClass(status: string) {
     switch (status) {
         case "PENDING": return "bg-amber-50 text-amber-700 ring-1 ring-inset ring-amber-200";
+        case "PAID": return "bg-yellow-50 text-yellow-700 ring-1 ring-inset ring-yellow-200";
         case "PROCESSING": return "bg-blue-50 text-blue-700 ring-1 ring-inset ring-blue-200";
         case "SHIPPED": return "bg-indigo-50 text-indigo-700 ring-1 ring-inset ring-indigo-200";
         case "COMPLETED": return "bg-emerald-50 text-emerald-700 ring-1 ring-inset ring-emerald-200";
         case "CANCELLED": return "bg-red-50 text-red-700 ring-1 ring-inset ring-red-200";
+        case "REFUND_PENDING": return "bg-orange-50 text-orange-700 ring-1 ring-inset ring-orange-200";
         default: return "bg-gray-50 text-gray-600 ring-1 ring-inset ring-gray-200";
     }
 }

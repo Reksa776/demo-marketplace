@@ -157,4 +157,12 @@ export const rateLimiters = {
     // File upload — prevent upload flooding
     upload: (userId: string) =>
         checkRateLimit(`upload:${userId}`, 20, 60 * 1000), // 20 per minute
+
+    // Refund request — prevent rapid refund attempts
+    refundRequest: (userId: string) =>
+        checkRateLimit(`refund:${userId}`, 3, 60 * 60 * 1000), // 3 per hour
+
+    // Repayment — prevent rapid repayment attempts
+    repayment: (userId: string) =>
+        checkRateLimit(`repay:${userId}`, 5, 5 * 60 * 1000), // 5 per 5 min
 };
