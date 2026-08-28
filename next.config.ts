@@ -40,7 +40,7 @@ const nextConfig: NextConfig = {
     ],
     allowedDevOrigins: [
         "192.168.2.49",
-        "103.93.132.21",
+        "103.93.132.214",
         "202.73.25.122",
         "demosolusisejalan.my.id",
         "debut-thanks-spray-wine.trycloudflare.com",
