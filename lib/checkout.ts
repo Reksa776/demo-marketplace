@@ -2067,18 +2067,19 @@ export async function rollbackCheckoutOrder(
                         item.variantId ===
                         null
                     ) {
-                        throw new Error(
-                            `Variant ID tidak ditemukan untuk OrderItem ${item.id}.`
-                        );
+                        // Variant was deleted (onDelete: SetNull).
+                        // Cannot restore to cart without a valid variantId.
+                        // Stock was already released when variant was deleted.
+                        continue;
                     }
 
                     if (
                         item.productId ===
                         null
                     ) {
-                        throw new Error(
-                            `Product ID tidak ditemukan untuk OrderItem ${item.id}.`
-                        );
+                        // Product was deleted (onDelete: SetNull).
+                        // Cannot restore to cart without a valid productId.
+                        continue;
                     }
 
                     const existingCartItem =
@@ -2164,18 +2165,43 @@ export async function rollbackCheckoutOrder(
                     item.variantId ===
                     null
                 ) {
-                    throw new Error(
-                        `Variant ID tidak ditemukan untuk OrderItem ${item.id}.`
-                    );
+                    // Variant was deleted (onDelete: SetNull).
+                    // Stock was already released when variant was deleted.
+                    // Restore Product.sold only.
+                    if (
+                        item.productId !== null
+                    ) {
+                        await tx.$executeRaw`
+                            UPDATE product
+                            SET sold = GREATEST(0, sold - ${item.quantity})
+                            WHERE id = ${item.productId}
+                        `;
+                    }
+                    continue;
                 }
 
                 if (
                     item.productId ===
                     null
                 ) {
-                    throw new Error(
-                        `Product ID tidak ditemukan untuk OrderItem ${item.id}.`
+                    // Product was deleted (onDelete: SetNull).
+                    // Variant stock still needs restoration.
+                    await tx.productVariant.update(
+                        {
+                            where: {
+                                id:
+                                    item.variantId,
+                            },
+
+                            data: {
+                                stock: {
+                                    increment:
+                                        item.quantity,
+                                },
+                            },
+                        }
                     );
+                    continue;
                 }
 
                 /*
