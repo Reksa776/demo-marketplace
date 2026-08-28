@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { resolveBatchPrices } from "@/lib/marketing/batch-pricing";
+import type { CartStockStatus } from "@/lib/cart-validation";
 
 /**
  * ==========================================
@@ -49,10 +50,50 @@ async function formatCartResponse(
         pricingResults.map((r) => [r.variantId, r])
     );
 
+    // ==========================================
+    // BATCH: Flash sale stock for all variants
+    // ==========================================
+    const variantIds = [
+        ...new Set(cartItems.map((item) => item.variantId)),
+    ];
+
+    const flashSales = await prisma.flashSale.findMany({
+        where: {
+            variantId: { in: variantIds },
+            isActive: true,
+        },
+        select: {
+            id: true,
+            variantId: true,
+            saleStock: true,
+        },
+    });
+
+    const flashSaleStockMap = new Map(
+        flashSales.map((fs) => [fs.variantId, fs])
+    );
+
     const formattedItems = cartItems.map((item) => {
         const pricing = pricingMap.get(item.variantId);
         const rawPrice = Number(item.variant.price);
         const effectivePrice = pricing?.effectivePrice ?? rawPrice;
+
+        // ==========================================
+        // STOCK STATUS
+        // ==========================================
+        // Flash sale items: authoritative stock is saleStock
+        // Regular items: authoritative stock is variant.stock
+        const flashSale = flashSaleStockMap.get(item.variantId);
+        const availableStock = flashSale
+            ? flashSale.saleStock
+            : item.variant.stock;
+
+        let stockStatus: CartStockStatus = "OK";
+        if (availableStock <= 0) {
+            stockStatus = "OUT_OF_STOCK";
+        } else if (item.quantity > availableStock) {
+            stockStatus = "INSUFFICIENT_STOCK";
+        }
 
         return {
             id: item.id,
@@ -71,15 +112,23 @@ async function formatCartResponse(
             bulkDiscountName: pricing?.bulkDiscountName ?? null,
             quantity: Number(item.quantity),
             stock: item.variant.stock,
+            availableStock,
+            stockStatus,
+            flashSaleId: flashSale?.id ?? null,
             weight: Number(item.variant.weight),
         };
     });
+
+    const invalidCount = formattedItems.filter(
+        (item) => item.stockStatus !== "OK"
+    ).length;
 
     return {
         cart: {
             id: cartData.id,
             userId: cartData.userId,
             items: formattedItems,
+            invalidCount,
         },
     };
 }

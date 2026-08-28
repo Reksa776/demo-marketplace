@@ -46,6 +46,9 @@ type CheckoutItem = {
     price: number;
     quantity: number;
 
+    availableStock: number;
+    stockStatus: "OK" | "OUT_OF_STOCK" | "INSUFFICIENT_STOCK" | "VARIANT_NOT_FOUND";
+
     /*
      * Berat satu variant.
      */
@@ -63,6 +66,7 @@ type CheckoutData = {
     items: CheckoutItem[];
     subtotal: number;
     totalWeight: number;
+    invalidCount: number;
     addresses: Address[];
 
     store: {
@@ -1512,6 +1516,15 @@ export default function CheckoutPage() {
         if (snapProcessingRef.current) {
             return;
         }
+
+        // Pre-check: reject if any item has insufficient stock
+        if (data && data.invalidCount > 0) {
+            toast.error(
+                "Ada item dengan stok tidak mencukupi. Kembali ke keranjang untuk memperbaiki."
+            );
+            return;
+        }
+
         if (!selectedAddress) {
             toast.error(
                 "Pilih alamat pengiriman."
@@ -1815,6 +1828,23 @@ export default function CheckoutPage() {
                                 Produk
                             </h2>
 
+                            {data.invalidCount > 0 && (
+                                <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+                                    <p className="text-sm font-medium text-amber-800">
+                                        ⚠️ {data.invalidCount} produk memiliki stok tidak mencukupi.
+                                    </p>
+                                    <p className="mt-1 text-xs text-amber-600">
+                                        Kembali ke keranjang untuk memperbaiki sebelum checkout.
+                                    </p>
+                                    <a
+                                        href="/cart"
+                                        className="mt-2 inline-block text-xs font-medium text-amber-700 underline hover:text-amber-900"
+                                    >
+                                        Buka Keranjang →
+                                    </a>
+                                </div>
+                            )}
+
                             <div className="mt-5 divide-y">
 
                                 {data.items.map(
@@ -1855,6 +1885,18 @@ export default function CheckoutPage() {
                                                         item.variantName
                                                     }
                                                 </p>
+
+                                                {item.stockStatus === "OUT_OF_STOCK" && (
+                                                    <p className="mt-1 text-xs font-medium text-red-500">
+                                                        ❌ Stok habis
+                                                    </p>
+                                                )}
+
+                                                {item.stockStatus === "INSUFFICIENT_STOCK" && (
+                                                    <p className="mt-1 text-xs font-medium text-amber-500">
+                                                        ⚠️ Stok hanya tersedia {item.availableStock}
+                                                    </p>
+                                                )}
 
                                                 <p className="mt-2 text-sm">
                                                     {
@@ -2967,13 +3009,25 @@ export default function CheckoutPage() {
 
                         </div>
 
+                        {data && data.invalidCount > 0 && (
+                            <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+                                <p className="text-sm font-medium text-amber-800">
+                                    ⚠️ {data.invalidCount} produk memiliki stok tidak mencukupi.
+                                </p>
+                                <p className="mt-1 text-xs text-amber-600">
+                                    Kembali ke keranjang untuk mengurangi jumlah atau menghapus item.
+                                </p>
+                            </div>
+                        )}
+
                         <button
                             type="button"
                             onClick={createOrder}
                             disabled={
                                 creatingOrder ||
                                 !address ||
-                                !selectedShipping
+                                !selectedShipping ||
+                                (data ? data.invalidCount > 0 : false)
                             }
                             className="mt-6 w-full rounded-xl bg-rose-600 px-5 py-3 font-semibold text-white transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:bg-gray-300"
                         >
@@ -2983,7 +3037,9 @@ export default function CheckoutPage() {
                                     ? "Pilih Alamat"
                                     : !selectedShipping
                                         ? "Pilih Pengiriman"
-                                        : "Buat Pesanan"}
+                                        : (data && data.invalidCount > 0)
+                                            ? "Stok Tidak Mencukupi"
+                                            : "Buat Pesanan"}
                         </button>
 
                     </aside>

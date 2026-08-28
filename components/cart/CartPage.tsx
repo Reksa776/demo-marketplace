@@ -31,7 +31,10 @@ type CartItem = {
     flashSaleName: string | null;
     bulkDiscountName: string | null;
     quantity: number;
-    stock: number;
+    stock: number;            // ProductVariant.stock (regular only)
+    availableStock: number;   // actual stock (flash sale or variant)
+    stockStatus: "OK" | "OUT_OF_STOCK" | "INSUFFICIENT_STOCK" | "VARIANT_NOT_FOUND";
+    flashSaleId: number | null;
     weight: number;
 };
 
@@ -39,6 +42,7 @@ type Cart = {
     id: number | null;
     userId: string;
     items: CartItem[];
+    invalidCount: number;
 };
 
 export default function CartPage() {
@@ -200,6 +204,8 @@ export default function CartPage() {
     }
 
     const items = cart?.items ?? [];
+    const invalidCount = cart?.invalidCount ?? 0;
+    const hasInvalidItems = invalidCount > 0;
 
     /**
      * Subtotal uses effectivePrice (marketing-adjusted),
@@ -286,7 +292,11 @@ export default function CartPage() {
                             return (
                                 <div
                                     key={item.id}
-                                    className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm"
+                                    className={`rounded-2xl border bg-white p-4 shadow-sm ${
+                                        item.stockStatus !== "OK"
+                                            ? "border-amber-200"
+                                            : "border-gray-100"
+                                    }`}
                                 >
                                     <div className="flex gap-4">
 
@@ -332,6 +342,18 @@ export default function CartPage() {
                                                     {item.bulkDiscountName && (
                                                         <p className="mt-0.5 text-xs font-medium text-blue-500">
                                                             📦 {item.bulkDiscountName}
+                                                        </p>
+                                                    )}
+
+                                                    {item.stockStatus === "OUT_OF_STOCK" && (
+                                                        <p className="mt-0.5 text-xs font-medium text-red-500">
+                                                            ❌ Stok habis
+                                                        </p>
+                                                    )}
+
+                                                    {item.stockStatus === "INSUFFICIENT_STOCK" && (
+                                                        <p className="mt-0.5 text-xs font-medium text-amber-500">
+                                                            ⚠️ Stok hanya tersedia {item.availableStock}
                                                         </p>
                                                     )}
                                                 </div>
@@ -496,9 +518,30 @@ export default function CartPage() {
                                 </div>
                             </div>
 
+                            {hasInvalidItems ? (
+                                <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+                                    <p className="text-sm font-medium text-amber-800">
+                                        ⚠️ {invalidCount} produk memiliki stok tidak mencukupi.
+                                    </p>
+                                    <p className="mt-1 text-xs text-amber-600">
+                                        Kurangi jumlah atau hapus item sebelum checkout.
+                                    </p>
+                                </div>
+                            ) : null}
+
                             <Link
                                 href="/checkout"
-                                className="flex h-12 w-full items-center justify-center rounded-xl bg-rose-600 px-4 text-sm font-semibold text-white transition hover:bg-rose-700"
+                                className={`flex h-12 w-full items-center justify-center rounded-xl px-4 text-sm font-semibold text-white transition ${
+                                    hasInvalidItems
+                                        ? "cursor-not-allowed bg-gray-300"
+                                        : "bg-rose-600 hover:bg-rose-700"
+                                }`}
+                                onClick={(e) => {
+                                    if (hasInvalidItems) {
+                                        e.preventDefault();
+                                        toast.error("Hapus atau kurangi item yang stoknya tidak mencukupi terlebih dahulu.");
+                                    }
+                                }}
                             >
                                 Lanjut ke Checkout
                             </Link>

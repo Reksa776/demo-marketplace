@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { resolveBatchPrices } from "@/lib/marketing/batch-pricing";
+import type { CartStockStatus } from "@/lib/cart-validation";
 
 export async function GET() {
     try {
@@ -159,7 +160,30 @@ export async function GET() {
         );
 
         // ==========================================
-        // ITEMS (with marketing prices)
+        // BATCH: Flash sale stock for all variants
+        // ==========================================
+        const variantIds = [
+            ...new Set(cart.items.map((item) => item.variantId)),
+        ];
+
+        const flashSales = await prisma.flashSale.findMany({
+            where: {
+                variantId: { in: variantIds },
+                isActive: true,
+            },
+            select: {
+                id: true,
+                variantId: true,
+                saleStock: true,
+            },
+        });
+
+        const flashSaleStockMap = new Map(
+            flashSales.map((fs) => [fs.variantId, fs])
+        );
+
+        // ==========================================
+        // ITEMS (with marketing prices + stock status)
         // ==========================================
 
         const items = cart.items.map(
@@ -206,6 +230,19 @@ export async function GET() {
                 const totalWeight =
                     weight * quantity;
 
+                // Stock status
+                const flashSale = flashSaleStockMap.get(item.variantId);
+                const availableStock = flashSale
+                    ? flashSale.saleStock
+                    : item.variant.stock;
+
+                let stockStatus: CartStockStatus = "OK";
+                if (availableStock <= 0) {
+                    stockStatus = "OUT_OF_STOCK";
+                } else if (quantity > availableStock) {
+                    stockStatus = "INSUFFICIENT_STOCK";
+                }
+
                 return {
                     id: item.id,
 
@@ -243,6 +280,8 @@ export async function GET() {
                         "ORIGINAL",
 
                     quantity,
+                    availableStock,
+                    stockStatus,
 
                     weight,
                     totalWeight,
@@ -272,6 +311,14 @@ export async function GET() {
         );
 
         // ==========================================
+        // STOCK VALIDATION
+        // ==========================================
+
+        const invalidCount = items.filter(
+            (item) => item.stockStatus !== "OK"
+        ).length;
+
+        // ==========================================
         // RESPONSE
         // ==========================================
 
@@ -284,6 +331,8 @@ export async function GET() {
                 subtotal,
 
                 totalWeight,
+
+                invalidCount,
 
                 addresses,
 
