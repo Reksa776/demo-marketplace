@@ -57,7 +57,7 @@ type AddressForm = {
     cityId: string;
 
     district: string;
-    districtId: string
+    districtId: string;
 
     subdistrict: string;
     subdistrictId: string;
@@ -2589,7 +2589,7 @@ export default function BuyNowPage({
                             Coba Lagi
                         </button>
                     </div>
-                </div>
+                {/* </div> */}
             </main>
         );
     }
