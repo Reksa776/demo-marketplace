@@ -57,7 +57,7 @@ type AddressForm = {
     cityId: string;
 
     district: string;
-    districtId: string;
+    districtId: string
 
     subdistrict: string;
     subdistrictId: string;
