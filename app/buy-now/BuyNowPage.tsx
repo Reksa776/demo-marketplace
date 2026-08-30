@@ -2589,7 +2589,7 @@ export default function BuyNowPage({
                             Coba Lagi
                         </button>
                     </div>
-                {/* </div> */}
+                </div>
             </main>
         );
     }
