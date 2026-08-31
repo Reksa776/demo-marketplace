@@ -442,7 +442,7 @@ export async function GET(
  *
  * Untuk payment non-COD, frontend menggunakan:
  *
- * /api/buy-now/midtrans
+ * /api/buy-now/ipaymu
  */
 export async function POST(
     request: NextRequest
@@ -539,7 +539,7 @@ export async function POST(
             "COD"
         ) {
             return jsonError(
-                "Gunakan endpoint Midtrans untuk pembayaran non-COD."
+                "Gunakan endpoint iPaymu untuk pembayaran non-COD."
             );
         }
 

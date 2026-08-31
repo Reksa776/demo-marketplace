@@ -22,7 +22,7 @@ import { createAuditLog } from "@/lib/admin/audit-log";
  * - Idempotent (status checks prevent double processing)
  *
  * NOTE: For actual provider refund API calls,
- * admin should use the Midtrans/iPaymu dashboard
+ * admin should use the iPaymu dashboard
  * or a separate endpoint that calls the provider API.
  */
 

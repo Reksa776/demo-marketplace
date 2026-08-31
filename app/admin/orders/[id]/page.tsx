@@ -1103,7 +1103,7 @@ export default function AdminOrderDetailPage() {
                                     </div>
 
                                     <p className="text-[11px] text-orange-500">
-                                        Setelah menyetujui, proses refund melalui dashboard Midtrans/iPaymu.
+                                        Setelah menyetujui, proses refund melalui dashboard iPaymu.
                                     </p>
                                 </div>
                             </div>

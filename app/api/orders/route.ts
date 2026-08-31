@@ -117,7 +117,7 @@ export async function POST(
                     success: false,
 
                     message:
-                        "Pembayaran non-COD harus melalui API Midtrans.",
+                        "Pembayaran non-COD harus melalui API iPaymu.",
                 },
                 {
                     status: 400,

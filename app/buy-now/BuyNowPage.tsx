@@ -195,7 +195,7 @@ const emptyAddressForm: AddressForm = {
  * JANGAN pakai helper ini untuk:
  *
  * POST create order
- * POST create Midtrans transaction
+ * POST create order
  * POST save address
  *
  * supaya tidak berpotensi membuat data/transaksi dobel.
@@ -500,24 +500,10 @@ export default function BuyNowPage({
 
     /*
      * =====================================================
-     * PAYMENT READY (always true for redirect flow)
+     * iPaymu redirect flow — no client-side
+     * payment library needed.
      * =====================================================
      */
-
-    const snapReady = true;
-    const snapLoading = false;
-    const snapError = null;
-
-    /*
-     * =====================================================
-     * LOAD MIDTRANS SNAP.JS
-     * =====================================================
-     */
-
-    // iPaymu redirect flow — no client-side
-    // payment library needed.
-    // Snap.js loading removed.
-    useEffect(() => {}, []);
 
     /*
      * =====================================================
@@ -2266,17 +2252,6 @@ export default function BuyNowPage({
             return;
         }
 
-        if (
-            !snapReady
-        ) {
-            toast.error(
-                snapError ||
-                "Midtrans belum siap. Silakan tunggu atau refresh halaman."
-            );
-
-            return;
-        }
-
         try {
             setCreatingOrder(
                 true
@@ -2385,7 +2360,7 @@ export default function BuyNowPage({
                     ? error.message
                     : "Gagal membuat pembayaran."
             );
-
+        } finally {
             setCreatingOrder(
                 false
             );
@@ -2524,15 +2499,7 @@ export default function BuyNowPage({
     const paymentButtonDisabled =
         creatingOrder ||
         !address ||
-        !selectedShipping ||
-        (
-            paymentMethod !==
-            "COD" &&
-            (
-                snapLoading ||
-                !snapReady
-            )
-        );
+        !selectedShipping;
 
     /*
      * =====================================================
@@ -3612,7 +3579,7 @@ export default function BuyNowPage({
                                         <div className="text-sm text-gray-500">
                                             Pembayaran
                                             melalui
-                                            Midtrans.
+                                            iPaymu.
                                         </div>
                                     </div>
                                 </label>
@@ -3649,7 +3616,7 @@ export default function BuyNowPage({
                                             GoPay /
                                             ShopeePay
                                             melalui
-                                            Midtrans.
+                                            iPaymu.
                                         </div>
                                     </div>
                                 </label>
@@ -3686,39 +3653,13 @@ export default function BuyNowPage({
                                             Bayar
                                             menggunakan
                                             QRIS melalui
-                                            Midtrans.
+                                            iPaymu.
                                         </div>
                                     </div>
                                 </label>
                             </div>
 
-                            {paymentMethod !==
-                                "COD" && (
-                                    <div className="mt-4 rounded-2xl bg-gray-50 p-4">
-                                        {snapLoading ? (
-                                            <div className="text-sm text-gray-500">
-                                                Memuat
-                                                Midtrans
-                                                Snap...
-                                            </div>
-                                        ) : snapError ? (
-                                            <div className="text-sm text-red-600">
-                                                {snapError}
-                                            </div>
-                                        ) : snapReady ? (
-                                            <div className="text-sm text-green-600">
-                                                Midtrans
-                                                siap
-                                                digunakan.
-                                            </div>
-                                        ) : (
-                                            <div className="text-sm text-gray-500">
-                                                Midtrans
-                                                belum siap.
-                                            </div>
-                                        )}
-                                    </div>
-                                )}
+
                         </section>
                     </div>
 
@@ -3958,11 +3899,7 @@ export default function BuyNowPage({
                                         : paymentMethod ===
                                             "COD"
                                             ? "Buat Pesanan"
-                                            : snapLoading
-                                                ? "Memuat Pembayaran..."
-                                                : !snapReady
-                                                    ? "Midtrans Tidak Siap"
-                                                    : "Bayar Sekarang"}
+                                            : "Bayar Sekarang"}
                         </button>
 
                         {/* =================================================

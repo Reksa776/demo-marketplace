@@ -326,7 +326,6 @@ export async function approveRefund(
  *
  * Used by:
  * - completeRefund() (admin endpoint)
- * - Midtrans webhook handler
  * - iPaymu webhook handler
  *
  * This is the CANONICAL refund completion implementation.
@@ -623,7 +622,7 @@ export async function findRefundByOrderId(orderId: number) {
  *
  * CAS-protected transition for webhook refund processing.
  *
- * Used by Midtrans and iPaymu webhook handlers.
+ * Used by payment webhook handlers.
  * Handles the case where a user-initiated refund is PENDING
  * and the provider confirms the refund before admin approval.
  *

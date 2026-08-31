@@ -398,60 +398,8 @@ export default function AffiliateDashboard() {
                 </div>
             </div>
 
-            {/* ===== REFERRAL LINK CENTER ===== */}
-            <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
-                <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-                    <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2">
-                            <FiLink size={16} className="text-gray-400" />
-                            <p className="text-xs font-medium text-gray-500">Referral Link Anda</p>
-                        </div>
-                        <div className="mt-2 flex items-center gap-3">
-                            <p className="font-mono text-2xl font-bold tracking-wider text-gray-900">{affiliate.code}</p>
-                        </div>
-                        <div className="mt-2 flex items-center gap-2 rounded-lg bg-gray-50 px-3 py-2">
-                            <code className="min-w-0 flex-1 truncate text-xs text-gray-500">{getReferralUrl()}</code>
-                        </div>
-                        <p className="mt-2 text-[11px] text-gray-400">Komisi {affiliate.commissionRate}% per order dari subtotal</p>
-                    </div>
-
-                    <div className="flex flex-wrap gap-2">
-                        <button type="button" onClick={() => copyToClipboard(getReferralUrl(), "link")}
-                            className="inline-flex items-center gap-2 rounded-xl bg-gray-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-gray-800">
-                            {copied === "link" ? <FiCheck size={14} /> : <FiCopy size={14} />}
-                            {copied === "link" ? "Tersalin!" : "Copy Link"}
-                        </button>
-                        <button type="button" onClick={() => copyToClipboard(affiliate.code, "code")}
-                            className="inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 transition hover:bg-gray-50">
-                            {copied === "code" ? <FiCheck size={14} /> : <FiCopy size={14} />}
-                            {copied === "code" ? "Tersalin!" : "Copy Kode"}
-                        </button>
-                        <button type="button" onClick={shareWhatsApp}
-                            className="inline-flex items-center gap-2 rounded-xl bg-green-500 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-green-600">
-                            <FiMessageCircle size={14} /> WhatsApp
-                        </button>
-                        <button type="button" onClick={shareFacebook}
-                            className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-blue-700">
-                            <FiExternalLink size={14} /> Facebook
-                        </button>
-                        <button type="button" onClick={shareTelegram}
-                            className="inline-flex items-center gap-2 rounded-xl bg-sky-500 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-sky-600">
-                            <FiSend size={14} /> Telegram
-                        </button>
-                        <button type="button" onClick={shareNative}
-                            className="inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 transition hover:bg-gray-50">
-                            <FiShare2 size={14} /> Share
-                        </button>
-                        <Link href="/affiliate/payouts"
-                            className="inline-flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-sm font-medium text-emerald-700 transition hover:bg-emerald-100">
-                            <FiDollarSign size={14} /> Pencairan
-                        </Link>
-                    </div>
-                </div>
-            </div>
-
             {/* ===== KPI CARDS ===== */}
-            <div className="mt-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
+            <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
                 <KpiCard icon={FiMousePointer} label="Total Klik" value={stats.totalClicks.toLocaleString("id-ID")} trend={trend?.clicks ?? null} color="blue" />
                 <KpiCard icon={FiShoppingBag} label="Total Order" value={stats.totalOrders.toLocaleString("id-ID")} sub={`${stats.totalConversions} konversi`} trend={trend?.conversions ?? null} color="violet" />
                 <KpiCard icon={FiTrendingUp} label="Total Penjualan" value={rupiah(stats.totalSales)} sub={`Rata-rata ${rupiah(stats.averageOrderValue)}/order`} trend={trend?.sales ?? null} color="amber" />
@@ -531,6 +479,58 @@ export default function AffiliateDashboard() {
                     <div className="mt-5 rounded-xl bg-gray-50 p-3 text-center">
                         <p className="text-xs text-gray-500">Conversion Rate</p>
                         <p className="mt-1 text-2xl font-bold text-gray-900">{funnel.conversionRate}%</p>
+                    </div>
+                </div>
+            </div>
+
+            {/* ===== REFERRAL LINK CENTER ===== */}
+            <div className="mt-6 rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                    <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                            <FiLink size={16} className="text-gray-400" />
+                            <p className="text-xs font-medium text-gray-500">Referral Link Anda</p>
+                        </div>
+                        <div className="mt-2 flex items-center gap-3">
+                            <p className="font-mono text-2xl font-bold tracking-wider text-gray-900">{affiliate.code}</p>
+                        </div>
+                        <div className="mt-2 flex items-center gap-2 rounded-lg bg-gray-50 px-3 py-2">
+                            <code className="min-w-0 flex-1 truncate text-xs text-gray-500">{getReferralUrl()}</code>
+                        </div>
+                        <p className="mt-2 text-[11px] text-gray-400">Komisi {affiliate.commissionRate}% per order dari subtotal</p>
+                    </div>
+
+                    <div className="flex flex-wrap gap-2">
+                        <button type="button" onClick={() => copyToClipboard(getReferralUrl(), "link")}
+                            className="inline-flex items-center gap-2 rounded-xl bg-gray-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-gray-800">
+                            {copied === "link" ? <FiCheck size={14} /> : <FiCopy size={14} />}
+                            {copied === "link" ? "Tersalin!" : "Copy Link"}
+                        </button>
+                        <button type="button" onClick={() => copyToClipboard(affiliate.code, "code")}
+                            className="inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 transition hover:bg-gray-50">
+                            {copied === "code" ? <FiCheck size={14} /> : <FiCopy size={14} />}
+                            {copied === "code" ? "Tersalin!" : "Copy Kode"}
+                        </button>
+                        <button type="button" onClick={shareWhatsApp}
+                            className="inline-flex items-center gap-2 rounded-xl bg-green-500 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-green-600">
+                            <FiMessageCircle size={14} /> WhatsApp
+                        </button>
+                        <button type="button" onClick={shareFacebook}
+                            className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-blue-700">
+                            <FiExternalLink size={14} /> Facebook
+                        </button>
+                        <button type="button" onClick={shareTelegram}
+                            className="inline-flex items-center gap-2 rounded-xl bg-sky-500 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-sky-600">
+                            <FiSend size={14} /> Telegram
+                        </button>
+                        <button type="button" onClick={shareNative}
+                            className="inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 transition hover:bg-gray-50">
+                            <FiShare2 size={14} /> Share
+                        </button>
+                        <Link href="/affiliate/payouts"
+                            className="inline-flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-sm font-medium text-emerald-700 transition hover:bg-emerald-100">
+                            <FiDollarSign size={14} /> Pencairan
+                        </Link>
                     </div>
                 </div>
             </div>

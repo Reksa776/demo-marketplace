@@ -2746,7 +2746,7 @@ export default function CheckoutPage() {
                                     </div>
 
                                     <div className="text-sm text-gray-500">
-                                        Pembayaran melalui Midtrans
+                                        Pembayaran melalui iPaymu
                                     </div>
                                 </div>
                             </label>
@@ -2771,7 +2771,7 @@ export default function CheckoutPage() {
                                     </div>
 
                                     <div className="text-sm text-gray-500">
-                                        GoPay / ShopeePay melalui Midtrans
+                                        GoPay / ShopeePay melalui iPaymu
                                     </div>
                                 </div>
                             </label>
@@ -2796,7 +2796,7 @@ export default function CheckoutPage() {
                                     </div>
 
                                     <div className="text-sm text-gray-500">
-                                        Bayar menggunakan QRIS melalui Midtrans
+                                        Bayar menggunakan QRIS melalui iPaymu
                                     </div>
                                 </div>
                             </label>

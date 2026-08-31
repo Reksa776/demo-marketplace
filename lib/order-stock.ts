@@ -9,7 +9,7 @@ import { Prisma } from "@prisma/client";
  * expired, failed, or refunded.
  *
  * Used by:
- *   - Midtrans webhook (expire/fail/refund)
+ *   - Payment webhook (expire/fail/refund)
  *   - Admin order status change (PAID → CANCELLED)
  *   - Checkout rollback
  *

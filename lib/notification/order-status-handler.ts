@@ -142,7 +142,7 @@ async function ensureWorkerInitialized(): Promise<void> {
  *
  * Dipanggil dari:
  * 1. Admin order status update (PATCH)
- * 2. Midtrans webhook (notification)
+ * 2. Payment webhook (notification)
  * 3. COD order creation
  *
  * Fungsi ini:

@@ -43,7 +43,7 @@ import type {
  * ↓
  * client redirects to iPaymu page
  *
- * Cart TIDAK dikosongkan (sama seperti Midtrans).
+ * Cart TIDAK dikosongkan.
  */
 
 export async function POST(request: Request) {

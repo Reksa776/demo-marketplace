@@ -81,14 +81,14 @@ const checkoutCode = readFile(
 const ordersRoute = readFile(
     "app/api/orders/route.ts"
 );
-const midtransRoute = readFile(
-    "app/api/payment/midtrans/route.ts"
+const ipaymuRoute = readFile(
+    "app/api/payment/ipaymu/route.ts"
 );
 const buyNowRoute = readFile(
     "app/api/buy-now/route.ts"
 );
-const buyNowMidtrans = readFile(
-    "app/api/buy-now/midtrans/route.ts"
+const buyNowIpaymu = readFile(
+    "app/api/buy-now/ipaymu/route.ts"
 );
 
 test("All 4 routes import createCheckoutOrder", () => {
@@ -99,10 +99,10 @@ test("All 4 routes import createCheckoutOrder", () => {
         "orders route missing createCheckoutOrder"
     );
     assert(
-        midtransRoute.includes(
+        ipaymuRoute.includes(
             "createCheckoutOrder"
         ),
-        "midtrans route missing createCheckoutOrder"
+        "ipaymu route missing createCheckoutOrder"
     );
     assert(
         buyNowRoute.includes(
@@ -111,10 +111,10 @@ test("All 4 routes import createCheckoutOrder", () => {
         "buy-now route missing createCheckoutOrder"
     );
     assert(
-        buyNowMidtrans.includes(
+        buyNowIpaymu.includes(
             "createCheckoutOrder"
         ),
-        "buy-now midtrans missing createCheckoutOrder"
+        "buy-now/ipaymu missing createCheckoutOrder"
     );
 });
 
@@ -122,9 +122,9 @@ test("No client-trusted pricing in checkout", () => {
     const routes = [
         checkoutCode,
         ordersRoute,
-        midtransRoute,
+        ipaymuRoute,
         buyNowRoute,
-        buyNowMidtrans,
+        buyNowIpaymu,
     ];
     for (const code of routes) {
         assert(
@@ -146,19 +146,19 @@ test("No inline voucher in Buy Now routes", () => {
         "Buy Now has inline voucher"
     );
     assert(
-        !buyNowMidtrans.includes(
+        !buyNowIpaymu.includes(
             "voucher.findUnique"
         ),
-        "Buy Now Midtrans has inline voucher"
+        "Buy Now iPaymu has inline voucher"
     );
 });
 
-test("No inline pricing in Buy Now Midtrans", () => {
+test("No inline pricing in Buy Now iPaymu", () => {
     assert(
-        !buyNowMidtrans.includes(
+        !buyNowIpaymu.includes(
             "decimalToNumber(variant.price)"
         ),
-        "Buy Now Midtrans has inline pricing"
+        "Buy Now iPaymu has inline pricing"
     );
 });
 
@@ -460,9 +460,9 @@ test("No ProductVariant.price writes", () => {
     const allCode = [
         checkoutCode,
         ordersRoute,
-        midtransRoute,
+        ipaymuRoute,
         buyNowRoute,
-        buyNowMidtrans,
+        buyNowIpaymu,
     ].join("\n");
     assert(
         !allCode.includes(
@@ -472,18 +472,18 @@ test("No ProductVariant.price writes", () => {
     );
 });
 
-test("Midtrans grossAmount from server", () => {
+test("iPaymu grossAmount from server", () => {
     assert(
-        midtransRoute.includes(
+        ipaymuRoute.includes(
             "result.grossAmount"
         ),
-        "Midtrans doesn't use server grossAmount"
+        "iPaymu doesn't use server grossAmount"
     );
     assert(
-        buyNowMidtrans.includes(
+        buyNowIpaymu.includes(
             "result.grossAmount"
         ),
-        "Buy Now Midtrans doesn't use server grossAmount"
+        "Buy Now iPaymu doesn't use server grossAmount"
     );
 });
 
@@ -639,8 +639,8 @@ console.log("\n10. Structured Logging:");
 
 const ordersRouteCode = readFile("app/api/orders/route.ts");
 const buyNowRouteCode = readFile("app/api/buy-now/route.ts");
-const buyNowMidtransCode = readFile("app/api/buy-now/midtrans/route.ts");
-const midtransCartCode = readFile("app/api/payment/midtrans/route.ts");
+const buyNowIpaymuCode = readFile("app/api/buy-now/ipaymu/route.ts");
+const ipaymuCartCode = readFile("app/api/payment/ipaymu/route.ts");
 
 test("Cart COD route has structured checkout failure log", () => {
     assert(
@@ -658,24 +658,22 @@ test("Buy Now COD route has structured checkout failure log", () => {
     );
 });
 
-test("Buy Now Midtrans route has structured checkout failure log", () => {
+test("Buy Now iPaymu route has structured checkout failure log", () => {
     assert(
-        buyNowMidtransCode.includes('event: "CHECKOUT_FAILURE"') &&
-        buyNowMidtransCode.includes('checkoutType: "BUY_NOW_MIDTRANS"'),
-        "Buy Now Midtrans route missing structured log"
+        buyNowIpaymuCode.includes('event: "CHECKOUT_FAILURE"'),
+        "Buy Now iPaymu route missing structured log"
     );
 });
 
-test("Cart Midtrans route has structured checkout failure log", () => {
+test("Cart iPaymu route has structured checkout failure log", () => {
     assert(
-        midtransCartCode.includes('event: "CHECKOUT_FAILURE"') &&
-        midtransCartCode.includes('checkoutType: "CART_MIDTRANS"'),
-        "Cart Midtrans route missing structured log"
+        ipaymuCartCode.includes('event: "CHECKOUT_FAILURE"'),
+        "Cart iPaymu route missing structured log"
     );
 });
 
 test("Structured logs include timestamp", () => {
-    const routes = [ordersRouteCode, buyNowRouteCode, buyNowMidtransCode, midtransCartCode];
+    const routes = [ordersRouteCode, buyNowRouteCode, buyNowIpaymuCode, ipaymuCartCode];
     for (const route of routes) {
         assert(
             route.includes('timestamp: new Date().toISOString()'),
@@ -684,10 +682,10 @@ test("Structured logs include timestamp", () => {
     }
 });
 
-test("Cart Midtrans log includes orderId for correlation", () => {
+test("Cart iPaymu log includes orderId for correlation", () => {
     assert(
-        midtransCartCode.includes('orderId: createdOrderId'),
-        "Cart Midtrans log missing orderId correlation"
+        ipaymuCartCode.includes('orderId: createdOrderId'),
+        "Cart iPaymu log missing orderId correlation"
     );
 });
 
@@ -697,7 +695,7 @@ test("Cart Midtrans log includes orderId for correlation", () => {
 
 console.log("\n11. Webhook Flash-Sale Integrity:");
 
-const webhookCode = readFile("app/api/payment/midtrans/notification/route.ts");
+const webhookCode = readFile("app/api/payment/ipaymu/notification/route.ts");
 
 test("Webhook expired handler uses atomic CAS", () => {
     assert(
@@ -755,7 +753,7 @@ test("Stock release is conditional (flash sale vs regular)", () => {
     );
 });
 
-test("Webhook verifies Midtrans signature", () => {
+test("Webhook verifies payment signature", () => {
     assert(
         webhookCode.includes('timingSafeEqual') || webhookCode.includes('signature'),
         "Webhook missing signature verification"
@@ -885,8 +883,8 @@ test("All checkout paths pass voucherCode to shared engine", () => {
         "Buy Now COD doesn't pass voucherCode"
     );
     assert(
-        buyNowMidtransCode.includes('voucherCode'),
-        "Buy Now Midtrans doesn't pass voucherCode"
+        buyNowIpaymuCode.includes('voucherCode'),
+        "Buy Now iPaymu doesn't pass voucherCode"
     );
 });
 
@@ -1139,12 +1137,12 @@ test("All 4 order creation endpoints use createCheckoutOrder", () => {
         "Buy Now COD doesn't use createCheckoutOrder"
     );
     assert(
-        buyNowMidtransCode.includes("createCheckoutOrder"),
-        "Buy Now Midtrans doesn't use createCheckoutOrder"
+        buyNowIpaymuCode.includes("createCheckoutOrder"),
+        "Buy Now iPaymu doesn't use createCheckoutOrder"
     );
     assert(
-        midtransCartCode.includes("createCheckoutOrder") || midtransCartCode.includes("createCheckoutOrder"),
-        "Cart Midtrans doesn't use createCheckoutOrder"
+        ipaymuCartCode.includes("createCheckoutOrder") || ipaymuCartCode.includes("createCheckoutOrder"),
+        "Cart iPaymu doesn't use createCheckoutOrder"
     );
 });
 
@@ -1302,8 +1300,8 @@ test("Public products API does not read archived query param", () => {
 console.log("\n17. Order Creation Rate Limiting:");
 
 const ordersRouteRL = readFile("app/api/orders/route.ts");
-const midtransCartRouteRL = readFile("app/api/payment/midtrans/route.ts");
-const buyNowMidtransRouteRL = readFile("app/api/buy-now/midtrans/route.ts");
+const ipaymuCartRouteRL = readFile("app/api/payment/ipaymu/route.ts");
+const buyNowIpaymuRouteRL = readFile("app/api/buy-now/ipaymu/route.ts");
 const buyNowRouteRL = readFile("app/api/buy-now/route.ts");
 const rateLimitLib = readFile("lib/rate-limit.ts");
 
@@ -1359,65 +1357,64 @@ test("POST /api/orders rate limit check is before createCheckoutOrder", () => {
     );
 });
 
-test("POST /api/payment/midtrans imports rateLimiters", () => {
+test("POST /api/payment/ipaymu imports rateLimiters", () => {
     assert(
-        midtransCartRouteRL.includes('import { rateLimiters } from "@/lib/rate-limit"'),
-        "/api/payment/midtrans POST doesn't import rateLimiters"
+        ipaymuCartRouteRL.includes('import { rateLimiters } from "@/lib/rate-limit"'),
+        "/api/payment/ipaymu POST doesn't import rateLimiters"
     );
 });
 
-test("POST /api/payment/midtrans calls rateLimiters.orderCreation with userId", () => {
+test("POST /api/payment/ipaymu calls rateLimiters.orderCreation with userId", () => {
     assert(
-        midtransCartRouteRL.includes("rateLimiters.orderCreation(userId)") ||
-        midtransCartRouteRL.includes("rateLimiters.orderCreation(userId!),"),
-        "/api/payment/midtrans POST doesn't call rateLimiters.orderCreation"
+        ipaymuCartRouteRL.includes("rateLimiters.orderCreation(userId)"),
+        "/api/payment/ipaymu POST doesn't call rateLimiters.orderCreation"
     );
 });
 
-test("POST /api/payment/midtrans returns 429 when rate limited", () => {
+test("POST /api/payment/ipaymu returns 429 when rate limited", () => {
     assert(
-        midtransCartRouteRL.includes("429"),
-        "/api/payment/midtrans POST doesn't return 429"
+        ipaymuCartRouteRL.includes("429"),
+        "/api/payment/ipaymu POST doesn't return 429"
     );
 });
 
-test("POST /api/payment/midtrans rate limit check is before createCheckoutOrder", () => {
-    const rlIdx = midtransCartRouteRL.indexOf("rateLimiters.orderCreation");
-    const coIdx = midtransCartRouteRL.indexOf("await createCheckoutOrder");
+test("POST /api/payment/ipaymu rate limit check is before createCheckoutOrder", () => {
+    const rlIdx = ipaymuCartRouteRL.indexOf("rateLimiters.orderCreation");
+    const coIdx = ipaymuCartRouteRL.indexOf("await createCheckoutOrder");
     assert(
         rlIdx > 0 && coIdx > 0 && rlIdx < coIdx,
-        "/api/payment/midtrans POST rate limit must be before createCheckoutOrder"
+        "/api/payment/ipaymu POST rate limit must be before createCheckoutOrder"
     );
 });
 
-test("POST /api/buy-now/midtrans imports rateLimiters", () => {
+test("POST /api/buy-now/ipaymu imports rateLimiters", () => {
     assert(
-        buyNowMidtransRouteRL.includes('import { rateLimiters } from "@/lib/rate-limit"'),
-        "/api/buy-now/midtrans POST doesn't import rateLimiters"
+        buyNowIpaymuRouteRL.includes('import { rateLimiters } from "@/lib/rate-limit"'),
+        "/api/buy-now/ipaymu POST doesn't import rateLimiters"
     );
 });
 
-test("POST /api/buy-now/midtrans calls rateLimiters.orderCreation with user.id", () => {
+test("POST /api/buy-now/ipaymu calls rateLimiters.orderCreation with user.id", () => {
     assert(
-        buyNowMidtransRouteRL.includes("rateLimiters.orderCreation(user.id!)") ||
-        buyNowMidtransRouteRL.includes("rateLimiters.orderCreation(user.id)"),
-        "/api/buy-now/midtrans POST doesn't call rateLimiters.orderCreation"
+        buyNowIpaymuRouteRL.includes("rateLimiters.orderCreation(user.id!)") ||
+        buyNowIpaymuRouteRL.includes("rateLimiters.orderCreation(user.id)"),
+        "/api/buy-now/ipaymu POST doesn't call rateLimiters.orderCreation"
     );
 });
 
-test("POST /api/buy-now/midtrans returns 429 when rate limited", () => {
+test("POST /api/buy-now/ipaymu returns 429 when rate limited", () => {
     assert(
-        buyNowMidtransRouteRL.includes("429"),
-        "/api/buy-now/midtrans POST doesn't return 429"
+        buyNowIpaymuRouteRL.includes("429"),
+        "/api/buy-now/ipaymu POST doesn't return 429"
     );
 });
 
-test("POST /api/buy-now/midtrans rate limit check is before createCheckoutOrder", () => {
-    const rlIdx = buyNowMidtransRouteRL.indexOf("rateLimiters.orderCreation");
-    const coIdx = buyNowMidtransRouteRL.indexOf("await createCheckoutOrder");
+test("POST /api/buy-now/ipaymu rate limit check is before createCheckoutOrder", () => {
+    const rlIdx = buyNowIpaymuRouteRL.indexOf("rateLimiters.orderCreation");
+    const coIdx = buyNowIpaymuRouteRL.indexOf("await createCheckoutOrder");
     assert(
         rlIdx > 0 && coIdx > 0 && rlIdx < coIdx,
-        "/api/buy-now/midtrans POST rate limit must be before createCheckoutOrder"
+        "/api/buy-now/ipaymu POST rate limit must be before createCheckoutOrder"
     );
 });
 
@@ -1439,7 +1436,7 @@ test("Existing POST /api/buy-now rate limit is before createCheckoutOrder", () =
 });
 
 test("All 4 order endpoints use same rate limiter (orderCreation)", () => {
-    const endpoints = [ordersRouteRL, midtransCartRouteRL, buyNowMidtransRouteRL, buyNowRouteRL];
+    const endpoints = [ordersRouteRL, ipaymuCartRouteRL, buyNowIpaymuRouteRL, buyNowRouteRL];
     for (const code of endpoints) {
         assert(
             code.includes("rateLimiters.orderCreation"),
@@ -1671,7 +1668,7 @@ test("cleanupPendingCheckoutOrders calls cleanup BEFORE $transaction (not inside
 console.log("\n20. Flash Sale Purchase Cleanup on Rollback:");
 
 const checkoutCodeT1 = readFile("lib/checkout.ts");
-const webhookCodeT1 = readFile("app/api/payment/midtrans/notification/route.ts");
+const webhookCodeT1 = readFile("app/api/payment/ipaymu/notification/route.ts");
 
 // Extract rollbackCheckoutOrder section
 const rollbackFnStart = checkoutCodeT1.indexOf("export async function rollbackCheckoutOrder(");
@@ -1802,7 +1799,7 @@ test("Admin PATCH SHIPPED requires tracking number (existing check)", () => {
 
 console.log("\n22. Payment / Webhook Integrity:");
 
-const webhookCodeT2 = readFile("app/api/payment/midtrans/notification/route.ts");
+const webhookCodeT2 = readFile("app/api/payment/ipaymu/notification/route.ts");
 
 test("Pending webhook has status IN ('PENDING', 'PROCESSING') guard", () => {
     // The pending webhook CAS must also check status, not just paymentStatus
@@ -1889,7 +1886,7 @@ test("Settlement webhook is idempotent (CAS prevents resurrection)", () => {
     );
 });
 
-test("Webhook verifies Midtrans signature with timing-safe comparison", () => {
+test("Webhook verifies payment signature with timing-safe comparison", () => {
     assert(
         webhookCodeT2.includes('timingSafeEqual'),
         "Webhook missing timingSafeEqual for signature verification"
@@ -1903,7 +1900,7 @@ test("Webhook validates gross_amount matches order total", () => {
     );
 });
 
-test("Webhook returns 200 for unknown order (prevents Midtrans retry loop)", () => {
+test("Webhook returns 200 for unknown order (prevents retry loop)", () => {
     // Order not found should return 200 to stop retries
     assert(
         webhookCodeT2.includes('Order tidak ditemukan'),
@@ -1911,7 +1908,7 @@ test("Webhook returns 200 for unknown order (prevents Midtrans retry loop)", () 
     );
 });
 
-test("Webhook returns 500 on error (triggers Midtrans retry)", () => {
+test("Webhook returns 500 on error (triggers retry)", () => {
     assert(
         webhookCodeT2.includes('Webhook processing failed'),
         "Webhook missing 500 error handling"

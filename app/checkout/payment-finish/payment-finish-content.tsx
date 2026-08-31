@@ -202,8 +202,7 @@ export default function PaymentFinishContent() {
                                     sedang
                                     mengonfirmasi
                                     pembayaran
-                                    Anda ke
-                                    Midtrans.
+                                    Anda.
                                 </p>
                             </>
                         )}

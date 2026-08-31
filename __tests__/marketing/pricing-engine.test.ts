@@ -522,9 +522,9 @@ test("verifyShippingCost is called before transaction", () => {
 
 test("All order creation endpoints go through createCheckoutOrder", () => {
     const buyNowCode = readFile("app/api/buy-now/route.ts");
-    const buyNowMidtransCode = readFile("app/api/buy-now/midtrans/route.ts");
+    const buyNowIpaymuCode = readFile("app/api/buy-now/ipaymu/route.ts");
     assert(buyNowCode.includes("createCheckoutOrder"), "buy-now does not use createCheckoutOrder");
-    assert(buyNowMidtransCode.includes("createCheckoutOrder"), "buy-now/midtrans does not use createCheckoutOrder");
+    assert(buyNowIpaymuCode.includes("createCheckoutOrder"), "buy-now/ipaymu does not use createCheckoutOrder");
 });
 
 test("RajaOngkir helper exists for server-side verification", () => {

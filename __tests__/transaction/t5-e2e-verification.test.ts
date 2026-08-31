@@ -77,8 +77,8 @@ const checkoutCode = readFile("lib/checkout.ts");
 const webhookCode = readFile("app/api/payment/midtrans/notification/route.ts");
 const ordersRoute = readFile("app/api/orders/route.ts");
 const buyNowRoute = readFile("app/api/buy-now/route.ts");
-const buyNowMidtrans = readFile("app/api/buy-now/midtrans/route.ts");
-const midtransRoute = readFile("app/api/payment/midtrans/route.ts");
+const buyNowIpaymu = readFile("app/api/buy-now/ipaymu/route.ts");
+const ipaymuRoute = readFile("app/api/payment/ipaymu/route.ts");
 const voucherCode = readFile("lib/voucher.ts");
 const flashSaleCode = readFile("lib/marketing/flash-sale.ts");
 const batchPricingCode = readFile("lib/marketing/batch-pricing.ts");
@@ -142,64 +142,64 @@ test("All COD endpoints return orderNumber and total", () => {
 });
 
 // ==========================================
-// 2. MIDTRANS CHECKOUT
+// 2. IPAYMU CHECKOUT
 // ==========================================
-console.log("\n2. Midtrans Checkout:");
+console.log("\n2. iPaymu Checkout:");
 
-test("Midtrans checkout routes through createCheckoutOrder", () => {
+test("iPaymu checkout routes through createCheckoutOrder", () => {
     assert(
-        midtransRoute.includes("createCheckoutOrder"),
-        "Cart Midtrans missing createCheckoutOrder"
+        ipaymuRoute.includes("createCheckoutOrder"),
+        "Cart iPaymu missing createCheckoutOrder"
     );
     assert(
-        buyNowMidtrans.includes("createCheckoutOrder"),
-        "Buy Now Midtrans missing createCheckoutOrder"
+        buyNowIpaymu.includes("createCheckoutOrder"),
+        "Buy Now iPaymu missing createCheckoutOrder"
     );
 });
 
-test("Midtrans does NOT clear cart (preserves for retry)", () => {
+test("iPaymu does NOT clear cart (preserves for retry)", () => {
     assert(
-        !midtransRoute.includes("cartItem.deleteMany") ||
-        midtransRoute.includes("restoreCart: false"),
-        "Cart Midtrans incorrectly clears cart"
+        !ipaymuRoute.includes("cartItem.deleteMany") ||
+        ipaymuRoute.includes("restoreCart: false"),
+        "Cart iPaymu incorrectly clears cart"
     );
     assert(
-        !buyNowMidtrans.includes("cartItem.deleteMany") ||
-        buyNowMidtrans.includes("restoreCart: false"),
-        "Buy Now Midtrans incorrectly clears cart"
-    );
-});
-
-test("Midtrans uses server-calculated grossAmount", () => {
-    assert(
-        midtransRoute.includes("result.grossAmount"),
-        "Cart Midtrans doesn't use server grossAmount"
-    );
-    assert(
-        buyNowMidtrans.includes("result.grossAmount"),
-        "Buy Now Midtrans doesn't use server grossAmount"
+        !buyNowIpaymu.includes("cartItem.deleteMany") ||
+        buyNowIpaymu.includes("restoreCart: false"),
+        "Buy Now iPaymu incorrectly clears cart"
     );
 });
 
-test("Midtrans snap uses item_details from server", () => {
+test("iPaymu uses server-calculated grossAmount", () => {
     assert(
-        midtransRoute.includes("result.itemDetails"),
-        "Cart Midtrans doesn't use server item_details"
+        ipaymuRoute.includes("result.grossAmount"),
+        "Cart iPaymu doesn't use server grossAmount"
     );
     assert(
-        buyNowMidtrans.includes("result.itemDetails"),
-        "Buy Now Midtrans doesn't use server item_details"
+        buyNowIpaymu.includes("result.grossAmount"),
+        "Buy Now iPaymu doesn't use server grossAmount"
     );
 });
 
-test("Midtrans rolls back on snap failure", () => {
+test("iPaymu uses item_details from server", () => {
     assert(
-        midtransRoute.includes("rollbackCheckoutOrder"),
-        "Cart Midtrans doesn't rollback on failure"
+        ipaymuRoute.includes("result.itemDetails"),
+        "Cart iPaymu doesn't use server item_details"
     );
     assert(
-        buyNowMidtrans.includes("rollbackCheckoutOrder"),
-        "Buy Now Midtrans doesn't rollback on failure"
+        buyNowIpaymu.includes("result.itemDetails"),
+        "Buy Now iPaymu doesn't use server item_details"
+    );
+});
+
+test("iPaymu rolls back on snap failure", () => {
+    assert(
+        ipaymuRoute.includes("rollbackCheckoutOrder"),
+        "Cart iPaymu doesn't rollback on failure"
+    );
+    assert(
+        buyNowIpaymu.includes("rollbackCheckoutOrder"),
+        "Buy Now iPaymu doesn't rollback on failure"
     );
 });
 
@@ -211,7 +211,7 @@ console.log("\n3. Buy Now:");
 test("Buy Now routes go through createCheckoutOrder", () => {
     assert(
         buyNowRoute.includes("createCheckoutOrder") &&
-        buyNowMidtrans.includes("createCheckoutOrder"),
+        buyNowIpaymu.includes("createCheckoutOrder"),
         "Buy Now not using shared checkout"
     );
 });
@@ -222,8 +222,8 @@ test("Buy Now uses BUY_NOW mode parameter", () => {
         "Buy Now COD missing BUY_NOW mode"
     );
     assert(
-        buyNowMidtrans.includes('mode: "BUY_NOW"'),
-        "Buy Now Midtrans missing BUY_NOW mode"
+        buyNowIpaymu.includes('mode: "BUY_NOW"'),
+        "Buy Now iPaymu missing BUY_NOW mode"
     );
 });
 
@@ -240,8 +240,8 @@ test("Buy Now has rate limiting", () => {
         "Buy Now COD missing rate limiting"
     );
     assert(
-        buyNowMidtrans.includes("rateLimiters.orderCreation"),
-        "Buy Now Midtrans missing rate limiting"
+        buyNowIpaymu.includes("rateLimiters.orderCreation"),
+        "Buy Now iPaymu missing rate limiting"
     );
 });
 
@@ -1035,12 +1035,12 @@ test("Rate limiting preserved on all order endpoints", () => {
         "Buy Now COD lost rate limiting"
     );
     assert(
-        buyNowMidtrans.includes("rateLimiters.orderCreation"),
-        "Buy Now Midtrans lost rate limiting"
+        buyNowIpaymu.includes("rateLimiters.orderCreation"),
+        "Buy Now iPaymu lost rate limiting"
     );
     assert(
-        midtransRoute.includes("rateLimiters.orderCreation"),
-        "Cart Midtrans lost rate limiting"
+        ipaymuRoute.includes("rateLimiters.orderCreation"),
+        "Cart iPaymu lost rate limiting"
     );
 });
 

@@ -11,7 +11,7 @@ import { prisma } from "@/lib/prisma";
  *
  * Dipakai oleh halaman payment-finish untuk
  * polling status order sampai webhook
- * Midtrans selesai memproses.
+ * payment provider selesai memproses.
  */
 
 export async function GET(

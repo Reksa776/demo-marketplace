@@ -45,7 +45,7 @@ export class NotificationService {
      *
      * Entry point utama.
      * Dipanggil dari admin order update
-     * atau Midtrans webhook.
+     * atau payment webhook.
      *
      * 1. Buat notification record (idempotent)
      * 2. Queue job

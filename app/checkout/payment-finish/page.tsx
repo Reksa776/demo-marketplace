@@ -9,7 +9,7 @@ import PaymentFinishContent from "./payment-finish-content";
  * Halaman ini TIDAK menentukan status
  * pembayaran secara final. Status final
  * ditentukan oleh webhook
- * /api/payment/midtrans/notification.
+ * /api/payment/ipaymu/notification.
  *
  * Halaman ini hanya polling status order
  * dari database sampai webhook selesai

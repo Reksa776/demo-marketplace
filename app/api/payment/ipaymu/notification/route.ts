@@ -578,7 +578,7 @@ export async function POST(
          * ==========================================
          *
          * iPaymu refund notification handling.
-         * Mirrors Midtrans refund handler.
+         * Mirrors payment refund handler.
          */
 
         const isRefunded =

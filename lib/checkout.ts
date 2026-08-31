@@ -528,7 +528,7 @@ function validateItemDetailsTotal(
  *      ↓
  * E-WALLET
  *
- * Order Midtrans lama dibatalkan.
+ * Order sebelumnya dibatalkan.
  *
  * STOCK dikembalikan.
  * VOUCHER dikembalikan.
@@ -904,9 +904,7 @@ export async function createCheckoutOrder(
      * IMPORTANT
      * ==========================================
      *
-     * Untuk Midtrans:
-     *
-     * cleanup pending attempt lama
+     * Cleanup pending attempt lama
      * SEBELUM membuat attempt baru.
      *
      * Cart tetap ada.
@@ -2025,12 +2023,10 @@ export async function createCheckoutOrder(
  * Default:
  * restoreCart = true
  *
- * Dipakai ketika order Midtrans
- * sudah dibuat lalu gagal.
+ * Dipakai ketika order sudah dibuat lalu gagal.
  *
- * Tetapi karena versi baru TIDAK menghapus
- * cart untuk Midtrans, API Midtrans
- * menggunakan restoreCart: false.
+ * Cart tidak dihapus oleh payment API.
+ * Menggunakan restoreCart: false.
  */
 
 export async function rollbackCheckoutOrder(
