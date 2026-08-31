@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { approveRefund, completeRefund, failRefund } from "@/lib/refund";
+import { createAuditLog } from "@/lib/admin/audit-log";
 
 /* ==========================================
  * PATCH /api/admin/orders/[id]/refund
@@ -158,6 +159,35 @@ export async function PATCH(
                 { status: 400 }
             );
         }
+
+        // ==========================================
+        // AUDIT LOG
+        // ==========================================
+
+        const auditActions: Record<string, string> = {
+            approve: "REFUND_APPROVED",
+            complete: "REFUND_COMPLETED",
+            reject: "REFUND_FAILED",
+        };
+
+        createAuditLog({
+            adminId: session.user.id,
+            action: auditActions[action] as any,
+            entityType: "Refund",
+            entityId: refund.id,
+            description: `Refund for order #${orderId}: ${action}${reason ? ` (${reason})` : ""}`,
+            metadata: {
+                orderId,
+                refundId: refund.id,
+                action,
+                amount: Number(refund.amount),
+                previousStatus: refund.status,
+                reason: reason || null,
+                providerRef: providerRef || null,
+            },
+        }).catch((err) =>
+            console.error("AUDIT LOG ERROR:", err)
+        );
 
         // ==========================================
         // RESPONSE

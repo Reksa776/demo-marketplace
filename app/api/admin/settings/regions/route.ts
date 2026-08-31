@@ -37,6 +37,24 @@ export async function GET(request: NextRequest) {
         const id =
             searchParams.get("id");
 
+        // ==========================================
+        // SECURITY (L3 FIX): Validate id is numeric
+        // ==========================================
+        // Prevents SSRF via path traversal in RajaOngkir
+        // API endpoint construction. Without this, an
+        // attacker could pass e.g. "../../v2/user" to
+        // access unintended API endpoints.
+        const numericId = id ? Number(id) : null;
+        if (id && (numericId === null || !Number.isInteger(numericId) || numericId <= 0)) {
+            return NextResponse.json(
+                {
+                    success: false,
+                    message: "ID wilayah tidak valid.",
+                },
+                { status: 400 }
+            );
+        }
+
         let endpoint = "";
 
         switch (type) {
@@ -56,7 +74,7 @@ export async function GET(request: NextRequest) {
                     );
                 }
 
-                endpoint = `/destination/city/${id}`;
+                endpoint = `/destination/city/${numericId}`;
                 break;
 
             case "districts":
@@ -71,7 +89,7 @@ export async function GET(request: NextRequest) {
                     );
                 }
 
-                endpoint = `/destination/district/${id}`;
+                endpoint = `/destination/district/${numericId}`;
                 break;
 
             case "subdistricts":
@@ -87,7 +105,7 @@ export async function GET(request: NextRequest) {
                 }
 
                 endpoint =
-                    `/destination/sub-district/${id}`;
+                    `/destination/sub-district/${numericId}`;
                 break;
 
             default:

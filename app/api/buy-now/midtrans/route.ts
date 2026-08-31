@@ -10,6 +10,7 @@ import {
 import { getReferralCode } from "@/lib/affiliate/referral";
 
 import { rateLimiters } from "@/lib/rate-limit";
+import { getAppOrigin } from "@/lib/app-origin";
 
 import Midtrans from "midtrans-client";
 
@@ -101,38 +102,6 @@ function getEnabledPayments(
         default:
             return [];
     }
-}
-
-function getAppOrigin(request: NextRequest) {
-    const envUrl =
-        process.env.NEXT_PUBLIC_APP_URL;
-
-    if (
-        envUrl &&
-        /^https?:\/\//.test(envUrl)
-    ) {
-        return envUrl.replace(/\/+$/, "");
-    }
-
-    const forwardedProto =
-        request.headers.get(
-            "x-forwarded-proto"
-        ) || "https";
-
-    const host =
-        request.headers.get(
-            "x-forwarded-host"
-        ) ||
-        request.headers.get("host");
-
-    if (!host) {
-        console.error(
-            "NEXT_PUBLIC_APP_URL tidak ter-set dan host tidak terdeteksi dari headers."
-        );
-        return "";
-    }
-
-    return `${forwardedProto}://${host}`;
 }
 
 async function getCurrentUser() {

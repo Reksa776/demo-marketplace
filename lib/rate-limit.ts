@@ -105,19 +105,43 @@ export function checkRateLimit(
 
 /**
  * Get client IP from request headers.
+ *
+ * Security (M2 fix):
+ * x-forwarded-for and x-real-ip are client-controllable
+ * headers. They MUST NOT be trusted unless the application
+ * is behind a known trusted reverse proxy.
+ *
+ * When TRUSTED_PROXY env var is NOT set (default):
+ *   Forwarding headers are ignored.
+ *   Returns "untrusted" — all clients share this bucket.
+ *   This is safe: rate limiting still works, it just groups
+ *   all untrusted clients together.
+ *
+ * When TRUSTED_PROXY env var IS set:
+ *   Forwarding headers from the trusted proxy are used.
+ *   The first IP in x-forwarded-for is treated as client IP.
+ *
+ * This prevents an attacker from spoofing x-forwarded-for
+ * to obtain a unique rate-limit bucket per request.
  */
 export function getClientIp(request: Request): string {
-    const forwarded = request.headers.get("x-forwarded-for");
-    if (forwarded) {
-        return forwarded.split(",")[0].trim();
+    const trustedProxy = process.env.TRUSTED_PROXY;
+
+    if (trustedProxy) {
+        // Only trust forwarding headers when behind a known proxy
+        const forwarded = request.headers.get("x-forwarded-for");
+        if (forwarded) {
+            return forwarded.split(",")[0].trim();
+        }
+
+        const realIp = request.headers.get("x-real-ip");
+        if (realIp) {
+            return realIp;
+        }
     }
 
-    const realIp = request.headers.get("x-real-ip");
-    if (realIp) {
-        return realIp;
-    }
-
-    return "unknown";
+    // No trusted proxy — forwarding headers are NOT trustworthy
+    return "untrusted";
 }
 
 /**

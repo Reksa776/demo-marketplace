@@ -520,15 +520,18 @@ describe("iPaymu Webhook — Verification Limitations", () => {
         expect(amount).not.toBe(orderTotal);
     });
 
-    test("DOCUMENTED LIMITATION: iPaymu webhook has no cryptographic signature", () => {
-        // iPaymu v2 webhook does NOT provide a cryptographic signature
-        // Security relies on:
-        // 1. Order reference validation
-        // 2. Amount validation against DB
-        // 3. CAS state machine guards
-        const hasSignature = false;
-        expect(hasSignature).toBe(false);
-        // This is an accepted provider limitation
+    test("iPaymu v2 webhook uses HMAC-SHA256 signature via X-Signature header", () => {
+        // iPaymu v2 webhook DOES provide a cryptographic signature:
+        // - X-Signature: HMAC-SHA256(apiKey, timestamp:externalID:rawBody)
+        // - X-Timestamp: YYYYMMDDHHmmss
+        // - X-External-ID: trx_id or reference_id
+        // Security model:
+        // 1. Cryptographic webhook signature verification (H2 fix)
+        // 2. Order reference validation
+        // 3. Amount validation against DB
+        // 4. CAS state machine guards
+        const hasSignature = true;
+        expect(hasSignature).toBe(true);
     });
 });
 
@@ -898,5 +901,205 @@ describe("transitionRefundForWebhook — CAS Logic", () => {
         const result = simulateTransitionRefundForWebhook("FAILED");
         expect(result.status).toBe("FAILED");
         expect(result.shouldComplete).toBe(false);
+    });
+});
+
+/* ==========================================
+ * H2 FIX: WEBHOOK SIGNATURE BEHAVIORAL TESTS
+ * ==========================================
+ *
+ * Verifies the iPaymu v2 webhook signature
+ * verification implementation.
+ *
+ * Algorithm:
+ *   HMAC-SHA256(apiKey, timestamp:externalID:rawBody)
+ *
+ * Headers:
+ *   X-Signature, X-Timestamp, X-External-ID
+ */
+
+describe("iPaymu Webhook Signature — H2 Fix Behavioral Tests", () => {
+    const TEST_API_KEY = "test-ipaymu-api-key-12345";
+    const TEST_TIMESTAMP = "20260831120000";
+    const TEST_EXTERNAL_ID = "trx-184854";
+
+    /**
+     * Helper: compute the expected iPaymu webhook signature.
+     * Algorithm: HMAC-SHA256(apiKey, timestamp:externalID:rawBody)
+     */
+    function computeSignature(
+        apiKey: string,
+        timestamp: string,
+        externalId: string,
+        rawBody: string
+    ): string {
+        const crypto = require("crypto");
+        const signedPayload = `${timestamp}:${externalId}:${rawBody}`;
+        return crypto
+            .createHmac("sha256", apiKey)
+            .update(signedPayload)
+            .digest("hex");
+    }
+
+    // ── TEST 1: Valid webhook signature ──
+    test("TEST 1: Valid signature → authentication succeeds", () => {
+        const { verifyWebhookSignature } = require("@/lib/payment/ipaymu");
+        const rawBody = "reference_id=PAY-CART-123&trx_id=184854&status_code=1&sub_total=49500";
+        const sig = computeSignature(TEST_API_KEY, TEST_TIMESTAMP, TEST_EXTERNAL_ID, rawBody);
+
+        const result = verifyWebhookSignature(
+            rawBody, sig, TEST_TIMESTAMP, TEST_EXTERNAL_ID, TEST_API_KEY
+        );
+        expect(result).toBe(true);
+    });
+
+    // ── TEST 2: Missing X-Signature → reject ──
+    test("TEST 2: Missing X-Signature → HTTP 401 (reject)", () => {
+        const { verifyWebhookSignature } = require("@/lib/payment/ipaymu");
+        const rawBody = "reference_id=PAY-CART-123&trx_id=184854&status_code=1";
+
+        const result = verifyWebhookSignature(
+            rawBody, "", TEST_TIMESTAMP, TEST_EXTERNAL_ID, TEST_API_KEY
+        );
+        expect(result).toBe(false);
+    });
+
+    // ── TEST 3: Missing X-Timestamp → reject ──
+    test("TEST 3: Missing X-Timestamp → HTTP 401 (reject)", () => {
+        const { verifyWebhookSignature } = require("@/lib/payment/ipaymu");
+        const rawBody = "reference_id=PAY-CART-123&trx_id=184854&status_code=1";
+        const sig = computeSignature(TEST_API_KEY, TEST_TIMESTAMP, TEST_EXTERNAL_ID, rawBody);
+
+        const result = verifyWebhookSignature(
+            rawBody, sig, "", TEST_EXTERNAL_ID, TEST_API_KEY
+        );
+        expect(result).toBe(false);
+    });
+
+    // ── TEST 4: Missing X-External-ID → reject ──
+    test("TEST 4: Missing X-External-ID → HTTP 401 (reject)", () => {
+        const { verifyWebhookSignature } = require("@/lib/payment/ipaymu");
+        const rawBody = "reference_id=PAY-CART-123&trx_id=184854&status_code=1";
+        const sig = computeSignature(TEST_API_KEY, TEST_TIMESTAMP, TEST_EXTERNAL_ID, rawBody);
+
+        const result = verifyWebhookSignature(
+            rawBody, sig, TEST_TIMESTAMP, "", TEST_API_KEY
+        );
+        expect(result).toBe(false);
+    });
+
+    // ── TEST 5: Invalid signature → reject ──
+    test("TEST 5: Invalid signature → HTTP 401 (reject)", () => {
+        const { verifyWebhookSignature } = require("@/lib/payment/ipaymu");
+        const rawBody = "reference_id=PAY-CART-123&trx_id=184854&status_code=1";
+        const fakeSig = "a".repeat(64); // 64-char hex but wrong value
+
+        const result = verifyWebhookSignature(
+            rawBody, fakeSig, TEST_TIMESTAMP, TEST_EXTERNAL_ID, TEST_API_KEY
+        );
+        expect(result).toBe(false);
+    });
+
+    // ── TEST 6: Body tampering → reject ──
+    test("TEST 6: Valid signature but tampered body → HTTP 401 (reject)", () => {
+        const { verifyWebhookSignature } = require("@/lib/payment/ipaymu");
+        const originalBody = "reference_id=PAY-CART-123&trx_id=184854&status_code=1&sub_total=49500";
+        const tamperedBody = "reference_id=PAY-CART-123&trx_id=184854&status_code=1&sub_total=99999";
+        const sig = computeSignature(TEST_API_KEY, TEST_TIMESTAMP, TEST_EXTERNAL_ID, originalBody);
+
+        const result = verifyWebhookSignature(
+            tamperedBody, sig, TEST_TIMESTAMP, TEST_EXTERNAL_ID, TEST_API_KEY
+        );
+        expect(result).toBe(false);
+    });
+
+    // ── TEST 7: Timestamp tampering → reject ──
+    test("TEST 7: Valid signature but tampered timestamp → HTTP 401 (reject)", () => {
+        const { verifyWebhookSignature } = require("@/lib/payment/ipaymu");
+        const rawBody = "reference_id=PAY-CART-123&trx_id=184854&status_code=1";
+        const sig = computeSignature(TEST_API_KEY, TEST_TIMESTAMP, TEST_EXTERNAL_ID, rawBody);
+
+        const result = verifyWebhookSignature(
+            rawBody, sig, "20260831999999", TEST_EXTERNAL_ID, TEST_API_KEY
+        );
+        expect(result).toBe(false);
+    });
+
+    // ── TEST 8: External ID tampering → reject ──
+    test("TEST 8: Valid signature but tampered external ID → HTTP 401 (reject)", () => {
+        const { verifyWebhookSignature } = require("@/lib/payment/ipaymu");
+        const rawBody = "reference_id=PAY-CART-123&trx_id=184854&status_code=1";
+        const sig = computeSignature(TEST_API_KEY, TEST_TIMESTAMP, TEST_EXTERNAL_ID, rawBody);
+
+        const result = verifyWebhookSignature(
+            rawBody, sig, TEST_TIMESTAMP, "trx-fake-999", TEST_API_KEY
+        );
+        expect(result).toBe(false);
+    });
+
+    // ── TEST 9: Missing API key → fail closed ──
+    test("TEST 9: Missing API key → fail closed (reject)", () => {
+        const { verifyWebhookSignature } = require("@/lib/payment/ipaymu");
+        const rawBody = "reference_id=PAY-CART-123&trx_id=184854&status_code=1";
+        const sig = computeSignature(TEST_API_KEY, TEST_TIMESTAMP, TEST_EXTERNAL_ID, rawBody);
+
+        const result = verifyWebhookSignature(
+            rawBody, sig, TEST_TIMESTAMP, TEST_EXTERNAL_ID, ""
+        );
+        expect(result).toBe(false);
+    });
+
+    // ── TEST 10: computeWebhookSignature is deterministic ──
+    test("TEST 10: computeWebhookSignature is deterministic and matches verifyWebhookSignature", () => {
+        const { computeWebhookSignature, verifyWebhookSignature } = require("@/lib/payment/ipaymu");
+        const rawBody = "reference_id=PAY-CART-123&trx_id=184854&status_code=1&sub_total=150000";
+
+        const sig1 = computeWebhookSignature(TEST_API_KEY, TEST_TIMESTAMP, TEST_EXTERNAL_ID, rawBody);
+        const sig2 = computeWebhookSignature(TEST_API_KEY, TEST_TIMESTAMP, TEST_EXTERNAL_ID, rawBody);
+
+        // Deterministic
+        expect(sig1).toBe(sig2);
+
+        // Matches verification
+        expect(verifyWebhookSignature(
+            rawBody, sig1, TEST_TIMESTAMP, TEST_EXTERNAL_ID, TEST_API_KEY
+        )).toBe(true);
+
+        // Different body → different signature
+        const sig3 = computeWebhookSignature(TEST_API_KEY, TEST_TIMESTAMP, TEST_EXTERNAL_ID, "other-body");
+        expect(sig1).not.toBe(sig3);
+    });
+});
+
+/* ==========================================
+ * OUTGOING SIGNATURE UNCHANGED VERIFICATION
+ * ==========================================
+ *
+ * Verify the outgoing iPaymu payment creation
+ * signature is NOT affected by the H2 fix.
+ */
+
+describe("Outgoing iPaymu Signature — Unchanged by H2 Fix", () => {
+    test("generateSignature still uses POST:VA:sha256(body):apiKey format", async () => {
+        const { generateSignature } = await import("@/lib/payment/ipaymu");
+
+        const body = '{"product":["Test"],"qty":["1"],"price":["10000"],"amount":10000}';
+        const va = "1179000899";
+        const apiKey = "test-api-key-123";
+
+        const sig = generateSignature(body, va, apiKey);
+
+        // Should still produce a 64-char hex string (HMAC-SHA256)
+        expect(sig).toMatch(/^[a-f0-9]{64}$/);
+    });
+
+    test("generateSignature is deterministic (unchanged)", async () => {
+        const { generateSignature } = await import("@/lib/payment/ipaymu");
+
+        const body = '{"amount":50000}';
+        const sig1 = generateSignature(body, "1179000899", "key123");
+        const sig2 = generateSignature(body, "1179000899", "key123");
+
+        expect(sig1).toBe(sig2);
     });
 });

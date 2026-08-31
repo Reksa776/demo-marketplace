@@ -16,8 +16,9 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
         const { id } = await params;
         const broadcast = await getBroadcast(Number(id));
         return NextResponse.json({ success: true, data: broadcast });
-    } catch (error: any) {
-        return NextResponse.json({ success: false, message: error?.message ?? "Gagal." }, { status: error?.message?.includes("tidak ditemukan") ? 404 : 500 });
+    } catch (error) {
+        const isNotFound = error instanceof Error && error.message.includes("tidak ditemukan");
+        return NextResponse.json({ success: false, message: isNotFound ? "Broadcast tidak ditemukan." : "Gagal mengambil data." }, { status: isNotFound ? 404 : 500 });
     }
 }
 
@@ -37,8 +38,8 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
         if (body.status !== undefined) data.status = body.status;
         const broadcast = await updateBroadcast(Number(id), data);
         return NextResponse.json({ success: true, message: "Berhasil diubah.", data: broadcast });
-    } catch (error: any) {
-        return NextResponse.json({ success: false, message: error?.message ?? "Gagal." }, { status: 400 });
+    } catch (error) {
+        return NextResponse.json({ success: false, message: "Gagal mengubah broadcast." }, { status: 500 });
     }
 }
 
@@ -49,7 +50,8 @@ export async function DELETE(_request: NextRequest, { params }: { params: Promis
         const { id } = await params;
         await deleteBroadcast(Number(id));
         return NextResponse.json({ success: true, message: "Berhasil dihapus." });
-    } catch (error: any) {
-        return NextResponse.json({ success: false, message: error?.message ?? "Gagal." }, { status: error?.message?.includes("tidak ditemukan") ? 404 : 400 });
+    } catch (error) {
+        const isNotFound = error instanceof Error && error.message.includes("tidak ditemukan");
+        return NextResponse.json({ success: false, message: isNotFound ? "Broadcast tidak ditemukan." : "Gagal menghapus data." }, { status: isNotFound ? 404 : 400 });
     }
 }

@@ -43,9 +43,9 @@ export async function GET(request: NextRequest) {
                 pagination: { page, limit, total: result.total, totalPages: Math.ceil(result.total / limit) },
             },
         });
-    } catch (error: any) {
-        console.error("GET /api/admin/bulk-discounts ERROR:", error?.message);
-        return NextResponse.json({ success: false, message: error?.message ?? "Gagal mengambil data." }, { status: 500 });
+    } catch (error) {
+        console.error("GET /api/admin/bulk-discounts ERROR:", error);
+        return NextResponse.json({ success: false, message: "Gagal mengambil data." }, { status: 500 });
     }
 }
 
@@ -78,8 +78,8 @@ export async function POST(request: NextRequest) {
         });
 
         return NextResponse.json({ success: true, message: "Bulk discount berhasil dibuat.", data: discount }, { status: 201 });
-    } catch (error: any) {
-        console.error("POST /api/admin/bulk-discounts ERROR:", error?.message);
-        return NextResponse.json({ success: false, message: error?.message ?? "Gagal membuat bulk discount." }, { status: 400 });
+    } catch (error) {
+        console.error("POST /api/admin/bulk-discounts ERROR:", error);
+        return NextResponse.json({ success: false, message: "Gagal membuat bulk discount." }, { status: 500 });
     }
 }

@@ -58,7 +58,23 @@ export async function GET(request: Request) {
         const status = searchParams.get("status") || "";
         const page = Math.max(1, parseInt(searchParams.get("page") || "1", 10));
         const limit = Math.min(50, Math.max(1, parseInt(searchParams.get("limit") || "10", 10)));
-        const sortBy = searchParams.get("sortBy") || "createdAt";
+        // ==========================================
+        // SECURITY (L2 FIX): Whitelist sortBy fields
+        // ==========================================
+        // Prevents sorting by sensitive/internal fields
+        // (e.g., processedBy, requestedBy, providerRef)
+        // and ensures only safe, intended sort columns
+        // are accepted.
+        const allowedSortFields = [
+            "createdAt",
+            "updatedAt",
+            "amount",
+            "status",
+        ];
+        const rawSortBy = searchParams.get("sortBy") || "createdAt";
+        const sortBy = allowedSortFields.includes(rawSortBy)
+            ? rawSortBy
+            : "createdAt";
         const sortOrder = searchParams.get("sortOrder") === "asc" ? "asc" : "desc";
 
         // ==========================================

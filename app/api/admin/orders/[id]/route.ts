@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { releaseStockAndVoucherForOrder } from "@/lib/order-stock";
+import { createAuditLog } from "@/lib/admin/audit-log";
 
 type RouteContext = {
     params: Promise<{
@@ -541,6 +542,36 @@ export async function PATCH(
 
             return updated;
         });
+
+        /*
+         * ==========================================
+         * AUDIT LOG
+         * ==========================================
+         *
+         * Record admin order status change for
+         * accountability and incident investigation.
+         */
+        if (previousStatus !== status) {
+            const auditAction = status === "CANCELLED"
+                ? "ORDER_CANCELLED"
+                : "ORDER_STATUS_CHANGED";
+
+            createAuditLog({
+                adminId: session.user.id,
+                action: auditAction,
+                entityType: "Order",
+                entityId: orderId,
+                description: `Order #${orderId}: ${previousStatus} → ${status}`,
+                metadata: {
+                    orderNumber: updatedOrder?.orderNumber || null,
+                    previousStatus,
+                    newStatus: status,
+                    trackingNumber: cleanTrackingNumber || null,
+                },
+            }).catch((err) =>
+                console.error("AUDIT LOG ERROR:", err)
+            );
+        }
 
         /*
          * ==========================================

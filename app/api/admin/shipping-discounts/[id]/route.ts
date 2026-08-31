@@ -16,8 +16,9 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
         const { id } = await params;
         const discount = await getShippingDiscount(Number(id));
         return NextResponse.json({ success: true, data: discount });
-    } catch (error: any) {
-        return NextResponse.json({ success: false, message: error?.message ?? "Gagal." }, { status: error?.message?.includes("tidak ditemukan") ? 404 : 500 });
+    } catch (error) {
+        const isNotFound = error instanceof Error && error.message.includes("tidak ditemukan");
+        return NextResponse.json({ success: false, message: isNotFound ? "Diskon ongkir tidak ditemukan." : "Gagal mengambil data." }, { status: isNotFound ? 404 : 500 });
     }
 }
 
@@ -39,8 +40,9 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
         if (body.isActive !== undefined) data.isActive = body.isActive;
         const discount = await updateShippingDiscount(Number(id), data);
         return NextResponse.json({ success: true, message: "Berhasil diubah.", data: discount });
-    } catch (error: any) {
-        return NextResponse.json({ success: false, message: error?.message ?? "Gagal." }, { status: error?.message?.includes("tidak ditemukan") ? 404 : 400 });
+    } catch (error) {
+        const isNotFound = error instanceof Error && error.message.includes("tidak ditemukan");
+        return NextResponse.json({ success: false, message: isNotFound ? "Diskon ongkir tidak ditemukan." : "Gagal mengubah data." }, { status: isNotFound ? 404 : 400 });
     }
 }
 
@@ -51,7 +53,8 @@ export async function DELETE(_request: NextRequest, { params }: { params: Promis
         const { id } = await params;
         await deleteShippingDiscount(Number(id));
         return NextResponse.json({ success: true, message: "Berhasil dihapus." });
-    } catch (error: any) {
-        return NextResponse.json({ success: false, message: error?.message ?? "Gagal." }, { status: error?.message?.includes("tidak ditemukan") ? 404 : 400 });
+    } catch (error) {
+        const isNotFound = error instanceof Error && error.message.includes("tidak ditemukan");
+        return NextResponse.json({ success: false, message: isNotFound ? "Diskon ongkir tidak ditemukan." : "Gagal menghapus data." }, { status: isNotFound ? 404 : 400 });
     }
 }

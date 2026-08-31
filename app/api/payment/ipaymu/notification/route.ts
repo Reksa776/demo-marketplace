@@ -12,8 +12,11 @@ import {
     isPendingNotification,
     isFailedNotification,
     verifyNotificationAmount,
+    verifyWebhookSignature,
     type IpaymuNotification,
 } from "@/lib/payment/ipaymu";
+
+import { IPAYMU_CONFIG } from "@/lib/payment/ipaymu";
 
 export const dynamic = "force-dynamic";
 
@@ -31,6 +34,92 @@ export async function POST(
 ) {
     try {
         /* ==========================================
+         * READ RAW BODY FIRST
+         * ==========================================
+         *
+         * The webhook signature covers the exact raw
+         * HTTP body. We must read it before any parsing.
+         */
+        const text = await request.text();
+
+        /* ==========================================
+         * H2 FIX: WEBHOOK SIGNATURE VERIFICATION
+         * ==========================================
+         *
+         * iPaymu v2 webhook authentication uses:
+         *   headers: X-Signature, X-Timestamp, X-External-ID
+         *   algorithm: HMAC-SHA256(apiKey, timestamp:externalID:rawBody)
+         *
+         * Fail-closed: reject 401 if ANY required
+         * header or API key is missing.
+         */
+        const receivedSignature =
+            request.headers.get("x-signature") ||
+            "";
+        const receivedTimestamp =
+            request.headers.get("x-timestamp") ||
+            "";
+        const receivedExternalId =
+            request.headers.get("x-external-id") ||
+            "";
+
+        if (
+            !receivedSignature ||
+            !receivedTimestamp ||
+            !receivedExternalId
+        ) {
+            console.error(
+                "IPAYMU SECURITY: MISSING WEBHOOK AUTH HEADERS — " +
+                "X-Signature, X-Timestamp, X-External-ID required"
+            );
+            return json(
+                {
+                    success: false,
+                    message: "Missing authentication headers.",
+                },
+                401
+            );
+        }
+
+        const { apiKey } = IPAYMU_CONFIG;
+
+        if (!apiKey) {
+            console.error(
+                "IPAYMU SECURITY: MISSING API KEY — " +
+                "cannot verify webhook signature"
+            );
+            return json(
+                {
+                    success: false,
+                    message: "Server configuration error.",
+                },
+                500
+            );
+        }
+
+        if (
+            !verifyWebhookSignature(
+                text,
+                receivedSignature,
+                receivedTimestamp,
+                receivedExternalId,
+                apiKey
+            )
+        ) {
+            console.error(
+                "IPAYMU SECURITY: INVALID SIGNATURE — " +
+                "webhook signature verification failed"
+            );
+            return json(
+                {
+                    success: false,
+                    message: "Invalid signature.",
+                },
+                401
+            );
+        }
+
+        /* ==========================================
          * PARSE URL-ENCODED BODY
          * ==========================================
          *
@@ -41,7 +130,6 @@ export async function POST(
          *   reference_id, trx_id, sid, status,
          *   status_code, sub_total, total, amount, etc.
          */
-        const text = await request.text();
         const params = new URLSearchParams(text);
         const raw: Record<string, string> = {};
         params.forEach((value, key) => {

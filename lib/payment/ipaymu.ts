@@ -455,6 +455,96 @@ export function verifyNotificationAmount(
     return true;
 }
 
+/* ==========================================
+ * WEBHOOK SIGNATURE VERIFICATION
+ * ==========================================
+ *
+ * Verifies the iPaymu v2 webhook notification
+ * signature.
+ *
+ * iPaymu webhook notifications are signed with:
+ *   headers: X-Signature, X-Timestamp, X-External-ID
+ *   body:    application/x-www-form-urlencoded
+ *
+ * Signature algorithm:
+ *   HMAC-SHA256(API_KEY, timestamp + ":" + externalID + ":" + rawBody)
+ *
+ * Verification uses timingSafeEqual to prevent
+ * timing attacks.
+ *
+ * Returns the HMAC-SHA256 signature for the given
+ * webhook parameters. Used for both verification
+ * and testing.
+ */
+export function computeWebhookSignature(
+    apiKey: string,
+    timestamp: string,
+    externalId: string,
+    rawBody: string
+): string {
+    const signedPayload = `${timestamp}:${externalId}:${rawBody}`;
+    return crypto
+        .createHmac("sha256", apiKey)
+        .update(signedPayload)
+        .digest("hex");
+}
+
+/**
+ * Verify the incoming iPaymu webhook signature.
+ *
+ * @param rawBody - The exact raw HTTP body (must not be reconstructed)
+ * @param receivedSignature - The value from the X-Signature header
+ * @param timestamp - The value from the X-Timestamp header
+ * @param externalId - The value from the X-External-ID header
+ * @param apiKey - The iPaymu API key (from env)
+ * @returns true if signature is valid, false otherwise
+ *
+ * Security:
+ * - Uses timingSafeEqual to prevent timing attacks
+ * - Returns false on any error (fail-closed)
+ * - If no API key is configured, returns false (fail-closed)
+ */
+export function verifyWebhookSignature(
+    rawBody: string,
+    receivedSignature: string,
+    timestamp: string,
+    externalId: string,
+    apiKey: string
+): boolean {
+    // Fail-closed: no API key = cannot verify = reject
+    if (!apiKey) {
+        return false;
+    }
+
+    // Fail-closed: missing any authentication material = reject
+    if (!receivedSignature || !timestamp || !externalId) {
+        return false;
+    }
+
+    try {
+        const expectedSignature = computeWebhookSignature(
+            apiKey,
+            timestamp,
+            externalId,
+            rawBody
+        );
+
+        // Handle length mismatch safely before timingSafeEqual
+        // (timingSafeEqual throws on mismatched lengths)
+        const receivedBuf = Buffer.from(receivedSignature, "utf8");
+        const expectedBuf = Buffer.from(expectedSignature, "utf8");
+
+        if (receivedBuf.length !== expectedBuf.length) {
+            return false;
+        }
+
+        return crypto.timingSafeEqual(receivedBuf, expectedBuf);
+    } catch {
+        // Any error → fail-closed
+        return false;
+    }
+}
+
 /**
  * Map iPaymu payment method/channel to our
  * internal CheckoutPaymentMethod.

@@ -39,7 +39,8 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
                 preview,
             },
         });
-    } catch (error: any) {
-        return NextResponse.json({ success: false, message: error?.message ?? "Gagal mengambil audience." }, { status: 500 });
+    } catch (error) {
+        console.error("GET /api/admin/broadcasts/audience ERROR:", error);
+        return NextResponse.json({ success: false, message: "Gagal mengambil audience." }, { status: 500 });
     }
 }

@@ -16,9 +16,9 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
         const { id } = await params;
         const discount = await getBulkDiscount(Number(id));
         return NextResponse.json({ success: true, data: discount });
-    } catch (error: any) {
-        const status = error?.message?.includes("tidak ditemukan") ? 404 : 500;
-        return NextResponse.json({ success: false, message: error?.message ?? "Gagal mengambil data." }, { status });
+    } catch (error) {
+        const isNotFound = error instanceof Error && error.message.includes("tidak ditemukan");
+        return NextResponse.json({ success: false, message: isNotFound ? "Bulk discount tidak ditemukan." : "Gagal mengambil data." }, { status: isNotFound ? 404 : 500 });
     }
 }
 
@@ -39,9 +39,9 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
         if (body.isActive !== undefined) data.isActive = body.isActive;
         const discount = await updateBulkDiscount(Number(id), data);
         return NextResponse.json({ success: true, message: "Bulk discount berhasil diubah.", data: discount });
-    } catch (error: any) {
-        const status = error?.message?.includes("tidak ditemukan") ? 404 : 400;
-        return NextResponse.json({ success: false, message: error?.message ?? "Gagal mengubah." }, { status });
+    } catch (error) {
+        const isNotFound = error instanceof Error && error.message.includes("tidak ditemukan");
+        return NextResponse.json({ success: false, message: isNotFound ? "Bulk discount tidak ditemukan." : "Gagal mengubah data." }, { status: isNotFound ? 404 : 400 });
     }
 }
 
@@ -52,8 +52,8 @@ export async function DELETE(_request: NextRequest, { params }: { params: Promis
         const { id } = await params;
         await deleteBulkDiscount(Number(id));
         return NextResponse.json({ success: true, message: "Bulk discount berhasil dihapus." });
-    } catch (error: any) {
-        const status = error?.message?.includes("tidak ditemukan") ? 404 : 400;
-        return NextResponse.json({ success: false, message: error?.message ?? "Gagal menghapus." }, { status });
+    } catch (error) {
+        const isNotFound = error instanceof Error && error.message.includes("tidak ditemukan");
+        return NextResponse.json({ success: false, message: isNotFound ? "Bulk discount tidak ditemukan." : "Gagal menghapus data." }, { status: isNotFound ? 404 : 400 });
     }
 }

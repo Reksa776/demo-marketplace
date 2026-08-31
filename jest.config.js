@@ -11,6 +11,7 @@ module.exports = {
         "!**/__tests__/marketing/pricing-engine.test.ts",
         "**/__tests__/p0/*.test.ts",
         "**/__tests__/order-refund/*.test.ts",
+        "**/__tests__/security/*.test.ts",
     ],
     transform: {
         "^.+\\.tsx?$": [

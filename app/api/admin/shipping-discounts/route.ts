@@ -25,9 +25,9 @@ export async function GET(request: NextRequest) {
             success: true,
             data: { items: result.items, pagination: { page, limit, total: result.total, totalPages: Math.ceil(result.total / limit) } },
         });
-    } catch (error: any) {
-        console.error("GET /api/admin/shipping-discounts ERROR:", error?.message);
-        return NextResponse.json({ success: false, message: error?.message ?? "Gagal mengambil data." }, { status: 500 });
+    } catch (error) {
+        console.error("GET /api/admin/shipping-discounts ERROR:", error);
+        return NextResponse.json({ success: false, message: "Gagal mengambil data." }, { status: 500 });
     }
 }
 
@@ -56,8 +56,8 @@ export async function POST(request: NextRequest) {
         });
 
         return NextResponse.json({ success: true, message: "Diskon ongkir berhasil dibuat.", data: discount }, { status: 201 });
-    } catch (error: any) {
-        console.error("POST /api/admin/shipping-discounts ERROR:", error?.message);
-        return NextResponse.json({ success: false, message: error?.message ?? "Gagal membuat." }, { status: 400 });
+    } catch (error) {
+        console.error("POST /api/admin/shipping-discounts ERROR:", error);
+        return NextResponse.json({ success: false, message: "Gagal membuat diskon ongkir." }, { status: 500 });
     }
 }

@@ -44,6 +44,23 @@ export async function GET(
             );
         }
 
+        // ==========================================
+        // SECURITY (L3 FIX): Validate subdistrictId is numeric
+        // ==========================================
+        // Prevents SSRF via path traversal in RajaOngkir
+        // API endpoint construction. Without this, an
+        // attacker could pass e.g. "../../v2/user" to
+        // access unintended API endpoints.
+        const numericSubdistrictId = Number(subdistrictId);
+        if (!Number.isInteger(numericSubdistrictId) || numericSubdistrictId <= 0) {
+            return NextResponse.json(
+                {
+                    message: "subdistrictId tidak valid.",
+                },
+                { status: 400 }
+            );
+        }
+
         /*
          * Kita tetap menggunakan API RajaOngkir.
          * Jangan mengubah endpoint region yang
@@ -52,7 +69,7 @@ export async function GET(
 
         const data =
             await rajaOngkirFetch(
-                `/destination/domestic-destination/${subdistrictId}`,
+                `/destination/domestic-destination/${numericSubdistrictId}`,
                 {
                     method: "GET",
                 }
