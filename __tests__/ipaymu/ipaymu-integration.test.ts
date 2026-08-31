@@ -886,6 +886,116 @@ describe("iPaymu Webhook Integration", () => {
             /console\.log.*secret/i
         );
     });
+
+    test("webhook uses VA number for callback signature (not API key)", () => {
+        const webhook = readFile(
+            "app/api/payment/ipaymu/notification/route.ts"
+        );
+
+        // Should reference IPAYMU_CONFIG.va, not apiKey
+        expect(webhook).toContain("const { va } = IPAYMU_CONFIG");
+        expect(webhook).toContain("verifyWebhookSignature(");
+    });
+
+    test("webhook does not use old HMAC-SHA256(apiKey, timestamp:externalID:rawBody) formula", () => {
+        const ipaymu = readFile(
+            "lib/payment/ipaymu.ts"
+        );
+
+        // Should NOT contain the old signed payload formula in computeWebhookSignature
+        expect(ipaymu).not.toContain("signedPayload");
+    });
+
+    test("webhook uses VA as secret key for callback signature", () => {
+        const ipaymu = readFile(
+            "lib/payment/ipaymu.ts"
+        );
+
+        // computeWebhookSignature should use merchantVa parameter
+        expect(ipaymu).toContain("merchantVa: string");
+        // Should use HMAC-SHA256 with VA number
+        expect(ipaymu).toContain('createHmac("sha256", merchantVa)');
+    });
+
+    test("webhook normalizes callback body types (trx_id to int, is_escrow to bool)", () => {
+        const ipaymu = readFile(
+            "lib/payment/ipaymu.ts"
+        );
+
+        expect(ipaymu).toContain("normalizeCallbackBody");
+        expect(ipaymu).toContain("INTEGER_KEYS");
+        expect(ipaymu).toContain("is_escrow");
+    });
+
+    test("webhook sorts keys and escapes slashes in canonical JSON", () => {
+        const ipaymu = readFile(
+            "lib/payment/ipaymu.ts"
+        );
+
+        expect(ipaymu).toContain("computeCanonicalJson");
+        expect(ipaymu).toContain("phpKsort");
+        expect(ipaymu).toContain("localeCompare");
+        expect(ipaymu).toContain("jsonBody.replace");
+    });
+
+    test("webhook verifyWebhookSignature uses timingSafeEqual", () => {
+        const ipaymu = readFile(
+            "lib/payment/ipaymu.ts"
+        );
+
+        expect(ipaymu).toContain("timingSafeEqual");
+    });
+
+    test("callback signature tests exist", () => {
+        const testFile = readFile(
+            "__tests__/order-refund/refund-repay-webhook.test.ts"
+        );
+
+        expect(testFile).toContain("Callback Signature");
+        expect(testFile).toContain("normalizeCallbackBody");
+    });
+
+    test("notification route passes VA to verifyWebhookSignature (3-arg)", () => {
+        const webhook = readFile(
+            "app/api/payment/ipaymu/notification/route.ts"
+        );
+
+        // Should call verifyWebhookSignature(text, receivedSignature, va)
+        expect(webhook).toContain(
+            "verifyWebhookSignature("
+        );
+        expect(webhook).toContain("receivedSignature,");
+        expect(webhook).toContain(
+            "va"
+        );
+    });
+
+    test("spin wheel discount is included in iPaymu cart checkout items", () => {
+        const route = readFile(
+            "app/api/payment/ipaymu/route.ts"
+        );
+
+        expect(route).toContain("spinWheelDiscount");
+        expect(route).toContain("Reward Spin Wheel");
+    });
+
+    test("spin wheel discount is included in iPaymu buy-now items", () => {
+        const route = readFile(
+            "app/api/buy-now/ipaymu/route.ts"
+        );
+
+        expect(route).toContain("spinWheelDiscount");
+        expect(route).toContain("Reward Spin Wheel");
+    });
+
+    test("checkout returns spinWheelDiscount in CreatedCheckout type", () => {
+        const checkout = readFile(
+            "lib/checkout.ts"
+        );
+
+        expect(checkout).toContain("spinWheelDiscount: number");
+        expect(checkout).toContain("spinWheelDiscount,");
+    });
 });
 
 /* ==========================================

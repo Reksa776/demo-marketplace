@@ -117,6 +117,8 @@ export type CreatedCheckout = {
 
     discount: number;
 
+    spinWheelDiscount: number;
+
     grossAmount: number;
 
     cartId: number | null;
@@ -2001,6 +2003,8 @@ export async function createCheckoutOrder(
                     finalShippingCost,
 
                 discount,
+
+                spinWheelDiscount,
 
                 grossAmount,
 

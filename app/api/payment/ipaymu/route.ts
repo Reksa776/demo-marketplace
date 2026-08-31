@@ -343,6 +343,15 @@ export async function POST(request: Request) {
             );
         }
 
+        // Add spin wheel reward discount as negative price item
+        if (result.spinWheelDiscount > 0) {
+            products.push("Reward Spin Wheel");
+            qtys.push("1");
+            prices.push(
+                String(-result.spinWheelDiscount)
+            );
+        }
+
         /* ==========================================
          * CUSTOMER DATA
          * ========================================== */
@@ -385,6 +394,10 @@ export async function POST(request: Request) {
                     50
                 )
             );
+        }
+
+        if (result.spinWheelDiscount > 0) {
+            descriptions.push("Reward Spin Wheel");
         }
 
         /* ==========================================

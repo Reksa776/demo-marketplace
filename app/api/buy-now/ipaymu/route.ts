@@ -327,6 +327,14 @@ export async function POST(
             );
         }
 
+        if (result.spinWheelDiscount > 0) {
+            products.push("Reward Spin Wheel");
+            qtys.push("1");
+            prices.push(
+                String(-result.spinWheelDiscount)
+            );
+        }
+
         const recipientName = (
             result.order.recipientName ?? ""
         ).substring(0, 50);
@@ -365,6 +373,10 @@ export async function POST(
                     50
                 )
             );
+        }
+
+        if (result.spinWheelDiscount > 0) {
+            descriptions.push("Reward Spin Wheel");
         }
 
         /* ==========================================

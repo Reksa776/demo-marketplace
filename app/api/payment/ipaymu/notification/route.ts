@@ -81,11 +81,11 @@ export async function POST(
             );
         }
 
-        const { apiKey } = IPAYMU_CONFIG;
+        const { va } = IPAYMU_CONFIG;
 
-        if (!apiKey) {
+        if (!va) {
             console.error(
-                "IPAYMU SECURITY: MISSING API KEY — " +
+                "IPAYMU SECURITY: MISSING VA NUMBER — " +
                 "cannot verify webhook signature"
             );
             return json(
@@ -101,9 +101,7 @@ export async function POST(
             !verifyWebhookSignature(
                 text,
                 receivedSignature,
-                receivedTimestamp,
-                receivedExternalId,
-                apiKey
+                va
             )
         ) {
             console.error(

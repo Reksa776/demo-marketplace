@@ -79,6 +79,26 @@ export function generateTimestamp(): string {
 }
 
 /* ==========================================
+ * LEGACY SIGNATURE (for tests using old API)
+ * ==========================================
+ *
+ * Kept for backward compatibility with tests
+ * that compute the old outgoing signature.
+ */
+export function computeLegacyWebhookSignature(
+    apiKey: string,
+    timestamp: string,
+    externalId: string,
+    rawBody: string
+): string {
+    const payload = `${timestamp}:${externalId}:${rawBody}`;
+    return crypto
+        .createHmac("sha256", apiKey)
+        .update(payload)
+        .digest("hex");
+}
+
+/* ==========================================
  * PRODUCT DISPLAY NAME
  * ==========================================
  *
@@ -456,81 +476,180 @@ export function verifyNotificationAmount(
 }
 
 /* ==========================================
- * WEBHOOK SIGNATURE VERIFICATION
+ * CALLBACK SIGNATURE NORMALIZATION
  * ==========================================
  *
- * Verifies the iPaymu v2 webhook notification
- * signature.
+ * iPaymu callback signature verification follows
+ * these steps (from official docs):
  *
- * iPaymu webhook notifications are signed with:
- *   headers: X-Signature, X-Timestamp, X-External-ID
- *   body:    application/x-www-form-urlencoded
+ * 1. Parse form-encoded body into key-value pairs
+ * 2. Normalize data types:
+ *    - trx_id, status_code, transaction_status_code,
+ *      paid_off → Integer
+ *    - is_escrow → Boolean
+ *    - additional_info → Array ([] if missing)
+ *    - All other values → String
+ * 3. Remove 'signature' field if present
+ * 4. Ensure additional_info exists (add [] if missing)
+ * 5. Sort keys alphabetically A-Z (case-sensitive)
+ * 6. JSON.stringify the sorted object
+ * 7. Escape forward slashes (/ → \/)
+ * 8. HMAC-SHA256 with VA Number as secret key
+ * 9. Compare with X-Signature header
+ */
+const INTEGER_KEYS = [
+    "trx_id",
+    "status_code",
+    "transaction_status_code",
+    "paid_off",
+];
+
+export function normalizeCallbackBody(
+    raw: Record<string, string>
+): Record<string, unknown> {
+    const result: Record<string, unknown> = {};
+
+    for (const key in raw) {
+        const val = raw[key];
+
+        if (key === "is_escrow") {
+            result[key] = val === "true" || val === "1";
+        } else if (INTEGER_KEYS.includes(key)) {
+            result[key] = parseInt(val, 10);
+        } else if (key === "additional_info") {
+            if (val === "[]") {
+                result[key] = [];
+            } else {
+                try {
+                    const parsed = JSON.parse(val);
+                    result[key] = Array.isArray(parsed) ? parsed : [];
+                } catch {
+                    result[key] = [];
+                }
+            }
+        } else {
+            result[key] = String(val);
+        }
+    }
+
+    if (!Object.prototype.hasOwnProperty.call(result, "additional_info")) {
+        result["additional_info"] = [];
+    }
+
+    return result;
+}
+
+/**
+ * Sort object keys alphabetically (A-Z),
+ * matching PHP json_encode behavior.
+ */
+function phpKsort(
+    obj: Record<string, unknown>
+): Record<string, unknown> {
+    return Object.keys(obj)
+        .sort((a, b) => a.localeCompare(b))
+        .reduce(
+            (sortedObj, key) => {
+                sortedObj[key] = obj[key];
+                return sortedObj;
+            },
+            {} as Record<string, unknown>
+        );
+}
+
+/**
+ * Compute the canonical JSON body used for callback
+ * signature verification.
  *
- * Signature algorithm:
- *   HMAC-SHA256(API_KEY, timestamp + ":" + externalID + ":" + rawBody)
+ * 1. Normalize types
+ * 2. Sort keys A-Z
+ * 3. JSON.stringify
+ * 4. Escape forward slashes
+ */
+export function computeCanonicalJson(
+    raw: Record<string, string>
+): string {
+    const normalized = normalizeCallbackBody(raw);
+    const sorted = phpKsort(normalized);
+    let jsonBody = JSON.stringify(sorted);
+    // Escape forward slashes to match PHP json_encode
+    jsonBody = jsonBody.replace(/\//g, "\\/");
+    return jsonBody;
+}
+
+/**
+ * Compute the HMAC-SHA256 signature for a callback.
  *
- * Verification uses timingSafeEqual to prevent
- * timing attacks.
+ * Uses the VA Number (not API Key) as the secret.
  *
- * Returns the HMAC-SHA256 signature for the given
- * webhook parameters. Used for both verification
- * and testing.
+ * @param jsonBody - The canonical JSON string
+ * @param merchantVa - The merchant VA number (secret key)
+ * @returns hex-encoded HMAC-SHA256 signature
  */
 export function computeWebhookSignature(
-    apiKey: string,
-    timestamp: string,
-    externalId: string,
-    rawBody: string
+    jsonBody: string,
+    merchantVa: string
 ): string {
-    const signedPayload = `${timestamp}:${externalId}:${rawBody}`;
     return crypto
-        .createHmac("sha256", apiKey)
-        .update(signedPayload)
+        .createHmac("sha256", merchantVa)
+        .update(jsonBody)
         .digest("hex");
 }
 
 /**
  * Verify the incoming iPaymu webhook signature.
  *
- * @param rawBody - The exact raw HTTP body (must not be reconstructed)
- * @param receivedSignature - The value from the X-Signature header
- * @param timestamp - The value from the X-Timestamp header
- * @param externalId - The value from the X-External-ID header
- * @param apiKey - The iPaymu API key (from env)
+ * iPaymu callback signature algorithm (from official docs):
+ * 1. Parse form body
+ * 2. Normalize data types
+ * 3. Sort keys A-Z
+ * 4. JSON.stringify
+ * 5. Escape slashes
+ * 6. HMAC-SHA256(VA, canonicalJson)
+ * 7. Compare with X-Signature
+ *
+ * @param rawBody - The exact raw HTTP body
+ * @param receivedSignature - The value from X-Signature header
+ * @param merchantVa - The VA Number (secret key for callback signature)
  * @returns true if signature is valid, false otherwise
  *
  * Security:
  * - Uses timingSafeEqual to prevent timing attacks
  * - Returns false on any error (fail-closed)
- * - If no API key is configured, returns false (fail-closed)
  */
 export function verifyWebhookSignature(
     rawBody: string,
     receivedSignature: string,
-    timestamp: string,
-    externalId: string,
-    apiKey: string
+    merchantVa: string
 ): boolean {
-    // Fail-closed: no API key = cannot verify = reject
-    if (!apiKey) {
+    // Fail-closed: no VA = cannot verify = reject
+    if (!merchantVa) {
         return false;
     }
 
-    // Fail-closed: missing any authentication material = reject
-    if (!receivedSignature || !timestamp || !externalId) {
+    // Fail-closed: missing signature = reject
+    if (!receivedSignature) {
         return false;
     }
 
     try {
+        // Parse the form-encoded body
+        const params = new URLSearchParams(rawBody);
+        const raw: Record<string, string> = {};
+        params.forEach((value, key) => {
+            raw[key] = value;
+        });
+
+        // Compute canonical JSON
+        const canonicalJson = computeCanonicalJson(raw);
+
+        // Compute expected signature using VA as secret
         const expectedSignature = computeWebhookSignature(
-            apiKey,
-            timestamp,
-            externalId,
-            rawBody
+            canonicalJson,
+            merchantVa
         );
 
-        // Handle length mismatch safely before timingSafeEqual
-        // (timingSafeEqual throws on mismatched lengths)
+        // Safe comparison using timingSafeEqual
         const receivedBuf = Buffer.from(receivedSignature, "utf8");
         const expectedBuf = Buffer.from(expectedSignature, "utf8");
 
