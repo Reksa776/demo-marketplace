@@ -1513,6 +1513,7 @@ export async function createCheckoutOrder(
                 }
 
                 const reward = spinRecord.reward;
+                const rewardBase = subtotal - discount;
 
                 if (reward.type === "FREE_SHIPPING") {
                     // Free shipping: set shipping to 0
@@ -1528,7 +1529,7 @@ export async function createCheckoutOrder(
                         reward.maxDiscount
                             ? Number(reward.maxDiscount)
                             : null,
-                        subtotal - discount
+                        rewardBase
                     );
                 } else if (reward.type === "CASHBACK") {
                     // Cashback is not a direct discount
@@ -1536,6 +1537,24 @@ export async function createCheckoutOrder(
                 }
 
                 spinWheelSpinId = spinRecord.id;
+
+                // ==========================================
+                // SAFE DIAGNOSTIC LOG (no secrets)
+                // ==========================================
+                logCheckoutEvent(
+                    "SPIN_REWARD_CALC",
+                    {
+                        spinId: spinRecord.id,
+                        rewardType: reward.type,
+                        rewardValue: Number(reward.value),
+                        rewardMaxDiscount: reward.maxDiscount ? Number(reward.maxDiscount) : null,
+                        rewardBase,
+                        spinWheelDiscount,
+                        freeShipping: reward.type === "FREE_SHIPPING" ? finalShippingCost2 === 0 : false,
+                        subtotal,
+                        voucherDiscount: discount,
+                    }
+                );
             }
 
             finalShippingCost = finalShippingCost2;

@@ -307,33 +307,54 @@ export async function createRedirectPayment(
 
         clearTimeout(timeoutId);
     } catch (fetchError: any) {
-        if (
-            fetchError.name === "AbortError"
-        ) {
+        // ==========================================
+        // NETWORK-LEVEL ERRORS (no HTTP response)
+        // ==========================================
+        if (fetchError.name === "AbortError") {
             throw new Error(
-                "iPaymu request timeout. Pembayaran tidak dapat dibuat saat ini."
+                "[TIMEOUT] iPaymu request timeout (30s). Pembayaran tidak dapat dibuat saat ini."
+            );
+        }
+
+        if (fetchError.cause?.code === "ENOTFOUND") {
+            throw new Error(
+                "[DNS_ERROR] iPaymu domain tidak dapat di-resolve. Periksa koneksi internet."
+            );
+        }
+
+        if (fetchError.cause?.code === "ECONNREFUSED") {
+            throw new Error(
+                "[CONNECTION_REFUSED] iPaymu server menolak koneksi."
             );
         }
 
         if (
-            fetchError.cause?.code ===
-                "ENOTFOUND" ||
-            fetchError.message?.includes(
-                "fetch failed"
-            )
+            fetchError.cause?.code === "ECONNRESET" ||
+            fetchError.message?.includes("socket hang up")
         ) {
             throw new Error(
-                "iPaymu server tidak dapat dijangkau. Periksa koneksi internet."
+                "[CONNECTION_RESET] iPaymu connection terputus."
             );
         }
 
+        if (
+            fetchError.cause?.code?.startsWith("ERR_TLS") ||
+            fetchError.message?.includes("SSL") ||
+            fetchError.message?.includes("TLS")
+        ) {
+            throw new Error(
+                "[TLS_ERROR] iPaymu TLS/SSL handshake gagal."
+            );
+        }
+
+        // Generic network error
         throw new Error(
-            `iPaymu connection error: ${fetchError.message}`
+            `[NETWORK_ERROR] iPaymu: ${fetchError.message}`
         );
     }
 
     // ==========================================
-    // PARSE RESPONSE
+    // HTTP-LEVEL RESPONSE
     // ==========================================
     let result: IpaymuResponse;
 
@@ -341,7 +362,7 @@ export async function createRedirectPayment(
         result = await response.json();
     } catch {
         throw new Error(
-            `iPaymu returned invalid JSON (HTTP ${response.status})`
+            `[INVALID_JSON] iPaymu returned non-JSON response (HTTP ${response.status})`
         );
     }
 
@@ -350,7 +371,8 @@ export async function createRedirectPayment(
     // ==========================================
     if (process.env.NODE_ENV !== "production") {
         console.log("[iPaymu] RESPONSE:", {
-            status: result.Status,
+            httpStatus: response.status,
+            ipaymuStatus: result.Status,
             message: result.Message,
             hasUrl: !!result.Data?.Url,
             sessionId: result.Data?.SessionId,
@@ -358,21 +380,40 @@ export async function createRedirectPayment(
     }
 
     // ==========================================
-    // VALIDATE RESPONSE
+    // HTTP 4XX / 5XX = application-level errors
+    // ==========================================
+    if (response.status === 401 || response.status === 403) {
+        throw new Error(
+            `[AUTH_ERROR] iPaymu authentication gagal (HTTP ${response.status}). Periksa API key dan VA.`
+        );
+    }
+
+    if (response.status >= 500) {
+        throw new Error(
+            `[IPAYMU_SERVER_ERROR] iPaymu server error (HTTP ${response.status}). Coba lagi nanti.`
+        );
+    }
+
+    if (response.status !== 200) {
+        throw new Error(
+            `[IPAYMU_HTTP_ERROR] iPaymu returned HTTP ${response.status}: ${result.Message || "unknown"}`
+        );
+    }
+
+    // ==========================================
+    // IPAYMU BUSINESS-LEVEL VALIDATION
     // ==========================================
     if (result.Status !== 200) {
-        // Don't expose raw error details in production
         const message =
             process.env.NODE_ENV === "production"
-                ? "Gagal membuat pembayaran iPaymu."
-                : result.Message ||
-                  "Gagal membuat pembayaran iPaymu.";
+                ? "[IPAYMU_API_ERROR] Gagal membuat pembayaran iPaymu."
+                : `[IPAYMU_API_ERROR] ${result.Message || "Gagal membuat pembayaran iPaymu."}`;
         throw new Error(message);
     }
 
     if (!result.Data?.Url) {
         throw new Error(
-            "iPaymu returned success but no payment URL."
+            "[IPAYMU_API_ERROR] iPaymu returned success but no payment URL."
         );
     }
 

@@ -877,6 +877,57 @@ test("Checkout validates item details total", () => {
     );
 });
 
+test("BuyNow iPaymu validates item total before payment creation", () => {
+    assert(
+        buyNowIpaymuRoute.includes("itemTotal") &&
+            buyNowIpaymuRoute.includes("result.grossAmount"),
+        "BuyNow iPaymu must validate item total == grossAmount"
+    );
+});
+
+test("Cart iPaymu validates item total before payment creation", () => {
+    assert(
+        cartIpaymuRoute.includes("itemTotal") &&
+            cartIpaymuRoute.includes("result.grossAmount"),
+        "Cart iPaymu must validate item total == grossAmount"
+    );
+});
+
+test("BuyNow iPaymu rolls back on item total mismatch", () => {
+    assert(
+        buyNowIpaymuRoute.includes("ITEM TOTAL MISMATCH"),
+        "Must log mismatch and rollback"
+    );
+});
+
+test("Error messages include error category prefix", () => {
+    assert(
+        ipaymuLib.includes("[TIMEOUT]") &&
+            ipaymuLib.includes("[DNS_ERROR]") &&
+            ipaymuLib.includes("[NETWORK_ERROR]") &&
+            ipaymuLib.includes("[AUTH_ERROR]") &&
+            ipaymuLib.includes("[IPAYMU_API_ERROR]") &&
+            ipaymuLib.includes("[IPAYMU_SERVER_ERROR]") &&
+            ipaymuLib.includes("[INVALID_JSON]") &&
+            ipaymuLib.includes("[CONNECTION_REFUSED]") &&
+            ipaymuLib.includes("[CONNECTION_RESET]") &&
+            ipaymuLib.includes("[TLS_ERROR]") &&
+            ipaymuLib.includes("[IPAYMU_HTTP_ERROR]"),
+        "Must categorize errors by type"
+    );
+});
+
+test("Spin wheel diagnostic logging includes reward details", () => {
+    const checkoutCode = readFile("lib/checkout.ts");
+    assert(
+        checkoutCode.includes("SPIN_REWARD_CALC") &&
+            checkoutCode.includes("rewardType") &&
+            checkoutCode.includes("rewardValue") &&
+            checkoutCode.includes("spinWheelDiscount"),
+        "Must log spin reward details for debugging"
+    );
+});
+
 test("Both frontend pages send spinWheelSpinId", () => {
     const checkoutPage = readFile("app/checkout/CheckoutPage.tsx");
     const buyNowPage = readFile("app/buy-now/BuyNowPage.tsx");

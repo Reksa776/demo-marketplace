@@ -398,11 +398,52 @@ export async function POST(request: Request) {
 
         if (result.spinWheelDiscount > 0) {
             descriptions.push("Reward Spin Wheel");
+        }        /* ==========================================
+         * VALIDATE ITEM DETAILS TOTAL
+         * ==========================================
+         */
+        const itemTotal = prices.reduce(
+            (sum, p, i) => sum + Number(p) * Number(qtys[i]),
+            0
+        );
+
+        if (itemTotal !== result.grossAmount) {
+            console.error(
+                "[iPaymu] ITEM TOTAL MISMATCH:",
+                {
+                    itemTotal,
+                    grossAmount: result.grossAmount,
+                    productCount: products.length,
+                    subtotal: result.subtotal,
+                    shipping: result.shippingCost,
+                    discount: result.discount,
+                    spinWheelDiscount: result.spinWheelDiscount,
+                }
+            );
+
+            try {
+                await rollbackCheckoutOrder(
+                    result.order.id,
+                    { restoreCart: false }
+                );
+                createdOrderId = null;
+            } catch (rollbackError) {
+                console.error("ROLLBACK ERROR:", rollbackError);
+            }
+
+            return NextResponse.json(
+                {
+                    success: false,
+                    message: "Kesalahan kalkulasi pembayaran. Silakan coba lagi.",
+                },
+                { status: 500 }
+            );
         }
 
         /* ==========================================
          * CREATE IPAYMU REDIRECT PAYMENT
-         * ========================================== */
+         * ==========================================
+         */
 
         const ipaymuResult =
             await createRedirectPayment({
