@@ -197,6 +197,16 @@ export type IpaymuResponse = {
  * payment.
  */
 
+/* ==========================================
+ * REQUEST TIMEOUT (30 seconds)
+ * ==========================================
+ *
+ * Production iPaymu API typically responds
+ * within 5-10 seconds. 30s covers slow
+ * network without hanging indefinitely.
+ */
+const IPAYMU_REQUEST_TIMEOUT_MS = 30_000;
+
 export async function createRedirectPayment(
     request: IpaymuRedirectRequest
 ): Promise<IpaymuResponse> {
@@ -205,6 +215,37 @@ export async function createRedirectPayment(
     if (!apiKey || !va) {
         throw new Error(
             "iPaymu credentials belum dikonfigurasi."
+        );
+    }
+
+    // ==========================================
+    // VALIDATE AMOUNT (server-authoritative)
+    // ==========================================
+    if (
+        !Number.isFinite(request.amount) ||
+        request.amount <= 0
+    ) {
+        throw new Error(
+            `iPaymu amount tidak valid: ${request.amount}`
+        );
+    }
+
+    // ==========================================
+    // VALIDATE PRODUCT ARRAYS
+    // ==========================================
+    if (
+        !Array.isArray(request.product) ||
+        request.product.length === 0
+    ) {
+        throw new Error("iPaymu product list kosong.");
+    }
+
+    if (
+        request.product.length !== request.qty.length ||
+        request.product.length !== request.price.length
+    ) {
+        throw new Error(
+            "iPaymu product/qty/price array length mismatch."
         );
     }
 
@@ -220,57 +261,118 @@ export async function createRedirectPayment(
     );
     const timestamp = generateTimestamp();
 
+    // ==========================================
+    // SECURITY: Never log API key or full signature
+    // ==========================================
     if (process.env.NODE_ENV !== "production") {
-        console.log("========== IPAYMU DEBUG ==========");
-        console.log("VA:", va);
-        console.log("BASE URL:", baseUrl);
-        console.log("BODY LENGTH:", body.length);
-        console.log("BODY HASH:", bodyHash);
-        console.log("SIGNATURE FIRST8:", signature.substring(0, 8));
-        console.log("TIMESTAMP:", timestamp);
-        console.log("==================================");
-    }
-
-    if (process.env.NODE_ENV !== "production") {
-        console.log("========== IPAYMU CREATE ==========");
-        console.log("URL:", `${baseUrl}/api/v2/payment/`);
-        console.log("AMOUNT:", request.amount);
-        console.log("REFERENCE:", request.referenceId);
-        console.log("METHOD:", request.paymentMethod);
-        console.log("CHANNEL:", request.paymentChannel);
-    }
-
-    const response = await fetch(
-        `${baseUrl}/api/v2/payment/`,
-        {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                va,
-                signature,
-                timestamp,
-                Accept: "application/json",
-            },
-            body,
-        }
-    );
-
-    const result: IpaymuResponse =
-        await response.json();
-
-    if (process.env.NODE_ENV !== "production") {
-        console.log("IPAYMU RESPONSE:", {
-            Status: result.Status,
-            Message: result.Message,
-            HasUrl: !!result.Data?.Url,
-            SessionId: result.Data?.SessionId,
+        console.log("[iPaymu] CREATE PAYMENT:", {
+            url: `${baseUrl}/api/v2/payment/`,
+            amount: request.amount,
+            referenceId: request.referenceId,
+            method: request.paymentMethod,
+            channel: request.paymentChannel,
+            productCount: request.product.length,
+            bodyHash: bodyHash.substring(0, 8) + "...",
+            timestamp,
         });
     }
 
-    if (result.Status !== 200) {
+    // ==========================================
+    // FETCH WITH TIMEOUT
+    // ==========================================
+    let response: Response;
+
+    try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(
+            () => controller.abort(),
+            IPAYMU_REQUEST_TIMEOUT_MS
+        );
+
+        response = await fetch(
+            `${baseUrl}/api/v2/payment/`,
+            {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    va,
+                    signature,
+                    timestamp,
+                    Accept: "application/json",
+                },
+                body,
+                signal: controller.signal,
+            }
+        );
+
+        clearTimeout(timeoutId);
+    } catch (fetchError: any) {
+        if (
+            fetchError.name === "AbortError"
+        ) {
+            throw new Error(
+                "iPaymu request timeout. Pembayaran tidak dapat dibuat saat ini."
+            );
+        }
+
+        if (
+            fetchError.cause?.code ===
+                "ENOTFOUND" ||
+            fetchError.message?.includes(
+                "fetch failed"
+            )
+        ) {
+            throw new Error(
+                "iPaymu server tidak dapat dijangkau. Periksa koneksi internet."
+            );
+        }
+
         throw new Error(
-            result.Message ||
-                "Gagal membuat pembayaran iPaymu."
+            `iPaymu connection error: ${fetchError.message}`
+        );
+    }
+
+    // ==========================================
+    // PARSE RESPONSE
+    // ==========================================
+    let result: IpaymuResponse;
+
+    try {
+        result = await response.json();
+    } catch {
+        throw new Error(
+            `iPaymu returned invalid JSON (HTTP ${response.status})`
+        );
+    }
+
+    // ==========================================
+    // SECURITY: Log safe fields only
+    // ==========================================
+    if (process.env.NODE_ENV !== "production") {
+        console.log("[iPaymu] RESPONSE:", {
+            status: result.Status,
+            message: result.Message,
+            hasUrl: !!result.Data?.Url,
+            sessionId: result.Data?.SessionId,
+        });
+    }
+
+    // ==========================================
+    // VALIDATE RESPONSE
+    // ==========================================
+    if (result.Status !== 200) {
+        // Don't expose raw error details in production
+        const message =
+            process.env.NODE_ENV === "production"
+                ? "Gagal membuat pembayaran iPaymu."
+                : result.Message ||
+                  "Gagal membuat pembayaran iPaymu.";
+        throw new Error(message);
+    }
+
+    if (!result.Data?.Url) {
+        throw new Error(
+            "iPaymu returned success but no payment URL."
         );
     }
 
@@ -662,6 +764,103 @@ export function verifyWebhookSignature(
         // Any error → fail-closed
         return false;
     }
+}
+
+/**
+ * ==========================================
+ * SERVER-TO-SERVER PAYMENT VERIFICATION
+ * ==========================================
+ *
+ * Defense-in-depth: query iPaymu directly to
+ * verify payment status. Use when:
+ * 1. Webhook signature fails but payment looks legit
+ * 2. First-time payment confirmation needs
+ *    authoritative verification
+ * 3. Reconciliation checks
+ *
+ * Endpoint: POST /api/v2/payment/status
+ * Auth: Same headers as outgoing (va, signature, timestamp)
+ */
+export type PaymentStatusResponse = {
+    Status: number;
+    Data?: {
+        Status?: string;
+        Amount?: number;
+        ReferenceId?: string;
+        SessionId?: string;
+    };
+    Message?: string;
+};
+
+export async function verifyPaymentStatus(
+    sessionId: string
+): Promise<PaymentStatusResponse> {
+    const { apiKey, va, baseUrl } = IPAYMU_CONFIG;
+
+    if (!apiKey || !va) {
+        throw new Error("iPaymu credentials belum dikonfigurasi.");
+    }
+
+    if (!sessionId) {
+        throw new Error("SessionId tidak boleh kosong.");
+    }
+
+    const body = JSON.stringify({
+        sessionId,
+    });
+    const signature = generateSignature(body, va, apiKey);
+    const timestamp = generateTimestamp();
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(
+        () => controller.abort(),
+        15_000
+    );
+
+    try {
+        const response = await fetch(
+            `${baseUrl}/api/v2/payment/status`,
+            {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    va,
+                    signature,
+                    timestamp,
+                    Accept: "application/json",
+                },
+                body,
+                signal: controller.signal,
+            }
+        );
+
+        clearTimeout(timeoutId);
+
+        const result = await response.json();
+        return result;
+    } catch (error: any) {
+        clearTimeout(timeoutId);
+
+        if (error.name === "AbortError") {
+            throw new Error("iPaymu status verification timeout.");
+        }
+        throw error;
+    }
+}
+
+/**
+ * Determine if a payment status response indicates success.
+ */
+export function isPaymentConfirmed(
+    statusResponse: PaymentStatusResponse
+): boolean {
+    return (
+        statusResponse.Status === 200 &&
+        (
+            statusResponse.Data?.Status?.toLowerCase() === "paid" ||
+            statusResponse.Data?.Status?.toLowerCase() === "settlement"
+        )
+    );
 }
 
 /**

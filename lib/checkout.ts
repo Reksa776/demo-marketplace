@@ -425,7 +425,8 @@ function createMidtransItemDetails(
     shippingCost: number,
     discount: number,
     voucherId: number | null,
-    voucherCode: string | null
+    voucherCode: string | null,
+    spinWheelDiscount: number = 0
 ): MidtransItem[] {
     const itemDetails =
         checkoutItems.map(
@@ -479,6 +480,19 @@ function createMidtransItemDetails(
                     0,
                     50
                 ),
+        });
+    }
+
+    // Spin wheel reward discount as negative price item
+    if (spinWheelDiscount > 0) {
+        itemDetails.push({
+            id: "SPIN_WHEEL_REWARD",
+
+            price: -spinWheelDiscount,
+
+            quantity: 1,
+
+            name: "Reward Spin Wheel",
         });
     }
 
@@ -1256,6 +1270,34 @@ export async function createCheckoutOrder(
 
             /*
              * ==========================================
+             * MUTUAL EXCLUSION: VOUCHER XOR SPIN WHEEL
+             * ==========================================
+             *
+             * Business rule: satu order hanya boleh
+             * menggunakan SATU jenis reward:
+             * - Regular Voucher
+             * - Spin Wheel Reward
+             *
+             * Tidak boleh keduanya sekaligus.
+             * Validasi ini wajib di server, bukan hanya UI.
+             */
+
+            const hasVoucher =
+                typeof input.voucherCode === "string" &&
+                input.voucherCode.trim().length > 0;
+
+            const hasSpinWheel =
+                typeof input.spinWheelSpinId === "number" &&
+                input.spinWheelSpinId > 0;
+
+            if (hasVoucher && hasSpinWheel) {
+                throw new Error(
+                    "Silakan pilih salah satu voucher atau reward Spin Wheel."
+                );
+            }
+
+            /*
+             * ==========================================
              * VOUCHER
              * ==========================================
              */
@@ -1533,7 +1575,8 @@ export async function createCheckoutOrder(
                     finalShippingCost,
                     discount,
                     voucherId,
-                    appliedVoucherCode
+                    appliedVoucherCode,
+                    spinWheelDiscount
                 );
 
             if (

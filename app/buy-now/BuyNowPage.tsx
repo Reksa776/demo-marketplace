@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import toast from "react-hot-toast";
 import { trackTikTokEvent } from "@/lib/analytics/tiktok";
+import VoucherPickerModal from "@/components/VoucherPickerModal";
+import type { VoucherPickerSelection } from "@/components/VoucherPickerModal";
 
 /*
  * =========================================================
@@ -354,17 +356,11 @@ export default function BuyNowPage({
      * =====================================================
      */
 
-    const [voucherCode, setVoucherCode] =
-        useState("");
-
     const [appliedVoucherCode, setAppliedVoucherCode] =
         useState("");
 
     const [voucherDiscount, setVoucherDiscount] =
         useState(0);
-
-    const [voucherLoading, setVoucherLoading] =
-        useState(false);
 
     // Spin Wheel reward state
     type PendingSpinReward = {
@@ -378,6 +374,103 @@ export default function BuyNowPage({
     };
     const [pendingSpinRewards, setPendingSpinRewards] = useState<PendingSpinReward[]>([]);
     const [selectedSpinReward, setSelectedSpinReward] = useState<number | null>(null);
+
+    // Voucher Picker Modal state
+    const [showVoucherPicker, setShowVoucherPicker] = useState(false);
+    const [voucherPickerSelection, setVoucherPickerSelection] = useState<VoucherPickerSelection>({
+        voucherCode: null,
+        spinWheelSpinId: null,
+        voucherDiscount: 0,
+        spinWheelDiscount: 0,
+    });
+
+    // Manual voucher code state
+    const [manualVoucherCode, setManualVoucherCode] = useState("");
+    const [manualVoucherLoading, setManualVoucherLoading] = useState(false);
+    const [manualVoucherError, setManualVoucherError] = useState<string | null>(null);
+    const [showManualVoucherInput, setShowManualVoucherInput] = useState(false);
+
+    function handleVoucherPickerSelect(selection: VoucherPickerSelection) {
+        setAppliedVoucherCode(selection.voucherCode || "");
+        setVoucherDiscount(selection.voucherDiscount);
+        setSelectedSpinReward(selection.spinWheelSpinId);
+        setVoucherPickerSelection(selection);
+        // Clear manual input state when picker selection changes
+        setManualVoucherCode("");
+        setManualVoucherError(null);
+    }
+
+    async function validateManualVoucher() {
+        const code = manualVoucherCode.trim();
+        if (!code) {
+            setManualVoucherError("Masukkan kode voucher.");
+            return;
+        }
+
+        if (!data) return;
+
+        try {
+            setManualVoucherLoading(true);
+            setManualVoucherError(null);
+
+            const response = await fetch("/api/voucher/validate", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    code,
+                    subtotal: data.subtotal,
+                }),
+                cache: "no-store",
+            });
+
+            const result = await response.json();
+
+            if (!response.ok || !result.success) {
+                setManualVoucherError(
+                    result.message || "Kode voucher tidak dapat digunakan."
+                );
+                return;
+            }
+
+            // Apply the validated voucher
+            setAppliedVoucherCode(result.data.code);
+            setVoucherDiscount(result.data.discount);
+
+            // Clear spin wheel (mutual exclusion)
+            setSelectedSpinReward(null);
+
+            // Update voucher picker selection to reflect the manual code
+            setVoucherPickerSelection({
+                voucherCode: result.data.code,
+                spinWheelSpinId: null,
+                voucherDiscount: result.data.discount,
+                spinWheelDiscount: 0,
+            });
+
+            setManualVoucherCode("");
+            setManualVoucherError(null);
+            setShowManualVoucherInput(false);
+
+            toast.success(`Voucher ${result.data.code} berhasil diterapkan!`);
+        } catch {
+            setManualVoucherError("Gagal memvalidasi voucher. Coba lagi.");
+        } finally {
+            setManualVoucherLoading(false);
+        }
+    }
+
+    function removeManualVoucher() {
+        setAppliedVoucherCode("");
+        setVoucherDiscount(0);
+        setManualVoucherCode("");
+        setManualVoucherError(null);
+        setVoucherPickerSelection({
+            voucherCode: null,
+            spinWheelSpinId: null,
+            voucherDiscount: 0,
+            spinWheelDiscount: 0,
+        });
+    }
 
     /*
      * =====================================================
@@ -1976,7 +2069,28 @@ export default function BuyNowPage({
     const finalShippingCost =
         useMemo(() => {
             return Math.max(0, shippingCost - shippingDiscount);
-        }, [shippingCost, shippingDiscount]);
+        }, [shippingCost, shippingDiscount]);    // Compute spin wheel discount client-side for display
+    const spinWheelDisplayDiscount = useMemo(() => {
+        if (!selectedSpinReward || !data) return 0;
+        const selected = pendingSpinRewards.find((r) => r.spinId === selectedSpinReward);
+        if (!selected) return 0;
+        const subtotal = Number(data.subtotal);
+        switch (selected.rewardType) {
+            case "PERCENTAGE": {
+                let d = (subtotal * selected.rewardValue) / 100;
+                if (selected.maxDiscount !== null && d > selected.maxDiscount) d = selected.maxDiscount;
+                if (d > subtotal) d = subtotal;
+                return Math.round(d);
+            }
+            case "FIXED": {
+                let d = selected.rewardValue;
+                if (d > subtotal) d = subtotal;
+                return Math.round(d);
+            }
+            default:
+                return 0;
+        }
+    }, [selectedSpinReward, pendingSpinRewards, data]);
 
     const grandTotal =
         useMemo(() => {
@@ -1993,6 +2107,10 @@ export default function BuyNowPage({
 
                 Number(
                     voucherDiscount
+                ) -
+
+                Number(
+                    spinWheelDisplayDiscount
                 ) +
 
                 Number(
@@ -2002,7 +2120,9 @@ export default function BuyNowPage({
         }, [
             data,
 
+
             voucherDiscount,
+            spinWheelDisplayDiscount,
             finalShippingCost,
         ]);
 
@@ -2020,70 +2140,6 @@ export default function BuyNowPage({
      * Voucher final tetap sebaiknya dihitung ulang
      * oleh backend saat create order.
      */
-
-    async function applyVoucher() {
-        const code = voucherCode.trim().toUpperCase();
-
-        if (!code) {
-            toast.error("Masukkan kode voucher.");
-            return;
-        }
-
-        if (!data || data.subtotal <= 0) {
-            toast.error("Subtotal belum valid.");
-            return;
-        }
-
-        try {
-            setVoucherLoading(true);
-
-            const response = await fetch("/api/voucher/validate", {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                },
-                body: JSON.stringify({
-                    code,
-                    subtotal: data.subtotal,
-                }),
-            });
-
-            const result = await response.json();
-
-            if (!response.ok || !result.success) {
-                throw new Error(
-                    result.message || "Voucher tidak bisa digunakan."
-                );
-            }
-
-            setAppliedVoucherCode(result.data.code);
-            setVoucherCode(result.data.code);
-            setVoucherDiscount(
-                Number(result.data.discount) || 0
-            );
-
-            toast.success(
-                `Voucher ${result.data.code} berhasil dipakai.`
-            );
-        } catch (error) {
-            setAppliedVoucherCode("");
-            setVoucherDiscount(0);
-
-            toast.error(
-                error instanceof Error
-                    ? error.message
-                    : "Gagal memvalidasi voucher."
-            );
-        } finally {
-            setVoucherLoading(false);
-        }
-    }
-
-    function removeVoucher() {
-        setVoucherCode("");
-        setAppliedVoucherCode("");
-        setVoucherDiscount(0);
-    }
 
     /*
      * =====================================================
@@ -3737,62 +3793,150 @@ export default function BuyNowPage({
                                 </div>
                             )}
 
-                            {/* VOUCHER */}
+                            {/* Voucher Section */}
+                            <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
+                                <div className="flex items-center justify-between">
+                                    <span className="text-sm font-semibold">
+                                        Voucher
+                                    </span>
+                                    {!appliedVoucherCode && !selectedSpinReward && (
+                                        <button
+                                            type="button"
+                                            onClick={() => setShowVoucherPicker(true)}
+                                            className="text-sm font-semibold text-rose-600 hover:text-rose-700"
+                                        >
+                                            Pilih Voucher {'>'}
+                                        </button>
+                                    )}
+                                    {(appliedVoucherCode || selectedSpinReward) && (
+                                        <button
+                                            type="button"
+                                            onClick={() => setShowVoucherPicker(true)}
+                                            className="text-sm font-semibold text-rose-600 hover:text-rose-700"
+                                        >
+                                            Ubah {'>'}
+                                        </button>
+                                    )}
+                                </div>
 
-                            {voucherDiscount >
-                                0 && (
-                                    <div className="flex justify-between gap-4 text-green-600">
-                                        <span>
-                                            Diskon Voucher
-                                        </span>
-
-                                        <span className="font-medium">
-                                            - Rp{" "}
-                                            {voucherDiscount.toLocaleString(
-                                                "id-ID"
-                                            )}
-                                        </span>
+                                {appliedVoucherCode ? (
+                                    <div className="mt-2">
+                                        <div className="flex items-center justify-between">
+                                            <div className="flex items-center gap-2">
+                                                <span className="text-sm">🎟️</span>
+                                                <span className="text-sm font-medium text-gray-900">
+                                                    {appliedVoucherCode}
+                                                </span>
+                                            </div>
+                                            <button
+                                                type="button"
+                                                onClick={removeManualVoucher}
+                                                className="text-xs text-red-500 hover:text-red-700"
+                                            >
+                                                Hapus
+                                            </button>
+                                        </div>
+                                        <div className="mt-1 text-xs font-semibold text-emerald-600">
+                                            Hemat {voucherDiscount > 0 ? `-Rp ${voucherDiscount.toLocaleString("id-ID")}` : ""}
+                                        </div>
+                                    </div>
+                                ) : selectedSpinReward ? (
+                                    <div className="mt-2">
+                                        <div className="flex items-center gap-2">
+                                            <span className="text-sm">🎡</span>
+                                            <span className="text-sm font-medium text-gray-900">
+                                                Reward Spin Wheel
+                                            </span>
+                                        </div>
+                                        <div className="mt-1 text-xs font-semibold text-amber-600">
+                                            Hemat {spinWheelDisplayDiscount > 0 ? `-Rp ${spinWheelDisplayDiscount.toLocaleString("id-ID")}` : ""}
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div className="mt-2">
+                                        <div className="text-xs text-gray-500">
+                                            Belum ada voucher yang digunakan
+                                        </div>
                                     </div>
                                 )}
 
-                            {/* SPIN WHEEL REWARD SELECTION */}
-                            {pendingSpinRewards.length > 0 && (
-                                <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
-                                    <div className="text-sm font-semibold text-amber-800">
-                                        🎡 Reward Spin Wheel
-                                    </div>
-                                    <div className="mt-2 space-y-2">
-                                        {pendingSpinRewards.map((r) => (
-                                            <label
-                                                key={r.spinId}
-                                                className={`flex cursor-pointer items-center gap-3 rounded-xl border p-3 transition ${
-                                                    selectedSpinReward === r.spinId
-                                                        ? "border-amber-500 bg-amber-100"
-                                                        : "border-gray-200 bg-white hover:border-amber-300"
-                                                }`}
+                                {/* Manual Voucher Code Input */}
+                                {!appliedVoucherCode && !selectedSpinReward && (
+                                    <div className="mt-3 border-t border-gray-200 pt-3">
+                                        {!showManualVoucherInput ? (
+                                            <button
+                                                type="button"
+                                                onClick={() => setShowManualVoucherInput(true)}
+                                                className="text-xs font-semibold text-rose-600 hover:text-rose-700"
                                             >
-                                                <input
-                                                    type="radio"
-                                                    name="spinReward"
-                                                    checked={selectedSpinReward === r.spinId}
-                                                    onChange={() => setSelectedSpinReward(r.spinId)}
-                                                    className="accent-amber-500"
-                                                />
-                                                <div className="flex-1">
-                                                    <div className="text-sm font-semibold text-gray-900">
-                                                        {r.rewardName}
-                                                    </div>
-                                                    <div className="text-xs text-gray-500">
-                                                        {r.rewardType === "FIXED" && `Rp ${r.rewardValue.toLocaleString("id-ID")} OFF`}
-                                                        {r.rewardType === "PERCENTAGE" && `Diskon ${r.rewardValue}%${r.maxDiscount ? ` (maks Rp ${r.maxDiscount.toLocaleString("id-ID")})` : ""}`}
-                                                        {r.rewardType === "FREE_SHIPPING" && "Gratis Ongkir"}
-                                                        {r.rewardType === "CASHBACK" && `Cashback Rp ${r.rewardValue.toLocaleString("id-ID")}`}
-                                                        {r.rewardType === "ZONK" && "Zonk"}
-                                                    </div>
+                                                ✏️ Masukkan kode voucher
+                                            </button>
+                                        ) : (
+                                            <div>
+                                                <div className="flex gap-2">
+                                                    <input
+                                                        type="text"
+                                                        value={manualVoucherCode}
+                                                        onChange={(e) => {
+                                                            setManualVoucherCode(e.target.value.toUpperCase());
+                                                            setManualVoucherError(null);
+                                                        }}
+                                                        placeholder="Contoh: PROMOHEMAT20"
+                                                        disabled={manualVoucherLoading}
+                                                        className="flex-1 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-rose-500 disabled:bg-gray-100"
+                                                        onKeyDown={(e) => {
+                                                            if (e.key === "Enter") {
+                                                                e.preventDefault();
+                                                                validateManualVoucher();
+                                                            }
+                                                        }}
+                                                    />
+                                                    <button
+                                                        type="button"
+                                                        onClick={validateManualVoucher}
+                                                        disabled={manualVoucherLoading || !manualVoucherCode.trim()}
+                                                        className="rounded-lg bg-rose-600 px-4 py-2 text-sm font-semibold text-white hover:bg-rose-700 disabled:cursor-not-allowed disabled:bg-gray-300"
+                                                    >
+                                                        {manualVoucherLoading ? "Memproses..." : "Gunakan"}
+                                                    </button>
                                                 </div>
-                                            </label>
-                                        ))}
+                                                <button
+                                                    type="button"
+                                                    onClick={() => {
+                                                        setShowManualVoucherInput(false);
+                                                        setManualVoucherCode("");
+                                                        setManualVoucherError(null);
+                                                    }}
+                                                    className="mt-1 text-xs text-gray-500 hover:text-gray-700"
+                                                >
+                                                    Batal
+                                                </button>
+                                                {manualVoucherError && (
+                                                    <p className="mt-2 text-xs font-medium text-red-500">
+                                                        {manualVoucherError}
+                                                    </p>
+                                                )}
+                                            </div>
+                                        )}
                                     </div>
+                                )}
+                            </div>
+
+                            {voucherDiscount > 0 && (
+                                <div className="flex justify-between gap-4 text-emerald-600">
+                                    <span>Diskon Voucher</span>
+                                    <span className="font-semibold">
+                                        - Rp {voucherDiscount.toLocaleString("id-ID")}
+                                    </span>
+                                </div>
+                            )}
+
+                            {spinWheelDisplayDiscount > 0 && (
+                                <div className="flex justify-between gap-4 text-amber-600">
+                                    <span>Diskon Spin Wheel</span>
+                                    <span className="font-semibold">
+                                        - Rp {spinWheelDisplayDiscount.toLocaleString("id-ID")}
+                                    </span>
                                 </div>
                             )}
 
@@ -3810,70 +3954,6 @@ export default function BuyNowPage({
                                     </span>
                                 </div>
                             </div>
-                        </div>
-
-                        {/* =================================================
-    VOUCHER
-================================================= */}
-
-                        <div className="mt-6 border-t pt-6">
-                            <div className="mb-2 text-sm font-semibold">
-                                Kode Voucher
-                            </div>
-
-                            {!appliedVoucherCode ? (
-                                <div className="flex gap-2">
-                                    <input
-                                        value={voucherCode}
-                                        onChange={(e) =>
-                                            setVoucherCode(
-                                                e.target.value.toUpperCase()
-                                            )
-                                        }
-                                        onKeyDown={(e) => {
-                                            if (e.key === "Enter") {
-                                                applyVoucher();
-                                            }
-                                        }}
-                                        placeholder="Masukkan kode"
-                                        disabled={voucherLoading}
-                                        className="min-w-0 flex-1 rounded-xl border border-gray-300 px-3 py-2.5 text-sm outline-none focus:border-rose-500"
-                                    />
-
-                                    <button
-                                        type="button"
-                                        onClick={applyVoucher}
-                                        disabled={
-                                            voucherLoading ||
-                                            !voucherCode.trim()
-                                        }
-                                        className="rounded-xl bg-gray-900 px-4 py-2.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-gray-300"
-                                    >
-                                        {voucherLoading ? "Cek..." : "Pakai"}
-                                    </button>
-                                </div>
-                            ) : (
-                                <div className="flex items-center justify-between rounded-xl bg-gray-50 px-3 py-3">
-                                    <div>
-                                        <div className="font-semibold text-emerald-600">
-                                            {appliedVoucherCode}
-                                        </div>
-
-                                        <div className="text-xs text-gray-500">
-                                            Diskon Rp{" "}
-                                            {voucherDiscount.toLocaleString("id-ID")}
-                                        </div>
-                                    </div>
-
-                                    <button
-                                        type="button"
-                                        onClick={removeVoucher}
-                                        className="text-xs font-semibold text-red-600"
-                                    >
-                                        Hapus
-                                    </button>
-                                </div>
-                            )}
                         </div>
 
                         {/* =================================================
@@ -3915,6 +3995,16 @@ export default function BuyNowPage({
                     </aside>
                 </div>
             </div>
+
+            {/* Voucher Picker Modal */}
+            <VoucherPickerModal
+                open={showVoucherPicker}
+                onClose={() => setShowVoucherPicker(false)}
+                onSelect={handleVoucherPickerSelect}
+                subtotal={data.subtotal}
+                currentSelection={voucherPickerSelection}
+            />
+
         </main>
     );
 }
