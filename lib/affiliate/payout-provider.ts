@@ -442,15 +442,28 @@ function mapProviderStatus(
 /**
  * Verify webhook signature from provider.
  *
- * IMPORTANT: Implement based on actual provider webhook format.
+ * IMPORTANT: Disbursement confirmations trigger commission
+ * settlement, so this MUST fail closed:
+ *   - Missing PAYOUT_SECRET_KEY → reject every webhook (401).
+ *   - Signature mismatch/empty/malformed → reject.
+ *
+ * Previously the development branch accepted ALL webhooks when
+ * credentials were unset, letting an unauthenticated caller
+ * mark payouts as PAID and settle commissions.
  */
 export function verifyWebhookSignature(
     payload: string,
     signature: string
 ): boolean {
-    if (isDevelopment) {
-        // In dev mode, accept all webhooks
-        return true;
+    if (!config.secretKey) {
+        console.error(
+            "[PAYOUT PROVIDER] PAYOUT_SECRET_KEY is not configured — rejecting webhook (fail closed)."
+        );
+        return false;
+    }
+
+    if (!signature) {
+        return false;
     }
 
     const expected = crypto

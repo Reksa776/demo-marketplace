@@ -35,6 +35,8 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
         if (body.value !== undefined) data.value = Number(body.value);
         if (body.maxDiscount !== undefined) data.maxDiscount = body.maxDiscount ? Number(body.maxDiscount) : null;
         if (body.minPurchase !== undefined) data.minPurchase = body.minPurchase ? Number(body.minPurchase) : null;
+        if (body.quota !== undefined) data.quota = body.quota === null || body.quota === "" ? null : Number(body.quota);
+        if (body.maxUsagePerUser !== undefined) data.maxUsagePerUser = body.maxUsagePerUser === null || body.maxUsagePerUser === "" ? null : Number(body.maxUsagePerUser);
         if (body.startAt !== undefined) data.startAt = new Date(body.startAt);
         if (body.endAt !== undefined) data.endAt = new Date(body.endAt);
         if (body.isActive !== undefined) data.isActive = body.isActive;

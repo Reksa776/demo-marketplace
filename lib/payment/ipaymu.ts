@@ -24,10 +24,21 @@
  */
 
 import crypto from "crypto";
+import { getIpaymuConfig } from "./config";
 
 /* ==========================================
  * CONFIGURATION
- * ========================================== */
+ * ==========================================
+ *
+ * Legacy constant retained for backward compatibility with
+ * static config checks. It is NOT the operational source of
+ * truth anymore — payment operations resolve configuration
+ * through getIpaymuConfig() (lib/payment/config.ts), which is
+ * strict/fail-closed and environment-aware.
+ *
+ * Sandbox: https://sandbox.ipaymu.com
+ * Production: https://my.ipaymu.com
+ */
 
 export const IPAYMU_CONFIG = {
     apiKey: process.env.IPAYMU_API_KEY || "",
@@ -210,7 +221,8 @@ const IPAYMU_REQUEST_TIMEOUT_MS = 30_000;
 export async function createRedirectPayment(
     request: IpaymuRedirectRequest
 ): Promise<IpaymuResponse> {
-    const { apiKey, va, baseUrl } = IPAYMU_CONFIG;
+    // FAIL-CLOSED: misconfigured servers throw before any request is sent.
+    const { apiKey, va, baseUrl } = getIpaymuConfig();
 
     if (!apiKey || !va) {
         throw new Error(
@@ -455,10 +467,12 @@ export async function createRedirectPayment(
  *   "Message": "Payment success"
  * }
  *
- * Status mapping:
- * - Status 200 = Payment successful (berhasil)
- * - Status = pending status
- * - Other = failed/expired
+ * Status mapping (see classifyIpaymuNotification for the full,
+ * fail-safe mapping):
+ * - Status 1 (status_code) → success
+ * - Status 0 / 100-199 → pending
+ * - Status >= 4 / >= 400 → failed/expired
+ * - Anything else (including 2 and 3) is EXPLICITLY never success.
  *
  * NOTE: The exact webhook payload varies.
  * We handle multiple possible formats.
@@ -586,6 +600,99 @@ export function isFailedNotification(
     }
 
     return false;
+}
+
+/* ==========================================
+ * EXPLICIT STATUS CLASSIFICATION
+ * ==========================================
+ *
+ * F14 FIX: Instead of relying on loose "success/pending/failed"
+ * heuristics, classify the notification into an explicit union
+ * so an unrecognized status can NEVER be treated as success.
+ *
+ * iPaymu `status_code` mapping (v2 callback):
+ *   1  → success (berhasil)
+ *   0  → pending (menunggu pembayaran)
+ *   2  → unconfirmed (tidak pernah dianggap sukses)
+ *   3  → unconfirmed (tidak pernah dianggap sukses)
+ *   >=4 → failed / expired / cancelled
+ *
+ * String `status` values:
+ *   "berhasil" → success
+ *   "pending"  → pending
+ *   "gagal"/"failed"/"expired"/"canceled" → failed
+ *   anything else → unknown (never success)
+ */
+export type IpaymuStatusClass =
+    | "success"
+    | "pending"
+    | "failed"
+    | "unknown";
+
+export function classifyIpaymuNotification(
+    notification: IpaymuNotification
+): IpaymuStatusClass {
+    // 1. String-based status (some webhook versions)
+    if (typeof notification.status === "string") {
+        const s = notification.status.toLowerCase();
+        if (s === "berhasil") return "success";
+        if (s === "pending") return "pending";
+        if (
+            s === "gagal" ||
+            s === "failed" ||
+            s === "expired" ||
+            s === "canceled" ||
+            s === "cancelled"
+        ) {
+            return "failed";
+        }
+        return "unknown";
+    }
+
+    // 2. Numeric Status field (after route normalization)
+    if (typeof notification.Status === "number") {
+        const code = notification.Status;
+        if (code === 200) return "success";
+        if (code >= 100 && code < 200) return "pending";
+        if (code >= 400) return "failed";
+        // 2xx/3xx and anything else: NOT success
+        return "unknown";
+    }
+
+    // 3. Raw status_code (still present on the notification)
+    // NOTE: Number(undefined) → NaN, so Number.isInteger handles
+    // the missing-field case without TypeScript narrowing issues.
+    const rawCode = Number(notification.status_code);
+    if (Number.isInteger(rawCode)) {
+        if (rawCode === 1) return "success";
+        if (rawCode === 0) return "pending";
+        // 2 and 3 are explicitly non-success (unconfirmed)
+        if (rawCode === 2 || rawCode === 3) return "pending";
+        if (rawCode >= 4) return "failed";
+        return "unknown";
+    }
+
+    // 4. transaction_status_code / settlement_status fallback
+    const txCode = Number(notification.transaction_status_code);
+    if (Number.isInteger(txCode)) {
+        if (txCode === 1) return "success";
+        if (txCode === 0) return "pending";
+        if (txCode === 2 || txCode === 3) return "pending";
+        if (txCode >= 4) return "failed";
+        return "unknown";
+    }
+
+    if (typeof notification.settlement_status === "string") {
+        const s = notification.settlement_status.toLowerCase();
+        if (s === "paid" || s === "settlement") return "success";
+        if (s === "refunded" || s === "canceled") return "failed";
+        return "unknown";
+    }
+
+    // Nothing recognizable → unknown. The route treats unknown as
+    // a no-op (acknowledges to iPaymu but makes NO state change),
+    // which can never accidentally settle an order.
+    return "unknown";
 }
 
 /**
@@ -836,7 +943,8 @@ export type PaymentStatusResponse = {
 export async function verifyPaymentStatus(
     sessionId: string
 ): Promise<PaymentStatusResponse> {
-    const { apiKey, va, baseUrl } = IPAYMU_CONFIG;
+    // FAIL-CLOSED: misconfigured servers throw before any request is sent.
+    const { apiKey, va, baseUrl } = getIpaymuConfig();
 
     if (!apiKey || !va) {
         throw new Error("iPaymu credentials belum dikonfigurasi.");

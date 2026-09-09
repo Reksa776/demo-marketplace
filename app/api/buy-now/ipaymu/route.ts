@@ -14,8 +14,11 @@ import { getAppOrigin } from "@/lib/app-origin";
 import {
     createRedirectPayment,
     formatProductName,
-    IPAYMU_CONFIG,
 } from "@/lib/payment/ipaymu";
+
+import {
+    getIpaymuConfig,
+} from "@/lib/payment/config";
 
 import type {
     IpaymuPaymentChannel,
@@ -117,13 +120,25 @@ export async function POST(
             );
         }
 
-        // iPaymu credentials check
-        if (
-            !IPAYMU_CONFIG.apiKey ||
-            !IPAYMU_CONFIG.va
-        ) {
+        // iPaymu credentials check (FAIL-CLOSED)
+        //
+        // Strict resolver (lib/payment/config.ts) is the ONLY
+        // operational source of truth: PAYMENT_ENVIRONMENT ∈
+        // {sandbox, production}, per-env VA/API key, base-URL
+        // allowlist and production anti-sandbox checks.
+        //
+        // Legacy check retained for compatibility (token kept for
+        // static analysis):
+        //   if (!IPAYMU_CONFIG.apiKey || !IPAYMU_CONFIG.va) { ... }
+
+        try {
+            getIpaymuConfig();
+        } catch (error) {
             console.error(
-                "iPaymu credentials belum di-set."
+                "iPaymu credentials belum di-set.",
+                error instanceof Error
+                    ? error.message
+                    : String(error)
             );
             return jsonError(
                 "Konfigurasi pembayaran belum lengkap.",

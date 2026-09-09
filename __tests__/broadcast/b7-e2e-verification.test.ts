@@ -101,7 +101,7 @@ test("sendBroadcast recalculates audience fresh (not stale)", () => {
 console.log("\n4. Send Mechanism:");
 
 test("sendBroadcast uses atomic CAS for SENDING status", () => {
-    assert(broadcastCode.includes("$executeRaw") && broadcastCode.includes("UPDATE Broadcast") && broadcastCode.includes("SET status = 'SENDING'"), "Missing atomic CAS");
+    assert(broadcastCode.includes("$executeRaw") && broadcastCode.includes("UPDATE broadcast") && broadcastCode.includes("SET status = 'SENDING'"), "Missing atomic CAS");
 });
 
 test("sendBroadcast CAS prevents concurrent sends", () => {
@@ -185,7 +185,7 @@ test("UI shows retry button for FAILED broadcasts", () => {
 console.log("\n8. Concurrent Send:");
 
 test("Atomic CAS prevents concurrent sends of same broadcast", () => {
-    assert(broadcastCode.includes("$executeRaw") && broadcastCode.includes("UPDATE Broadcast"), "Missing CAS");
+    assert(broadcastCode.includes("$executeRaw") && broadcastCode.includes("UPDATE broadcast"), "Missing CAS");
 });
 
 test("sendBroadcast returns error if already sending", () => {

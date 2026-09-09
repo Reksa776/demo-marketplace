@@ -107,6 +107,30 @@ export async function POST(request: Request) {
         }
 
         /* ==========================================
+         * F16: AMOUNT CONSISTENCY CHECK
+         * ==========================================
+         *
+         * A compromised/replayed callback for a different amount
+         * must not settle commissions at the wrong value. When the
+         * provider echoes the amount, it must equal the payout.
+         */
+        if (
+            typeof payload.amount === "number" &&
+            Number(payout.amount) !== payload.amount
+        ) {
+            console.error(
+                `[PAYOUT WEBHOOK] Amount mismatch for payout #${payout.id}: expected ${payout.amount}, got ${payload.amount}`
+            );
+            return NextResponse.json(
+                {
+                    success: false,
+                    message: "Amount mismatch",
+                },
+                { status: 400 }
+            );
+        }
+
+        /* ==========================================
          * IDEMPOTENT: Already in final state
          * ========================================== */
 
@@ -180,7 +204,7 @@ export async function POST(request: Request) {
                  * FIFO allocation. This is idempotent.
                  */
                 const settledCount =
-                    await settleCommissionsForPayout(payout.id);
+                    await settleCommissionsForPayout(payout.id, tx);
 
                 console.log(
                     `[PAYOUT WEBHOOK] Payout #${payout.id} → PAID. Settled ${settledCount} commission(s).`

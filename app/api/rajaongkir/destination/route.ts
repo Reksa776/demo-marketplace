@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { rajaOngkirFetch } from "@/lib/rajaongkir";
 
 type RajaOngkirDestination = {
     id: number;
@@ -113,28 +114,6 @@ export async function GET(request: Request) {
 
         /*
          * ==========================================
-         * API KEY
-         * ==========================================
-         */
-
-        const apiKey =
-            process.env.RAJAONGKIR_API_KEY;
-
-        if (!apiKey) {
-            return NextResponse.json(
-                {
-                    success: false,
-                    message:
-                        "RAJAONGKIR_API_KEY belum dikonfigurasi.",
-                },
-                {
-                    status: 500,
-                }
-            );
-        }
-
-        /*
-         * ==========================================
          * SEARCH TERM
          * ==========================================
          *
@@ -165,34 +144,18 @@ export async function GET(request: Request) {
 
         /*
          * ==========================================
-         * RAJAONGKIR URL
+         * RAJAONGKIR ENDPOINT (via shared client)
          * ==========================================
+         *
+         * API key / base URL are handled centrally by
+         * rajaOngkirFetch (lib/rajaongkir.ts).
          */
 
-        const url =
-            new URL(
-                "https://rajaongkir.komerce.id/api/v1/destination/domestic-destination"
-            );
-
-        url.searchParams.set(
-            "search",
-            searchTerm
-        );
-
-        /*
-         * Ambil cukup banyak hasil agar kita
-         * bisa mencocokkan lokasi secara akurat.
-         */
-
-        url.searchParams.set(
-            "limit",
-            "100"
-        );
-
-        url.searchParams.set(
-            "offset",
-            "0"
-        );
+        const queryParams = new URLSearchParams({
+            search: searchTerm,
+            limit: "100",
+            offset: "0",
+        });
 
         console.log(
             "RAJAONGKIR DESTINATION REQUEST:",
@@ -206,66 +169,16 @@ export async function GET(request: Request) {
             }
         );
 
-        /*
-         * ==========================================
-         * FETCH RAJAONGKIR
-         * ==========================================
-         */
-
-        const response =
-            await fetch(
-                url.toString(),
+        const result =
+            await rajaOngkirFetch<RajaOngkirDestination[]>(
+                `/destination/domestic-destination?${queryParams.toString()}`,
                 {
                     method: "GET",
-
                     headers: {
-                        key: apiKey,
-                        Accept:
-                            "application/json",
+                        Accept: "application/json",
                     },
-
-                    cache: "no-store",
                 }
             );
-
-        const result =
-            await response.json();
-
-        console.log(
-            "RAJAONGKIR DESTINATION RESPONSE:",
-            JSON.stringify(
-                result,
-                null,
-                2
-            )
-        );
-
-        /*
-         * ==========================================
-         * HANDLE ERROR
-         * ==========================================
-         */
-
-        if (!response.ok) {
-            return NextResponse.json(
-                {
-                    success: false,
-                    message:
-                        result?.meta
-                            ?.message ||
-                        result?.message ||
-                        "Gagal mengambil destination RajaOngkir.",
-
-                    meta:
-                        result?.meta ??
-                        null,
-                },
-                {
-                    status:
-                        response.status,
-                }
-            );
-        }
 
         /*
          * ==========================================
@@ -274,10 +187,8 @@ export async function GET(request: Request) {
          */
 
         const destinations =
-            Array.isArray(
-                result?.data
-            )
-                ? (result.data as RajaOngkirDestination[])
+            Array.isArray(result)
+                ? result
                 : [];
 
         if (
@@ -288,9 +199,7 @@ export async function GET(request: Request) {
                     success: false,
                     message:
                         `Destination RajaOngkir tidak ditemukan untuk "${subdistrict}".`,
-                    meta:
-                        result?.meta ??
-                        null,
+                    meta: null,
                 },
                 {
                     status: 404,

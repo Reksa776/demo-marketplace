@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { Voucher_type } from "@prisma/client";
+import { Prisma, Voucher_type } from "@prisma/client";
 
 /**
  * ==========================================
@@ -32,6 +32,9 @@ export type ShippingDiscountResult = {
     originalShippingCost: number;
     discountAmount: number;
     finalShippingCost: number;
+    quota: number | null;
+    usedCount: number;
+    maxUsagePerUser: number | null;
 };
 
 // ==========================================
@@ -45,6 +48,8 @@ export async function createShippingDiscount(data: {
     value: number;
     maxDiscount?: number | null;
     minPurchase?: number | null;
+    quota?: number | null;
+    maxUsagePerUser?: number | null;
     startAt: Date;
     endAt: Date;
     isActive?: boolean;
@@ -57,6 +62,16 @@ export async function createShippingDiscount(data: {
     }
     if (data.type === "PERCENTAGE" && data.value > 100) {
         throw new Error("Persentase diskon tidak boleh lebih dari 100%.");
+    }
+    if (data.quota !== undefined && data.quota !== null && data.quota < 1) {
+        throw new Error("Kuota harus minimal 1.");
+    }
+    if (
+        data.maxUsagePerUser !== undefined &&
+        data.maxUsagePerUser !== null &&
+        data.maxUsagePerUser < 1
+    ) {
+        throw new Error("Batas pemakaian per user harus minimal 1.");
     }
 
     if (data.code) {
@@ -74,6 +89,8 @@ export async function createShippingDiscount(data: {
             value: data.value,
             maxDiscount: data.maxDiscount ?? null,
             minPurchase: data.minPurchase ?? null,
+            quota: data.quota ?? null,
+            maxUsagePerUser: data.maxUsagePerUser ?? null,
             startAt: data.startAt,
             endAt: data.endAt,
             isActive: data.isActive ?? true,
@@ -90,6 +107,8 @@ export async function updateShippingDiscount(
         value?: number;
         maxDiscount?: number | null;
         minPurchase?: number | null;
+        quota?: number | null;
+        maxUsagePerUser?: number | null;
         startAt?: Date;
         endAt?: Date;
         isActive?: boolean;
@@ -100,6 +119,16 @@ export async function updateShippingDiscount(
 
     if (data.startAt && data.endAt && data.endAt <= data.startAt) {
         throw new Error("Tanggal berakhir harus setelah tanggal mulai.");
+    }
+    if (data.quota !== undefined && data.quota !== null && data.quota < 1) {
+        throw new Error("Kuota harus minimal 1.");
+    }
+    if (
+        data.maxUsagePerUser !== undefined &&
+        data.maxUsagePerUser !== null &&
+        data.maxUsagePerUser < 1
+    ) {
+        throw new Error("Batas pemakaian per user harus minimal 1.");
     }
 
     return prisma.shippingDiscount.update({ where: { id }, data });
@@ -195,6 +224,14 @@ export async function calculateShippingDiscount(
 
     if (!discount) return null;
 
+    // F9: quota exhausted → not applicable, even if still active.
+    // (Could not be expressed as a Prisma filter because it compares
+    // two columns, so it is enforced here and atomically re-checked
+    // by reserveShippingDiscountUsage at order time.)
+    if (discount.quota !== null && discount.usedCount >= discount.quota) {
+        return null;
+    }
+
     // Check minimum purchase
     if (discount.minPurchase && subtotal < Number(discount.minPurchase)) {
         return null;
@@ -221,5 +258,72 @@ export async function calculateShippingDiscount(
         originalShippingCost: shippingCost,
         discountAmount,
         finalShippingCost: shippingCost - discountAmount,
+        quota: discount.quota,
+        usedCount: discount.usedCount,
+        maxUsagePerUser: discount.maxUsagePerUser,
     };
+}
+
+// ==========================================
+// ATOMIC QUOTA RESERVATION (F9)
+// ==========================================
+//
+// MUST be called inside the SAME transaction that creates the
+// order. Uses a conditional UPDATE (CAS) so two concurrent
+// checkouts can never both consume the last quota slot.
+//
+// Returns true when the slot was reserved and the discount can
+// be applied.
+
+export async function reserveShippingDiscountUsage(
+    tx: Prisma.TransactionClient,
+    discountId: number
+): Promise<boolean> {
+    const updated = await tx.$executeRaw`
+        UPDATE shippingdiscount
+        SET usedCount = usedCount + 1
+        WHERE id = ${discountId}
+          AND isActive = true
+          AND (quota IS NULL OR usedCount < quota)
+    `;
+
+    return updated === 1;
+}
+
+/**
+ * Release one quota slot for a cancelled order (F9).
+ * MUST be called inside the SAME transaction that flips the
+ * order to CANCELLED. Only decrements when a slot exists.
+ */
+export async function releaseShippingDiscountUsage(
+    tx: Prisma.TransactionClient,
+    discountId: number
+): Promise<void> {
+    await tx.$executeRaw`
+        UPDATE shippingdiscount
+        SET usedCount = CASE
+            WHEN usedCount > 0 THEN usedCount - 1
+            ELSE usedCount
+        END
+        WHERE id = ${discountId}
+    `;
+}
+
+/**
+ * Convenience: release quota for an order when it is cancelled,
+ * based on the stored shippingDiscountId. Safe no-op when the
+ * order never used one.
+ */
+export async function releaseShippingDiscountForOrder(
+    tx: Prisma.TransactionClient,
+    order: {
+        id: number;
+        shippingDiscountId: number | null;
+    } | null
+): Promise<void> {
+    if (!order?.shippingDiscountId) return;
+    await releaseShippingDiscountUsage(
+        tx,
+        order.shippingDiscountId
+    );
 }

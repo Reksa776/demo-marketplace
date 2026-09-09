@@ -258,7 +258,40 @@ export async function POST(
             );
         }
 
-        if (variant.stock <= 0) {
+        /*
+         * F4: A variant under an ACTIVE flash sale uses flash
+         * saleStock as its authoritative stock (checkout fully skips
+         * variant.stock for flash items). Validate the cart against
+         * saleStock, not variant.stock, so oversized carts are caught
+         * here instead of failing at checkout.
+         */
+        const activeFlashSale =
+            await prisma.flashSale.findFirst({
+                where: {
+                    variantId,
+                    isActive: true,
+                    startAt: { lte: new Date() },
+                    endAt: { gte: new Date() },
+                },
+                select: { id: true, saleStock: true },
+            });
+
+        const availableLimit = activeFlashSale
+            ? activeFlashSale.saleStock
+            : variant.stock;
+
+        if (activeFlashSale && activeFlashSale.saleStock <= 0) {
+            return NextResponse.json(
+                {
+                    message: "Stok flash sale habis.",
+                },
+                {
+                    status: 400,
+                }
+            );
+        }
+
+        if (!activeFlashSale && variant.stock <= 0) {
             return NextResponse.json(
                 {
                     message: "Stok produk habis.",
@@ -269,10 +302,12 @@ export async function POST(
             );
         }
 
-        if (quantity > variant.stock) {
+        if (quantity > availableLimit) {
             return NextResponse.json(
                 {
-                    message: `Stok hanya tersedia ${variant.stock}.`,
+                    message: activeFlashSale
+                        ? `Stok flash sale hanya tersedia ${activeFlashSale.saleStock}.`
+                        : `Stok hanya tersedia ${variant.stock}.`,
                 },
                 {
                     status: 400,
@@ -341,13 +376,13 @@ export async function POST(
                 );
             }
 
-            // Verify stock after atomic increment
+            // Verify stock after atomic increment (F4: flash-aware)
             const afterUpdate = await prisma.cartItem.findUnique({
                 where: { id: existingItem.id },
                 select: { quantity: true },
             });
 
-            if (afterUpdate && afterUpdate.quantity > variant.stock) {
+            if (afterUpdate && afterUpdate.quantity > availableLimit) {
                 // Rollback the increment
                 await prisma.cartItem.updateMany({
                     where: {
@@ -360,7 +395,9 @@ export async function POST(
                 });
                 return NextResponse.json(
                     {
-                        message: `Jumlah melebihi stok. Stok tersedia ${variant.stock}.`,
+                        message: activeFlashSale
+                            ? `Jumlah melebihi stok flash sale. Stok tersedia ${activeFlashSale.saleStock}.`
+                            : `Jumlah melebihi stok. Stok tersedia ${variant.stock}.`,
                     },
                     {
                         status: 400,
@@ -485,13 +522,50 @@ export async function PATCH(
             );
         }
 
-        if (
-            quantity >
-            item.variant.stock
-        ) {
+        // F4: flash-aware stock check for PATCH
+        const activeFlashSale =
+            await prisma.flashSale.findFirst({
+                where: {
+                    variantId: item.variantId,
+                    isActive: true,
+                    startAt: { lte: new Date() },
+                    endAt: { gte: new Date() },
+                },
+                select: { id: true, saleStock: true },
+            });
+
+        const availableLimit = activeFlashSale
+            ? activeFlashSale.saleStock
+            : item.variant.stock;
+
+        if (activeFlashSale && activeFlashSale.saleStock <= 0) {
             return NextResponse.json(
                 {
-                    message: `Stok hanya tersedia ${item.variant.stock}.`,
+                    message: "Stok flash sale habis.",
+                },
+                {
+                    status: 400,
+                }
+            );
+        }
+
+        if (!activeFlashSale && item.variant.stock <= 0) {
+            return NextResponse.json(
+                {
+                    message: "Stok produk habis.",
+                },
+                {
+                    status: 400,
+                }
+            );
+        }
+
+        if (quantity > availableLimit) {
+            return NextResponse.json(
+                {
+                    message: activeFlashSale
+                        ? `Stok flash sale hanya tersedia ${activeFlashSale.saleStock}.`
+                        : `Stok hanya tersedia ${item.variant.stock}.`,
                 },
                 {
                     status: 400,

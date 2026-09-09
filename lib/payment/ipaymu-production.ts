@@ -7,6 +7,14 @@
  * deploying to production with sandbox
  * credentials or misconfiguration.
  *
+ * Legacy (IPAYMU_API_KEY/IPAYMU_VA/IPAYMU_IS_PRODUCTION) is
+ * still supported for backward compatibility, but the STRICT
+ * model (lib/payment/config.ts) is the operational source of
+ * truth:
+ *
+ *   PAYMENT_ENVIRONMENT = sandbox | production
+ *   IPAYMU_SANDBOX_*      | IPAYMU_PRODUCTION_*
+ *
  * Usage:
  *   import { validateIpaymuProductionConfig } from "@/lib/payment/ipaymu-production";
  *   validateIpaymuProductionConfig(); // throws on failure
@@ -16,6 +24,11 @@
  */
 
 import crypto from "crypto";
+
+import {
+    buildIpaymuConfig,
+    PaymentConfigError,
+} from "./config";
 
 const SANDBOX_URL = "https://sandbox.ipaymu.com";
 const PRODUCTION_URL = "https://my.ipaymu.com";
@@ -39,11 +52,14 @@ export function validateIpaymuProductionConfig(): ValidationResult {
     const warnings: string[] = [];
 
     const isProduction =
+        process.env.PAYMENT_ENVIRONMENT === "production" ||
         process.env.IPAYMU_IS_PRODUCTION === "true";
 
     if (!isProduction) {
         warnings.push(
-            "IPAYMU_IS_PRODUCTION is not 'true' — running in sandbox mode"
+            "No production environment selected — " +
+                "set PAYMENT_ENVIRONMENT=production (or " +
+                "IPAYMU_IS_PRODUCTION=true) to enforce production checks"
         );
     }
 
@@ -52,51 +68,63 @@ export function validateIpaymuProductionConfig(): ValidationResult {
     const configuredUrl = process.env.IPAYMU_URL || "";
     const appUrl = process.env.NEXT_PUBLIC_APP_URL || "";
 
-    // ==========================================
-    // API KEY
-    // ==========================================
-
-    if (!apiKey) {
-        errors.push("IPAYMU_API_KEY is not set");
-    } else if (apiKey.length < 10) {
-        errors.push("IPAYMU_API_KEY appears too short (minimum 10 chars)");
-    }
-
-    // ==========================================
-    // VA
-    // ==========================================
-
-    if (!va) {
-        errors.push("IPAYMU_VA is not set");
-    } else if (!/^\d{10,20}$/.test(va)) {
-        errors.push(
-            "IPAYMU_VA should be a numeric string of 10-20 digits"
+    // New-model credentials take precedence over legacy vars.
+    const strictMode =
+        !!(
+            process.env.IPAYMU_PRODUCTION_API_KEY ||
+            process.env.IPAYMU_PRODUCTION_VA ||
+            process.env.IPAYMU_SANDBOX_API_KEY ||
+            process.env.IPAYMU_SANDBOX_VA
         );
-    }
 
     // ==========================================
-    // PRODUCTION URL
+    // API KEY (legacy mode only — strict model
+    // below validates the per-environment vars)
     // ==========================================
 
-    if (isProduction) {
-        // In production, URL must be the production endpoint
-        if (configuredUrl && configuredUrl !== PRODUCTION_URL) {
+    if (!strictMode) {
+        if (!apiKey) {
+            errors.push("IPAYMU_API_KEY is not set");
+        } else if (apiKey.length < 10) {
+            errors.push("IPAYMU_API_KEY appears too short (minimum 10 chars)");
+        }
+
+        // ==========================================
+        // VA (legacy mode only)
+        // ==========================================
+
+        if (!va) {
+            errors.push("IPAYMU_VA is not set");
+        } else if (!/^\d{10,20}$/.test(va)) {
             errors.push(
-                `IPAYMU_URL is '${configuredUrl}' but production requires '${PRODUCTION_URL}'`
+                "IPAYMU_VA should be a numeric string of 10-20 digits"
             );
         }
 
-        if (configuredUrl.includes("sandbox")) {
-            errors.push(
-                "IPAYMU_URL contains 'sandbox' — cannot use sandbox in production"
-            );
-        }
+        // ==========================================
+        // PRODUCTION URL (legacy mode only)
+        // ==========================================
 
-        // Check for localhost
-        if (configuredUrl.includes("localhost")) {
-            errors.push(
-                "IPAYMU_URL contains 'localhost' — not valid for production"
-            );
+        if (isProduction) {
+            // In production, URL must be the production endpoint
+            if (configuredUrl && configuredUrl !== PRODUCTION_URL) {
+                errors.push(
+                    `IPAYMU_URL is '${configuredUrl}' but production requires '${PRODUCTION_URL}'`
+                );
+            }
+
+            if (configuredUrl.includes("sandbox")) {
+                errors.push(
+                    "IPAYMU_URL contains 'sandbox' — cannot use sandbox in production"
+                );
+            }
+
+            // Check for localhost
+            if (configuredUrl.includes("localhost")) {
+                errors.push(
+                    "IPAYMU_URL contains 'localhost' — not valid for production"
+                );
+            }
         }
     }
 
@@ -134,6 +162,42 @@ export function validateIpaymuProductionConfig(): ValidationResult {
     }
 
     // ==========================================
+    // STRICT FAIL-CLOSED VALIDATION (NEW MODEL)
+    // ==========================================
+    //
+    // lib/payment/config.ts is the canonical resolver:
+    //  - PAYMENT_ENVIRONMENT must be exactly sandbox|production
+    //  - per-environment VA/API key presence & format
+    //  - base-URL allowlist (sandbox ⇄ sandbox, prod ⇄ prod),
+    //    which is what prevents 'sandbox' from ever being used
+    //    in production
+    //  - production blocks sandbox-VA reuse & localhost APP_URL
+    //
+    // The validator folds its strict error into the result so
+    // initIpaymuConfig() fails fast instead of letting a broken
+    // payment pipeline silently reach users.
+
+    if (strictMode || isProduction) {
+        try {
+            const resolved = buildIpaymuConfig(process.env);
+            if (
+                resolved.environment === "production" &&
+                !appUrl.startsWith("https://")
+            ) {
+                errors.push(
+                    `NEXT_PUBLIC_APP_URL must use HTTPS in production, got '${appUrl}'`
+                );
+            }
+        } catch (e) {
+            const detail =
+                e instanceof PaymentConfigError
+                    ? e.message
+                    : String(e);
+            errors.push(`Strict iPaymu config check failed: ${detail}`);
+        }
+    }
+
+    // ==========================================
     // LOGGING SAFETY
     // ==========================================
 
@@ -153,13 +217,18 @@ export function validateIpaymuProductionConfig(): ValidationResult {
  * FAIL-FAST ON MODULE LOAD (production only)
  * ==========================================
  *
- * When IPAYMU_IS_PRODUCTION=true, validates
- * configuration immediately on import.
- * In development, validation is opt-in.
+ * When production is selected (either by
+ * PAYMENT_ENVIRONMENT=production or legacy
+ * IPAYMU_IS_PRODUCTION=true), validates
+ * configuration immediately at call time.
+ * In development, validation is opt-in (and
+ * deliberately lazy so `next build` can run
+ * without PAYMENT_ENVIRONMENT set).
  */
 
 export function initIpaymuConfig() {
     const isProduction =
+        process.env.PAYMENT_ENVIRONMENT === "production" ||
         process.env.IPAYMU_IS_PRODUCTION === "true";
 
     if (isProduction) {
@@ -209,24 +278,39 @@ export function getIpaymuConfigSummary() {
             : SANDBOX_URL);
     const appUrl = process.env.NEXT_PUBLIC_APP_URL || "";
     const isProduction =
+        process.env.PAYMENT_ENVIRONMENT === "production" ||
         process.env.IPAYMU_IS_PRODUCTION === "true";
 
+    // Prefer the strict resolver when it is resolvable.
+    let strictBaseUrl = "";
+    let strictVa = "";
+    let environment: "sandbox" | "production" | "unknown" = "unknown";
+    try {
+        const cfg = buildIpaymuConfig(process.env);
+        environment = cfg.environment;
+        strictBaseUrl = cfg.baseUrl;
+        strictVa = cfg.va;
+    } catch {
+        // Not resolvable — summary will fall back to legacy fields.
+    }
+
     return {
+        environment,
         isProduction,
         hasApiKey: !!apiKey,
-        apiKeyLength: apiKey.length,
+        apiKeyLength: (strictBaseUrl ? "" : apiKey).length || apiKey.length,
         apiKeyPreview: apiKey
             ? `${apiKey.substring(0, 4)}...${apiKey.substring(apiKey.length - 4)}`
             : "NOT SET",
-        hasVa: !!va,
-        vaPreview: va
-            ? `${va.substring(0, 3)}***${va.substring(va.length - 3)}`
+        hasVa: !!(strictVa || va),
+        vaPreview: (strictVa || va)
+            ? `${(strictVa || va).substring(0, 3)}***${(strictVa || va).substring((strictVa || va).length - 3)}`
             : "NOT SET",
-        baseUrl: url,
+        baseUrl: strictBaseUrl || url,
         hasAppUrl: !!appUrl,
         appUrl,
-        isSandbox: url.includes("sandbox"),
-        isProductionUrl: url.includes("my.ipaymu.com"),
+        isSandbox: (strictBaseUrl || url).includes("sandbox"),
+        isProductionUrl: (strictBaseUrl || url).includes("my.ipaymu.com"),
     };
 }
 
@@ -255,7 +339,8 @@ export function validateCallbackUrl(
 
         // Must be HTTPS in production
         if (
-            process.env.IPAYMU_IS_PRODUCTION === "true" &&
+            (process.env.PAYMENT_ENVIRONMENT === "production" ||
+                process.env.IPAYMU_IS_PRODUCTION === "true") &&
             parsed.protocol !== "https:"
         ) {
             errors.push(`${label}: must use HTTPS in production, got ${parsed.protocol}`);
@@ -301,6 +386,7 @@ if (require.main === module) {
     const summary = getIpaymuConfigSummary();
 
     console.log("Configuration Summary:");
+    console.log(`  Environment: ${summary.environment}`);
     console.log(`  Production Mode: ${summary.isProduction ? "YES" : "NO (sandbox)"}`);
     console.log(`  API Key: ${summary.apiKeyPreview}`);
     console.log(`  VA: ${summary.vaPreview}`);

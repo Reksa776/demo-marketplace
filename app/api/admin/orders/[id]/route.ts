@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { releaseStockAndVoucherForOrder } from "@/lib/order-stock";
+import { releaseShippingDiscountForOrder } from "@/lib/marketing/shipping-discount";
 import { createAuditLog } from "@/lib/admin/audit-log";
 
 type RouteContext = {
@@ -477,15 +478,17 @@ export async function PATCH(
 
         const previousStatus = order.status;
 
+        let conflict = false;
+
         const updatedOrder = await prisma.$transaction(async (tx) => {
             /*
              * P0 FIX (C3): CAS status update.
              *
-             * When transitioning to CANCELLED, also restore stock
-             * and cancel affiliate commission inside the same
-             * transaction. The stock release uses conditional
-             * updates (GREATEST, saleStock >= qty) so duplicate
-             * calls are safe.
+             * When transitioning to CANCELLED, also restore stock,
+             * release the shipping-discount usage, and cancel
+             * affiliate commission inside the same transaction. The
+             * stock release uses conditional updates (GREATEST,
+             * saleStock >= qty) so duplicate calls are safe.
              */
             if (status === "CANCELLED" && previousStatus !== "CANCELLED") {
                 // CAS: atomically set status to CANCELLED
@@ -497,12 +500,22 @@ export async function PATCH(
                 `;
 
                 if (casAffected === 0) {
-                    // Already cancelled — return current state
-                    return await tx.order.findUnique({ where: { id: orderId } });
+                    // Already cancelled — report conflict (state changed
+                    // between read and write).
+                    conflict = true;
+                    return null;
                 }
 
                 // Release reserved stock and voucher usage
                 await releaseStockAndVoucherForOrder(tx, orderId);
+
+                // Release the reserved shipping-discount usage (F9/F21)
+                if (order.shippingDiscountId) {
+                    await releaseShippingDiscountForOrder(
+                        tx,
+                        order
+                    );
+                }
 
                 // Cancel affiliate commission
                 const { cancelCommissionForOrder } =
@@ -512,17 +525,34 @@ export async function PATCH(
                 return await tx.order.findUnique({ where: { id: orderId } });
             }
 
-            // Non-cancel transitions: update fields
-            const updated = await tx.order.update({
-                where: { id: orderId },
-                data: {
-                    status,
-                    trackingNumber:
+            /*
+             * F21/TOCTOU FIX: every non-cancel transition is a
+             * compare-and-swap against the status we validated above.
+             * Two concurrent PATCHes that both read `previousStatus`
+             * can no longer both apply (e.g. PAID -> PROCESSING and
+             * PAID -> SHIPPED landing simultaneously, skipping valid
+             * intermediate states).
+             */
+            const casAffected = await tx.$executeRaw`
+                UPDATE \`order\`
+                SET status = ${status},
+                    trackingNumber = ${
                         trackingNumber !== undefined
                             ? cleanTrackingNumber || null
-                            : order.trackingNumber,
-                    trackingUrl,
-                },
+                            : order.trackingNumber
+                    },
+                    trackingUrl = ${trackingUrl}
+                WHERE id = ${orderId}
+                  AND status = ${previousStatus}
+            `;
+
+            if (casAffected === 0) {
+                conflict = true;
+                return null;
+            }
+
+            const updated = await tx.order.findUnique({
+                where: { id: orderId },
             });
 
             /*
@@ -542,6 +572,17 @@ export async function PATCH(
 
             return updated;
         });
+
+        if (conflict) {
+            return NextResponse.json(
+                {
+                    success: false,
+                    message:
+                        "Status pesanan telah berubah oleh permintaan lain. Silakan muat ulang dan coba lagi.",
+                },
+                { status: 409 }
+            );
+        }
 
         /*
          * ==========================================

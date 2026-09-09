@@ -7,12 +7,12 @@
  * Run: npx tsx __tests__/shipping/courier-handling.test.ts
  *
  * Tests verify:
- * - All three couriers (JNE, JNT, SICEPAT) are requested
- * - No hardcoded whitelist blocks SiCepat
+ * - All three couriers (JNE, JNT, SICEPAT) are requested (defaults)
+ * - Courier allowlist is centralized in lib/rajaongkir.ts and keeps sicepat
  * - Response parser filters only cargo (JTR), not couriers
  * - UI displays courier name from response
- * - Server-side verification accepts any courier
- * - Both Cart and Buy Now use consistent courier flow
+ * - Server-side verification passes courier to calculateDomesticCost
+ * - Both Cart and Buy Now use consistent courier flow via shared helpers
  */
 
 import { readFileSync } from "fs";
@@ -85,6 +85,7 @@ console.log("\nB. Shipping API Routes:");
 
 const shippingCostRoute = readFile("app/api/shipping/cost/route.ts");
 const buyNowShippingRoute = readFile("app/api/buy-now/shipping/route.ts");
+const rajaOngkirLib = readFile("lib/rajaongkir.ts");
 
 test("/api/shipping/cost default courier includes sicepat", () => {
     assert(
@@ -100,79 +101,69 @@ test("/api/buy-now/shipping default courier includes sicepat", () => {
     );
 });
 
-test("/api/shipping/cost passes courier to RajaOngkir", () => {
+test("/api/shipping/cost delegates to shared calculateDomesticCost", () => {
     assert(
-        shippingCostRoute.includes('formData.append("courier", courier)'),
-        "Must pass courier parameter to RajaOngkir"
+        shippingCostRoute.includes("calculateDomesticCost("),
+        "Must call shared calculateDomesticCost"
     );
 });
 
-test("/api/buy-now/shipping passes courier to RajaOngkir", () => {
+test("/api/buy-now/shipping delegates to shared calculateDomesticCost", () => {
     assert(
-        buyNowShippingRoute.includes('formData.append("courier", courier)'),
-        "Must pass courier parameter to RajaOngkir"
+        buyNowShippingRoute.includes("calculateDomesticCost("),
+        "Must call shared calculateDomesticCost"
     );
 });
 
 // ==========================================
-// C. RESPONSE PARSER — NO COURIER WHITELIST
+// C. RESPONSE PARSER — JTR FILTER, NO COURIER BLOCKLIST
 // ==========================================
 
-console.log("\nC. Response Parser — No Courier Whitelist:");
+console.log("\nC. Response Parser — JTR filter, couriers preserved:");
 
-test("Shipping cost route: filter only removes JTR (cargo)", () => {
-    // Must NOT filter by courier code
+test("Shared parser filters only JTR (cargo) services", () => {
+    // Must filter JTR cargo services
     assert(
-        shippingCostRoute.includes('service.startsWith("JTR")'),
+        rajaOngkirLib.includes('service.startsWith("JTR")'),
         "Must filter JTR cargo services"
     );
-    // Must NOT have a whitelist that blocks sicepat
+    // Must NOT drop sicepat in the response filter
     assert(
-        !shippingCostRoute.includes('"sicepat"') ||
-        shippingCostRoute.includes('"jne:jnt:sicepat"'),
-        "Must not have sicepat-only filter"
+        rajaOngkirLib.includes("sicepat"),
+        "Allowlist must include sicepat"
     );
-    // Must NOT have courier code comparison that could block sicepat
-    const filterSection = shippingCostRoute.substring(
-        shippingCostRoute.indexOf(".filter("),
-        shippingCostRoute.indexOf(".map(")
+    const filterSection = rajaOngkirLib.substring(
+        rajaOngkirLib.indexOf(".filter("),
+        rajaOngkirLib.indexOf(".map(")
     );
     assert(
         !filterSection.includes('.code === "jne"') &&
-        !filterSection.includes('.code === "jnt"'),
-        "Filter must not compare courier codes (would block sicepat)"
+        !filterSection.includes('.code === "jnt"') &&
+        !filterSection.includes('.code === "sicepat"'),
+        "Filter must not compare specific courier codes"
     );
 });
 
-test("BuyNow shipping route: filter only removes JTR (cargo)", () => {
+test("Courier allowlist is centralized in lib/rajaongkir.ts", () => {
     assert(
-        buyNowShippingRoute.includes('service.startsWith("JTR")'),
-        "Must filter JTR cargo services"
-    );
-    const filterSection = buyNowShippingRoute.substring(
-        buyNowShippingRoute.indexOf(".filter("),
-        buyNowShippingRoute.indexOf(".map(")
+        rajaOngkirLib.includes("COURIER_ALLOWLIST"),
+        "Allowlist constant must live in shared lib"
     );
     assert(
-        !filterSection.includes('.code === "jne"') &&
-        !filterSection.includes('.code === "jnt"'),
-        "Filter must not compare courier codes (would block sicepat)"
+        rajaOngkirLib.includes('"jne"') &&
+        rajaOngkirLib.includes('"jnt"') &&
+        rajaOngkirLib.includes('"sicepat"'),
+        "Allowlist must include jne, jnt, sicepat"
     );
 });
 
-test("No hardcoded courier whitelist in any shipping file", () => {
-    const files = [
-        shippingCostRoute,
-        buyNowShippingRoute,
-        readFile("lib/rajaongkir-shipping.ts"),
-    ];
-    for (const code of files) {
+test("Routes do not inline courier filters", () => {
+    for (const code of [shippingCostRoute, buyNowShippingRoute]) {
         assert(
             !code.includes('["jne", "jnt"]') &&
             !code.includes('["JNE", "JNT"]') &&
-            !code.includes("whitelist") &&
-            !code.includes("allowedCouriers"),
-            "Must not have hardcoded courier whitelist"
+            !code.includes('filter(c => c === "jne")'),
+            "Must not inline courier whitelist/filters in routes"
         );
     }
 });
@@ -263,7 +254,7 @@ test("BuyNowPage has getServiceExplanation function", () => {
 console.log("\nF. Server-Side Verification:");
 
 const checkoutCode = readFile("lib/checkout.ts");
-const rajaOngkirCode = readFile("lib/rajaongkir-shipping.ts");
+const rajaOngkirCode = readFile("lib/rajaongkir.ts");
 
 test("Server-side verifyShippingCost exists", () => {
     assert(
@@ -293,24 +284,36 @@ test("Server-side verifyShippingCost matches by service", () => {
     );
 });
 
-test("calculateDomesticCost accepts any courier string", () => {
+test("calculateDomesticCost accepts optional courier string", () => {
     assert(
         rajaOngkirCode.includes("courier?: string"),
         "Must accept optional courier string"
     );
     assert(
-        rajaOngkirCode.includes('courier || "jne:sicepat:'),
-        "Default courier must include sicepat"
+        rajaOngkirCode.includes("courier ||"),
+        "Default courier must exist"
     );
 });
 
-test("calculateDomesticCost does not filter by courier code", () => {
-    // Must NOT have a filter that checks courier code
+test("calculateDomesticCost sanitizes couriers via allowlist", () => {
     assert(
-        !rajaOngkirCode.includes('.code === "jne"') &&
-        !rajaOngkirCode.includes('.code === "jnt"') &&
-        !rajaOngkirCode.includes('.code === "sicepat"'),
-        "Must not filter by courier code"
+        rajaOngkirCode.includes("sanitizeCouriers("),
+        "Must sanitize courier against allowlist"
+    );
+    assert(
+        rajaOngkirCode.includes("COURIER_ALLOWLIST"),
+        "Must reference the shared allowlist"
+    );
+});
+
+test("calculateDomesticCost pins price to lowest server-side", () => {
+    assert(
+        rajaOngkirCode.includes('form.append("price"'),
+        "Must send price param"
+    );
+    assert(
+        rajaOngkirCode.includes("lowest"),
+        "Must pin price to lowest"
     );
 });
 
@@ -383,22 +386,24 @@ test("Both API routes have same default courier", () => {
 
 test("Both API routes use same filter logic (JTR only)", () => {
     assert(
-        shippingCostRoute.includes('service.startsWith("JTR")') &&
-        buyNowShippingRoute.includes('service.startsWith("JTR")'),
-        "Both must filter only JTR cargo services"
+        shippingCostRoute.includes("normalizeShippingData(") &&
+        buyNowShippingRoute.includes("normalizeShippingData("),
+        "Both must delegate to normalizeShippingData"
+    );
+    assert(
+        rajaOngkirLib.includes('service.startsWith("JTR")'),
+        "Shared parser must filter only JTR"
     );
 });
 
-test("Both API routes sort by courier name then cost", () => {
+test("Shared parser sorts by courier name then cost", () => {
     assert(
-        shippingCostRoute.includes("a.courier.localeCompare(b.courier)") &&
-        buyNowShippingRoute.includes("a.courier.localeCompare(b.courier)"),
-        "Both must sort by courier name"
+        rajaOngkirLib.includes("a.courier.localeCompare(b.courier)"),
+        "Shared parser must sort by courier name"
     );
     assert(
-        shippingCostRoute.includes("a.cost - b.cost") &&
-        buyNowShippingRoute.includes("a.cost - b.cost"),
-        "Both must sort by cost within courier"
+        rajaOngkirLib.includes("a.cost - b.cost"),
+        "Shared parser must sort by cost within courier"
     );
 });
 

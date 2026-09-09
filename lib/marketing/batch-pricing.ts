@@ -208,22 +208,41 @@ export async function resolveBatchPrices(
             orderBy: { minQuantity: "desc" },
         });
 
-    // Group by variantId/productId and pick best tier per quantity
-    const bulkDiscountMap = new Map<
-        number,
-        (typeof bulkDiscounts)[0]
-    >();
-    const bulkDiscountProductMap = new Map<
-        number,
-        (typeof bulkDiscounts)[0]
-    >();
+    // Group by variantId/productId. Keep ALL tiers per key (not
+    // just the highest) so the best QUALIFYING tier can be picked
+    // per item quantity (F1/F2).
+    type BulkDiscountRow = (typeof bulkDiscounts)[number];
+    const bulkDiscountMap = new Map<number, BulkDiscountRow[]>();
+    const bulkDiscountProductMap = new Map<number, BulkDiscountRow[]>();
     for (const bd of bulkDiscounts) {
-        if (bd.variantId && !bulkDiscountMap.has(bd.variantId)) {
-            bulkDiscountMap.set(bd.variantId, bd);
-        } else if (!bd.variantId && !bulkDiscountProductMap.has(bd.productId)) {
-            bulkDiscountProductMap.set(bd.productId, bd);
+        if (bd.variantId) {
+            const list = bulkDiscountMap.get(bd.variantId) ?? [];
+            list.push(bd);
+            bulkDiscountMap.set(bd.variantId, list);
+        } else {
+            const list = bulkDiscountProductMap.get(bd.productId) ?? [];
+            list.push(bd);
+            bulkDiscountProductMap.set(bd.productId, list);
         }
     }
+
+    /**
+     * F1/F2: pick the bulk discount tier with the highest
+     * minQuantity that is still <= quantity. Given the query
+     * orders by minQuantity desc, the first qualifying tier
+     * is the best one.
+     */
+    const pickBestQualifyingTier = (
+        tiers: BulkDiscountRow[],
+        quantity: number
+    ) => {
+        for (const bd of tiers) {
+            if (quantity >= bd.minQuantity) {
+                return bd;
+            }
+        }
+        return null;
+    };
 
     // ==========================================
     // RESOLVE PER ITEM (in-memory, 0 queries)
@@ -357,8 +376,18 @@ export async function resolveBatchPrices(
     //    Only applies if no higher-priority discount gave a better price
     const quantity = item.quantity ?? 1;
     if (result.source === "ORIGINAL" || result.discountAmount === 0) {
-        const bd = bulkDiscountMap.get(item.variantId) ?? bulkDiscountProductMap.get(item.productId);
-        if (bd && quantity >= bd.minQuantity) {
+        // F1: even when a variant-level tier exists but none of its
+        // tiers qualifies, fall through to the product-level tiers.
+        const variantTiers = bulkDiscountMap.get(item.variantId);
+        const productTiers = bulkDiscountProductMap.get(item.productId);
+        const bd =
+            (variantTiers
+                ? pickBestQualifyingTier(variantTiers, quantity)
+                : null) ??
+            (productTiers
+                ? pickBestQualifyingTier(productTiers, quantity)
+                : null);
+        if (bd) {
             const dv = Number(bd.value);
             let amt = 0;
             if (bd.type === "PERCENTAGE") {

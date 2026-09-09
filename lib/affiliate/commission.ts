@@ -411,73 +411,84 @@ export async function createWithdrawalRequest(
  */
 
 export async function settleCommissionsForPayout(
+    payoutId: number,
+    tx?: Prisma.TransactionClient
+): Promise<number> {
+    if (tx) {
+        return settlePayoutCommissions(tx, payoutId);
+    }
+    return prisma.$transaction((transaction) =>
+        settlePayoutCommissions(transaction, payoutId)
+    );
+}
+
+async function settlePayoutCommissions(
+    tx: Prisma.TransactionClient,
     payoutId: number
 ): Promise<number> {
-    return prisma.$transaction(async (tx) => {
-        /*
-         * Locking read: ensures only one settlement pass
-         * runs for this payout (idempotent + race-safe).
-         */
-        const locked = await tx.$queryRaw<
-            Array<{ id: number; affiliateId: number }>
-        >`
-            SELECT id, affiliateId FROM \`affiliatepayout\`
-            WHERE id = ${payoutId} AND status = 'PAID'
-            FOR UPDATE
-        `;
+    /*
+     * Locking read: ensures only one settlement pass
+     * runs for this payout (idempotent + race-safe).
+     */
+    const locked = await tx.$queryRaw<
+        Array<{ id: number; affiliateId: number }>
+    >`
+        SELECT id, affiliateId FROM \`affiliatepayout\`
+        WHERE id = ${payoutId} AND status = 'PAID'
+        FOR UPDATE
+    `;
 
-        if (!locked || locked.length === 0) {
-            return 0;
-        }
+    if (!locked || locked.length === 0) {
+        return 0;
+    }
 
-        const { affiliateId } = locked[0];
+    const { affiliateId } = locked[0];
 
-        const payout = await tx.affiliatePayout.findUnique({
-            where: { id: payoutId },
-            select: { amount: true },
-        });
-
-        if (!payout) {
-            return 0;
-        }
-
-        let remaining = new Prisma.Decimal(
-            payout.amount
-        );
-
-        const conversions = await tx.affiliateConversion.findMany({
-            where: {
-                affiliateId,
-                status: "APPROVED",
-            },
-            orderBy: { createdAt: "asc" },
-            select: {
-                id: true,
-                commissionAmount: true,
-            },
-        });
-
-        const idsToSettle: number[] = [];
-
-        for (const conv of conversions) {
-            if (remaining.lte(0)) break;
-            idsToSettle.push(conv.id);
-            remaining = remaining.sub(conv.commissionAmount);
-        }
-
-        if (idsToSettle.length === 0) {
-            return 0;
-        }
-
-        const result = await tx.affiliateConversion.updateMany({
-            where: { id: { in: idsToSettle } },
-            data: { status: "PAID" },
-        });
-
-        console.log(
-            `AFFILIATE_PAYOUT_SETTLED: payout #${payoutId} settled ${result.count} conversion(s) for affiliate ${affiliateId}`
-        );
-
-        return result.count;
+    const payout = await tx.affiliatePayout.findUnique({
+        where: { id: payoutId },
+        select: { amount: true },
     });
+
+    if (!payout) {
+        return 0;
+    }
+
+    let remaining = new Prisma.Decimal(
+        payout.amount
+    );
+
+    const conversions = await tx.affiliateConversion.findMany({
+        where: {
+            affiliateId,
+            status: "APPROVED",
+        },
+        orderBy: { createdAt: "asc" },
+        select: {
+            id: true,
+            commissionAmount: true,
+        },
+    });
+
+    const idsToSettle: number[] = [];
+
+    for (const conv of conversions) {
+        if (remaining.lte(0)) break;
+        idsToSettle.push(conv.id);
+        remaining = remaining.sub(conv.commissionAmount);
+    }
+
+    if (idsToSettle.length === 0) {
+        return 0;
+    }
+
+    const result = await tx.affiliateConversion.updateMany({
+        where: { id: { in: idsToSettle } },
+        data: { status: "PAID" },
+    });
+
+    console.log(
+        `AFFILIATE_PAYOUT_SETTLED: payout #${payoutId} settled ${result.count} conversion(s) for affiliate ${affiliateId}`
+    );
+
+    return result.count;
 }

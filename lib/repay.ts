@@ -1,5 +1,8 @@
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@prisma/client";
+import {
+    recordFlashSalePurchase,
+} from "./marketing/flash-sale";
 
 /* ==========================================
  * REPAYMENT ELIGIBILITY
@@ -123,6 +126,27 @@ async function reReserveStockForOrder(
         });
 
         if (flashSale && flashSale.isActive) {
+            // F18: re-reserve flash stock AND re-enforce the per-user
+            // purchase limit. recordFlashSalePurchase pre-checks AND
+            // post-validates against purchaseLimit (race-safe).
+            try {
+                await recordFlashSalePurchase(
+                    tx,
+                    flashSale.id,
+                    order.userId,
+                    item.quantity
+                );
+            } catch (error) {
+                const { FlashSalePurchaseLimitError } =
+                    await import("./marketing/errors");
+                if (error instanceof FlashSalePurchaseLimitError) {
+                    throw new Error(
+                        `Batas pembelian flash sale ${item.productName} sudah tercapai untuk pembayaran ulang.`
+                    );
+                }
+                throw error;
+            }
+
             // Flash sale: re-reserve flash sale stock
             const affectedRows = await tx.$executeRaw`
                 UPDATE flashsale
@@ -139,23 +163,14 @@ async function reReserveStockForOrder(
                 );
             }
 
-            // Re-create purchase record
-            await tx.flashSalePurchase.upsert({
-                where: {
-                    flashSaleId_userId: {
-                        flashSaleId: flashSale.id,
-                        userId: order.userId,
-                    },
-                },
-                create: {
-                    flashSaleId: flashSale.id,
-                    userId: order.userId,
-                    quantity: item.quantity,
-                },
-                update: {
-                    quantity: { increment: item.quantity },
-                },
-            });
+            // F5: keep Product.sold in sync for flash items (the
+            // generic branch below only handles non-flash items).
+            if (item.productId !== null) {
+                await tx.product.update({
+                    where: { id: item.productId },
+                    data: { sold: { increment: item.quantity } },
+                });
+            }
         } else {
             // Regular item: re-reserve variant stock
             const stockUpdate = await tx.productVariant.updateMany({
@@ -187,6 +202,31 @@ async function reReserveStockForOrder(
     // Re-reserve voucher usage
     if (typeof order.voucherId === "number") {
         const { incrementVoucherUsage } = await import("@/lib/voucher");
+
+        // F18: re-enforce the per-user cap before re-consuming it.
+        const voucher = await tx.voucher.findUnique({
+            where: { id: order.voucherId },
+            select: { id: true, maxUsagePerUser: true },
+        });
+
+        if (voucher?.maxUsagePerUser) {
+            const usageRow = await tx.voucherUserUsage.findUnique({
+                where: {
+                    voucherId_userId: {
+                        voucherId: order.voucherId,
+                        userId: order.userId,
+                    },
+                },
+            });
+
+            const currentUsage = usageRow?.usageCount ?? 0;
+            if (currentUsage >= voucher.maxUsagePerUser) {
+                throw new Error(
+                    "Batas pemakaian voucher sudah tercapai untuk pembayaran ulang."
+                );
+            }
+        }
+
         const voucherReserved = await incrementVoucherUsage(tx, order.voucherId);
 
         if (!voucherReserved) {
@@ -212,14 +252,40 @@ async function reReserveStockForOrder(
     }
 
     // Re-reserve spin wheel reward
-    const spinRecord = await tx.spinWheelSpin.findFirst({
-        where: {
-            userId: order.userId,
-            status: "AVAILABLE",
-            orderId: null,
-        },
-        orderBy: { createdAt: "desc" },
-    });
+    let spinRecord: { id: number } | null = null;
+
+    if (order.originalSpinWheelSpinId != null) {
+        /*
+         * F18: use the EXACT spin the original checkout consumed
+         * (identity persisted on the order). Re-reserve it only if
+         * cancel has released it and no OTHER order took it since.
+         */
+        spinRecord = await tx.spinWheelSpin.findFirst({
+            where: {
+                id: order.originalSpinWheelSpinId,
+                userId: order.userId,
+                status: "AVAILABLE",
+                orderId: null,
+            },
+            select: { id: true },
+        });
+    }
+
+    if (!spinRecord && order.originalSpinWheelSpinId == null) {
+        // Legacy orders without an original-spin snapshot keep the
+        // previous behavior (latest available spin). Orders WITH a
+        // snapshot never grab a DIFFERENT spin if the original was
+        // already consumed elsewhere or expired.
+        spinRecord = await tx.spinWheelSpin.findFirst({
+            where: {
+                userId: order.userId,
+                status: "AVAILABLE",
+                orderId: null,
+            },
+            orderBy: { createdAt: "desc" },
+            select: { id: true },
+        });
+    }
 
     if (spinRecord) {
         await tx.spinWheelSpin.update({

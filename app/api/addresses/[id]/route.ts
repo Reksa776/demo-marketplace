@@ -173,46 +173,137 @@ export async function PATCH(
 
         /* ==========================================
          * VALIDATE REGION IDs IF PROVIDED
-         * ========================================== */
+         * ==========================================
+         *
+         * F8: Same chain rules as POST /api/addresses.
+         * A child region may only be stored when no parent is
+         * set OR the parent matches. A valid child also implies
+         * its parent, so the stored chain is never contradictory.
+         */
 
-        if (body.provinceId !== undefined) {
-            const pid = Number(body.provinceId);
-            if (Number.isInteger(pid) && pid > 0) {
-                const prov = await prisma.province.findUnique({ where: { id: pid }, select: { id: true } });
-                updateData.provinceId = prov ? pid : null;
-            } else {
-                updateData.provinceId = null;
+        // Candidate value for each level: body if provided (parsed to
+        // a positive integer else null), otherwise the existing row value.
+        const candidateProvinceId =
+            body.provinceId !== undefined
+                ? (() => {
+                      const n = Number(body.provinceId);
+                      return Number.isInteger(n) && n > 0 ? n : null;
+                  })()
+                : existing.provinceId;
+
+        const candidateRegencyId =
+            body.cityId !== undefined
+                ? (() => {
+                      const n = Number(body.cityId);
+                      return Number.isInteger(n) && n > 0 ? n : null;
+                  })()
+                : existing.regencyId;
+
+        const candidateDistrictId =
+            body.districtId !== undefined
+                ? (() => {
+                      const n = Number(body.districtId);
+                      return Number.isInteger(n) && n > 0 ? n : null;
+                  })()
+                : existing.districtId;
+
+        const candidateVillageId =
+            body.villageId !== undefined
+                ? (() => {
+                      const n = Number(body.villageId);
+                      return Number.isInteger(n) && n > 0 ? n : null;
+                  })()
+                : existing.villageId;
+
+        let validProvinceId: number | null = null;
+        let validRegencyId: number | null = null;
+        let validDistrictId: number | null = null;
+        let validVillageId: number | null = null;
+
+        if (candidateProvinceId) {
+            const prov = await prisma.province.findUnique({
+                where: { id: candidateProvinceId },
+                select: { id: true },
+            });
+            if (prov) validProvinceId = prov.id;
+        }
+
+        if (candidateRegencyId) {
+            const regencyData = await prisma.regency.findUnique({
+                where: { id: candidateRegencyId },
+                select: { id: true, provinceId: true },
+            });
+            if (regencyData) {
+                if (!validProvinceId || regencyData.provinceId === validProvinceId) {
+                    validRegencyId = regencyData.id;
+                    if (!validProvinceId) validProvinceId = regencyData.provinceId;
+                }
             }
         }
 
-        if (body.cityId !== undefined) {
-            const cid = Number(body.cityId);
-            if (Number.isInteger(cid) && cid > 0) {
-                const reg = await prisma.regency.findUnique({ where: { id: cid }, select: { id: true } });
-                updateData.regencyId = reg ? cid : null;
-            } else {
-                updateData.regencyId = null;
+        if (candidateDistrictId) {
+            const districtData = await prisma.district.findUnique({
+                where: { id: candidateDistrictId },
+                select: { id: true, regencyId: true },
+            });
+            if (districtData) {
+                if (!validRegencyId || districtData.regencyId === validRegencyId) {
+                    validDistrictId = districtData.id;
+                    if (!validRegencyId) {
+                        validRegencyId = districtData.regencyId;
+                        if (!validProvinceId) {
+                            const reg = await prisma.regency.findUnique({
+                                where: { id: validRegencyId },
+                                select: { provinceId: true },
+                            });
+                            if (reg) validProvinceId = reg.provinceId;
+                        }
+                    }
+                }
             }
         }
 
-        if (body.districtId !== undefined) {
-            const did = Number(body.districtId);
-            if (Number.isInteger(did) && did > 0) {
-                const dist = await prisma.district.findUnique({ where: { id: did }, select: { id: true } });
-                updateData.districtId = dist ? did : null;
-            } else {
-                updateData.districtId = null;
+        if (candidateVillageId) {
+            const villageData = await prisma.village.findUnique({
+                where: { id: candidateVillageId },
+                select: { id: true, districtId: true },
+            });
+            if (villageData) {
+                if (!validDistrictId || villageData.districtId === validDistrictId) {
+                    validVillageId = villageData.id;
+                    if (!validDistrictId) validDistrictId = villageData.districtId;
+                }
             }
         }
 
-        if (body.villageId !== undefined) {
-            const vid = Number(body.villageId);
-            if (Number.isInteger(vid) && vid > 0) {
-                const vil = await prisma.village.findUnique({ where: { id: vid }, select: { id: true } });
-                updateData.villageId = vil ? vid : null;
-            } else {
-                updateData.villageId = null;
-            }
+        // Write only levels the client explicitly provided…
+        if (body.provinceId !== undefined) updateData.provinceId = validProvinceId;
+        if (body.cityId !== undefined) updateData.regencyId = validRegencyId;
+        if (body.districtId !== undefined) updateData.districtId = validDistrictId;
+        if (body.villageId !== undefined) updateData.villageId = validVillageId;
+
+        // …and cascade any parent implied by an accepted child where the
+        // client did not override it, so the stored chain stays consistent.
+        if (
+            body.provinceId === undefined &&
+            existing.provinceId === null &&
+            validProvinceId !== null
+        ) {
+            updateData.provinceId = validProvinceId;
+        }
+        if (
+            body.cityId === undefined &&
+            existing.regencyId === null &&
+            validRegencyId !== null
+        ) {
+            updateData.regencyId = validRegencyId;
+        }
+        if (
+            body.districtId === undefined &&
+            existing.districtId === null &&
+            validDistrictId !== null
+        ) {
+            updateData.districtId = validDistrictId;
         }
 
         /* ==========================================

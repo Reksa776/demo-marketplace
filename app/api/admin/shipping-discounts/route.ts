@@ -36,7 +36,7 @@ export async function POST(request: NextRequest) {
         const admin = await requireAdmin();
         if ("error" in admin) return admin.error;
         const body = await request.json();
-        const { name, code, type, value, maxDiscount, minPurchase, startAt, endAt, isActive } = body;
+        const { name, code, type, value, maxDiscount, minPurchase, startAt, endAt, isActive, quota, maxUsagePerUser } = body;
 
         if (!name?.trim()) return NextResponse.json({ success: false, message: "Nama wajib diisi." }, { status: 400 });
         if (!type || !["PERCENTAGE", "FIXED"].includes(type)) return NextResponse.json({ success: false, message: "Tipe diskon tidak valid." }, { status: 400 });
@@ -50,6 +50,8 @@ export async function POST(request: NextRequest) {
             value: Number(value),
             maxDiscount: maxDiscount ? Number(maxDiscount) : null,
             minPurchase: minPurchase ? Number(minPurchase) : null,
+            quota: quota !== undefined && quota !== null && quota !== "" ? Number(quota) : null,
+            maxUsagePerUser: maxUsagePerUser !== undefined && maxUsagePerUser !== null && maxUsagePerUser !== "" ? Number(maxUsagePerUser) : null,
             startAt: new Date(startAt),
             endAt: new Date(endAt),
             isActive: isActive !== false,

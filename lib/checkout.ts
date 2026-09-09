@@ -17,10 +17,11 @@ import {
 } from "./marketing/batch-pricing";
 import {
     calculateShippingDiscount,
+    reserveShippingDiscountUsage,
 } from "./marketing/shipping-discount";
 import {
     calculateDomesticCost,
-} from "./rajaongkir-shipping";
+} from "./rajaongkir";
 import {
     calculateSpinRewardDiscount,
 } from "./spin-wheel";
@@ -1437,24 +1438,83 @@ export async function createCheckoutOrder(
             let finalShippingCost = verifiedShippingCost;
             let shippingDiscountAmount = 0;
             let shippingDiscountName: string | null = null;
+            let shippingDiscountId: number | null = null;
+
+            /*
+             * ==========================================
+             * F9: PROMO-CODE PRECEDENCE
+             * ==========================================
+             *
+             * There is a single promo-code input. If that code was
+             * already accepted as a VOUCHER (voucherId !== null),
+             * it must NOT simultaneously activate a shipping
+             * discount — otherwise one code yields two discounts.
+             * Codes that are NOT valid vouchers may still act as
+             * shipping-discount codes.
+             */
+            const shippingDiscountCode =
+                voucherId !== null
+                    ? null
+                    : typeof input.voucherCode === "string" &&
+                        input.voucherCode.trim()
+                      ? input.voucherCode.trim()
+                      : null;
 
             try {
                 const shippingDiscountResult =
                     await calculateShippingDiscount(
                         verifiedShippingCost,
                         subtotal,
-                        typeof input.voucherCode === "string"
-                            ? input.voucherCode
-                            : null
+                        shippingDiscountCode
                     );
 
                 if (shippingDiscountResult) {
-                    finalShippingCost =
-                        shippingDiscountResult.finalShippingCost;
-                    shippingDiscountAmount =
-                        shippingDiscountResult.discountAmount;
-                    shippingDiscountName =
-                        shippingDiscountResult.name;
+                    /*
+                     * F9: per-user usage cap (best-effort pre-check;
+                     * the CAS below is authoritative for global quota
+                     * and rolls back with the order).
+                     */
+                    let withinUserCap = true;
+                    if (shippingDiscountResult.maxUsagePerUser) {
+                        const usedByUser =
+                            await tx.order.count({
+                                where: {
+                                    userId: input.userId,
+                                    shippingDiscountId:
+                                        shippingDiscountResult.shippingDiscountId,
+                                    status: {
+                                        notIn: [
+                                            "CANCELLED",
+                                            "REFUND_PENDING",
+                                        ],
+                                    },
+                                },
+                            });
+
+                        withinUserCap =
+                            usedByUser <
+                            shippingDiscountResult.maxUsagePerUser;
+                    }
+
+                    if (withinUserCap) {
+                        // Atomic global-quota reservation (CAS).
+                        const reserved =
+                            await reserveShippingDiscountUsage(
+                                tx,
+                                shippingDiscountResult.shippingDiscountId
+                            );
+
+                        if (reserved) {
+                            shippingDiscountId =
+                                shippingDiscountResult.shippingDiscountId;
+                            finalShippingCost =
+                                shippingDiscountResult.finalShippingCost;
+                            shippingDiscountAmount =
+                                shippingDiscountResult.discountAmount;
+                            shippingDiscountName =
+                                shippingDiscountResult.name;
+                        }
+                    }
                 }
             } catch {
                 // Shipping discount failure is non-fatal —
@@ -1662,6 +1722,28 @@ export async function createCheckoutOrder(
                         input.userId,
                         item.quantity
                     );
+
+                    /*
+                     * F5: Flash-sale items were skipped by the
+                     * generic stock loop below (which `continue`s on
+                     * flashSaleId), so Product.sold was NEVER
+                     * incremented for flash purchases. Increment it
+                     * here — once, in this branch only — so flash
+                     * and non-flash items stay consistent.
+                     */
+                    if (item.productId != null) {
+                        await tx.product.update({
+                            where: {
+                                id: item.productId,
+                            },
+                            data: {
+                                sold: {
+                                    increment:
+                                        item.quantity,
+                                },
+                            },
+                        });
+                    }
                 }
             }
 
@@ -1727,6 +1809,26 @@ export async function createCheckoutOrder(
 
                         voucherCode:
                             appliedVoucherCode ??
+                            undefined,
+
+                        // F9: shipping-discount attribution
+                        shippingDiscountId:
+                            shippingDiscountId ??
+                            undefined,
+
+                        shippingDiscountName:
+                            shippingDiscountName ??
+                            undefined,
+
+                        shippingDiscountAmount:
+                            shippingDiscountAmount > 0
+                                ? shippingDiscountAmount
+                                : undefined,
+
+                        // F18: keep the exact spin identity on the order
+                        // (survives release-on-cancel, unlike spin.orderId)
+                        originalSpinWheelSpinId:
+                            spinWheelSpinId ??
                             undefined,
 
                         status:

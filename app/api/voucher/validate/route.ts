@@ -72,12 +72,32 @@ export async function POST(request: Request) {
         // (items parameter is optional for preview — eligibility still checked)
         const items: VoucherValidationItem[] = Array.isArray(body.items) ? body.items : [];
 
+        /*
+         * F10: Resolve the campaign context from the cart items so
+         * campaign-scoped vouchers validate/preview correctly.
+         * Mirrors the authoritative resolution in lib/checkout.ts.
+         */
+        let campaignId: number | null = null;
+        try {
+            const { resolveOrderCampaignId } = await import("@/lib/marketing/batch-pricing");
+            const productIds = items
+                .map((i) => Number(i.productId))
+                .filter((id) => Number.isInteger(id) && id > 0);
+            campaignId = productIds.length
+                ? await resolveOrderCampaignId(
+                      productIds.map((productId) => ({ productId }))
+                  )
+                : null;
+        } catch {
+            campaignId = null;
+        }
+
         const result = await validateAndCalculateVoucherEnhanced(
             code,
             parsedSubtotal,
             items,
             session.user.id,
-            null, // campaignId — preview doesn't know this
+            campaignId,
             prisma
         );
 

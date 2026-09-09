@@ -376,6 +376,22 @@ export async function executeSpin(
 
     // Check spin availability + create atomically
     return prisma.$transaction(async (tx) => {
+        /*
+         * F11: The old catch-all was the DB unique constraint
+         * (campaignId, userId), REMOVED by migration
+         * 20260826000000_remove_spin_unique_constraint (it blocks
+         * maxSpinsPerUser > 1). Capacity is now enforced here by
+         * serializing spins per campaign: taking a FOR UPDATE lock
+         * on the campaign row makes concurrent executeSpin calls
+         * queue up, so the per-user count below is race-free even
+         * when the cap is crossed at the exact same instant.
+         */
+        await tx.$executeRaw`
+            SELECT id FROM spinwheelcampaign
+            WHERE id = ${campaign.id}
+            FOR UPDATE
+        `;
+
         // Count existing spins (all statuses that consume milestones)
         const existingSpins = await tx.spinWheelSpin.count({
             where: {
@@ -450,9 +466,11 @@ export async function executeSpin(
                 },
             });
         } catch (err: any) {
-            // P2002 = unique constraint violation (race condition safety net)
-            // This should rarely happen after the constraint was removed,
-            // but handles edge cases where concurrent requests slip through.
+            // P2002 = unique constraint violation.
+            // After migration 20260826000000 the (campaignId, userId)
+            // uniqueness is gone (it blocked maxSpinsPerUser > 1), so
+            // this fires only if a narrower constraint is reintroduced.
+            // The FOR UPDATE lock above is the real race guard now.
             if (err?.code === "P2002") {
                 return {
                     success: false,

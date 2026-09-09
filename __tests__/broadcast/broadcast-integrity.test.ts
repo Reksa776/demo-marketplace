@@ -62,7 +62,7 @@ test("sendBroadcast validates status transition (DRAFT/SCHEDULED → SENDING)", 
 });
 
 test("sendBroadcast uses atomic CAS to set SENDING status", () => {
-    assert(broadcastCode.includes("$executeRaw") && broadcastCode.includes("UPDATE Broadcast") && broadcastCode.includes("SET status = 'SENDING'"), "Missing atomic CAS for SENDING status");
+    assert(broadcastCode.includes("$executeRaw") && broadcastCode.includes("UPDATE broadcast") && broadcastCode.includes("SET status = 'SENDING'"), "Missing atomic CAS for SENDING status");
 });
 
 test("sendBroadcast CAS only processes DRAFT/SCHEDULED broadcasts", () => {
@@ -186,12 +186,13 @@ test("Send endpoint validates broadcast ID", () => {
     assert(broadcastSendRoute.includes("Number.isInteger") && broadcastSendRoute.includes("broadcastId"), "Missing ID validation");
 });
 
-test("Send endpoint calls sendBroadcast", () => {
-    assert(broadcastSendRoute.includes("await sendBroadcast(broadcastId)"), "Missing sendBroadcast call");
+test("Send endpoint enqueues broadcast to background queue (F26)", () => {
+    assert(broadcastSendRoute.includes("getNotificationQueue().enqueue"), "Missing enqueue call");
+    assert(broadcastSendRoute.includes("registerBroadcastQueueWorker()"), "Missing worker registration");
 });
 
-test("Send endpoint returns sentCount/failedCount in response", () => {
-    assert(broadcastSendRoute.includes("result.sentCount") && broadcastSendRoute.includes("result.failedCount"), "Missing count in response");
+test("Send endpoint returns queued acknowledgment (async contract)", () => {
+    assert(broadcastSendRoute.includes("queued: true"), "Missing queued acknowledgment");
 });
 
 test("Send endpoint handles errors with appropriate HTTP status", () => {

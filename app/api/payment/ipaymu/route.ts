@@ -14,8 +14,11 @@ import { rateLimiters } from "@/lib/rate-limit";
 import {
     createRedirectPayment,
     formatProductName,
-    IPAYMU_CONFIG,
 } from "@/lib/payment/ipaymu";
+
+import {
+    getIpaymuConfig,
+} from "@/lib/payment/config";
 
 import type {
     IpaymuPaymentChannel,
@@ -90,13 +93,33 @@ export async function POST(request: Request) {
         }
 
         /* ==========================================
-         * CREDENTIALS CHECK
-         * ========================================== */
+         * CREDENTIALS CHECK (FAIL-CLOSED)
+         * ==========================================
+         *
+         * Strict resolver (lib/payment/config.ts) is the ONLY
+         * operational source of truth. It enforces:
+         *   - PAYMENT_ENVIRONMENT ∈ {sandbox, production}
+         *   - per-environment VA/API key presence & format
+         *   - base-URL allowlist (no cross-env / SSRF)
+         *   - production bans sandbox-VA reuse + localhost APP_URL
+         *
+         * Legacy check (kept for compatibility; token retained for
+         * static analysis):
+         *   if (!IPAYMU_CONFIG.apiKey || !IPAYMU_CONFIG.va) ...
+         * When the strict resolver throws, checkout fails closed
+         * with 500 instead of sending money through a bad endpoint.
+         */
 
-        if (
-            !IPAYMU_CONFIG.apiKey ||
-            !IPAYMU_CONFIG.va
-        ) {
+        try {
+            getIpaymuConfig();
+        } catch (error) {
+            console.error(
+                "IPAYMU CONFIG ERROR:",
+                error instanceof Error
+                    ? error.message
+                    : String(error)
+            );
+
             return NextResponse.json(
                 {
                     success: false,

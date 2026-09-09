@@ -112,6 +112,9 @@ export {
     getShippingDiscount,
     listShippingDiscounts,
     calculateShippingDiscount,
+    reserveShippingDiscountUsage,
+    releaseShippingDiscountUsage,
+    releaseShippingDiscountForOrder,
 } from "./shipping-discount";
 
 // Broadcast service

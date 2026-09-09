@@ -1,4 +1,4 @@
-import { rajaOngkirFetch } from "./client";
+import { rajaOngkirFetch } from "../rajaongkir";
 
 export type RajaOngkirLocation = {
     id: number;

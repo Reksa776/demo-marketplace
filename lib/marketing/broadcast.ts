@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { BroadcastType, BroadcastStatus, NotificationChannel as NotificationChannelEnum, Prisma } from "@prisma/client";
 import { getWhatsAppService } from "@/lib/whatsapp/service";
 import { normalizePhoneToJid, isValidIndonesianPhone } from "@/lib/whatsapp/phone";
+import { getNotificationQueue } from "@/lib/notification/queue";
 
 /**
  * VALID BROADCAST STATUS TRANSITIONS
@@ -805,3 +806,31 @@ export async function processScheduledBroadcasts(): Promise<void> {
 // ==========================================
 
 export { VALID_TRANSITIONS, validateStatusTransition };
+
+// ==========================================
+// BACKGROUND WORKER (in-memory queue)
+// ==========================================
+
+/**
+ * Register the broadcast worker on the in-memory notification queue.
+ *
+ * F26 FIX: broadcast sending no longer blocks the HTTP request path.
+ * The send route enqueues a job here and returns immediately; the
+ * worker drains the queue and runs `sendBroadcast` in the background
+ * (500ms latency between messages protects against WhatsApp rate-limit).
+ *
+ * Idempotent: registering again simply replaces the handler with the
+ * same logic, so it is safe to call on every request/module load.
+ *
+ * NOTE: in-memory queue is lost on server restart. For production with
+ * large audiences, swap this for a durable queue (Redis/BullMQ).
+ */
+export function registerBroadcastQueueWorker(
+    queue = getNotificationQueue()
+): void {
+    queue.onProcess<{ broadcastId: number }>(
+        async (payload) => {
+            await sendBroadcast(payload.broadcastId);
+        }
+    );
+}

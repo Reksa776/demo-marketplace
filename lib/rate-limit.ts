@@ -189,4 +189,8 @@ export const rateLimiters = {
     // Repayment — prevent rapid repayment attempts
     repayment: (userId: string) =>
         checkRateLimit(`repay:${userId}`, 5, 5 * 60 * 1000), // 5 per 5 min
+
+    // Shipping cost — public endpoint backed by paid RajaOngkir calls
+    shippingCost: (ip: string) =>
+        checkRateLimit(`shipping:${ip}`, 60, 60 * 1000), // 60 per minute
 };

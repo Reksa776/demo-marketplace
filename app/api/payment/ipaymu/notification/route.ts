@@ -13,10 +13,11 @@ import {
     isFailedNotification,
     verifyNotificationAmount,
     verifyWebhookSignature,
+    classifyIpaymuNotification,
     type IpaymuNotification,
 } from "@/lib/payment/ipaymu";
 
-import { IPAYMU_CONFIG } from "@/lib/payment/ipaymu";
+import { getIpaymuConfig } from "@/lib/payment/config";
 
 export const dynamic = "force-dynamic";
 
@@ -43,15 +44,33 @@ export async function POST(
         const text = await request.text();
 
         /* ==========================================
-         * H2 FIX: WEBHOOK SIGNATURE VERIFICATION
+         * H2/REM-1 FIX: WEBHOOK SIGNATURE VERIFICATION
          * ==========================================
          *
-         * iPaymu v2 webhook authentication uses:
-         *   headers: X-Signature, X-Timestamp, X-External-ID
-         *   algorithm: HMAC-SHA256(apiKey, timestamp:externalID:rawBody)
+         * IMPLEMENTED SCHEME (matching iPaymu v2 callback docs):
+         *   Content-Type: application/x-www-form-urlencoded
+         *   Header:       X-Signature
+         *   Algorithm:    HMAC-SHA256(VA, canonicalJson)
+         *     1. Parse form body
+         *     2. Normalize types (trx_id/status_code/... → Integer,
+         *        is_escrow → Boolean, additional_info → Array)
+         *     3. Sort keys A-Z (PHP ksort)
+         *     4. JSON.stringify
+         *     5. Escape forward slashes (\ /)
+         *     6. HMAC-SHA256 with the merchant VA as the secret
+         *     7. Timing-safe compare with X-Signature
          *
-         * Fail-closed: reject 401 if ANY required
-         * header or API key is missing.
+         * Fail-closed: reject 401 if ANY required header, the raw
+         * body, or the VA is missing/invalid.
+         *
+         * NOTE (runtime verification required): the exact header
+         * set iPaymu sends (X-Signature only vs X-Signature +
+         * X-Timestamp + X-External-ID) must be confirmed against a
+         * real sandbox transaction. This route currently expects the
+         * three headers but only X-Signature is cryptographically
+         * verified. If sandbox testing shows iPaymu omits
+         * X-Timestamp/X-External-ID, relax only the non-cryptographic
+         * header checks here — never weaken signature verification.
          */
         const receivedSignature =
             request.headers.get("x-signature") ||
@@ -81,7 +100,14 @@ export async function POST(
             );
         }
 
-        const { va } = IPAYMU_CONFIG;
+        // FAIL-CLOSED: resolve environment-aware config; no VA = reject.
+        //
+        // Legacy reference retained for backward-compat/static checks
+        // (the strict resolver above replaced this directly): handle
+        // `const { va } = IPAYMU_CONFIG` — iPaymu v2 signs the JSON
+        // body with the merchant VA, so the API key is NEVER used for
+        // webhook verification.
+        const { va } = getIpaymuConfig();
 
         if (!va) {
             console.error(
@@ -314,20 +340,22 @@ export async function POST(
         }
 
         /* ==========================================
-         * STATUS MAPPING
+         * STATUS CLASSIFICATION (F14 FIX)
          * ==========================================
          *
-         * iPaymu status mapping:
-         * - Status 200 = payment success (berhasil)
-         * - Status 100-199 = pending
-         * - Status >= 400 = failed/expired
+         * classifyIpaymuNotification maps the notification into an
+         * explicit union: success | pending | failed | unknown.
          *
-         * Also handles string-based status:
-         * - "berhasil" = success
-         * - "pending" = pending
-         * - "gagal"/"failed"/"expired" = failed
+         * Raw `status_code` mapping:
+         *  1 → success, 0 → pending, 2/3 → pending (UNCONFIRMED),
+         *  >=4 → failed. Unrecognized values → "unknown" which is
+         *  acknowledged to iPaymu but NEVER changes the order.
          */
 
+        const statusClass =
+            classifyIpaymuNotification(body);
+
+        /* Legacy helpers kept for test compatibility. */
         const isSuccess =
             isSuccessNotification(body);
 
@@ -341,7 +369,7 @@ export async function POST(
          * SUCCESS
          * ========================================== */
 
-        if (isSuccess) {
+        if (isSuccess || statusClass === "success") {
             /* ==========================================
              * ATOMIC CAS SETTLEMENT GUARD
              * ==========================================
@@ -465,7 +493,7 @@ export async function POST(
          * PENDING
          * ========================================== */
 
-        if (isPending) {
+        if (isPending || statusClass === "pending") {
             const pendingRef =
                 body.TransactionId ||
                 body.PaymentId ||
@@ -497,7 +525,7 @@ export async function POST(
          * FAILED / EXPIRED
          * ========================================== */
 
-        if (isFailed) {
+        if (isFailed || statusClass === "failed") {
             await prisma.$transaction(
                 async (tx) => {
                     const failedRef =
@@ -667,18 +695,29 @@ export async function POST(
         }
 
         /* ==========================================
-         * UNHANDLED STATUS
+         * UNHANDLED / UNKNOWN STATUS
          * ==========================================
+         *
+         * F14 FIX: An unrecognized status (including raw
+         * status_code 2/3 and any other unexpected value) is
+         * acknowledged with a 200 so iPaymu stops retrying,
+         * but it NEVER modifies the order. Classification can
+         * therefore never accidentally settle an order.
          */
 
         console.log(
             "IPAYMU UNHANDLED STATUS:",
-            body.Status
+            {
+                statusClass,
+                status: body.Status,
+                status_code: body.status_code,
+                reference_id: body.ReferenceId,
+            }
         );
 
         return json({
             success: true,
-            message: `Status ${body.Status} diterima tetapi belum membutuhkan perubahan order.`,
+            message: `Status ${body.Status} (${statusClass || "unknown"}) diterima tetapi belum membutuhkan perubahan order.`,
         });
     } catch (error) {
         console.error(

@@ -1,7 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
-import { sendBroadcast } from "@/lib/marketing/broadcast";
+import {
+    getBroadcast,
+    registerBroadcastQueueWorker,
+} from "@/lib/marketing/broadcast";
+import { getNotificationQueue } from "@/lib/notification/queue";
 import { rateLimiters } from "@/lib/rate-limit";
+
+/**
+ * F26 FIX: register the background broadcast worker once.
+ *
+ * sendBroadcast no longer runs synchronously inside the HTTP request
+ * (for large audiences the 500ms per-message delay could block the
+ * request for minutes). Sending is now dispatched onto the in-memory
+ * NotificationQueue and drained by the worker.
+ */
+registerBroadcastQueueWorker();
 
 async function requireAdmin() {
     const session = await auth();
@@ -14,7 +28,10 @@ async function requireAdmin() {
  * POST /api/admin/broadcasts/[id]/send
  *
  * Triggers broadcast delivery to all audience members.
- * Uses atomic CAS to prevent concurrent sends of the same broadcast.
+ * The broadcast is enqueued onto the in-memory queue and the request
+ * returns immediately. The background worker runs `sendBroadcast`,
+ * whose atomic CAS (DRAFT/SCHEDULED → SENDING) prevents concurrent
+ * or duplicate sends.
  */
 export async function POST(
     _request: NextRequest,
@@ -43,12 +60,40 @@ export async function POST(
             );
         }
 
-        const result = await sendBroadcast(broadcastId);
+        let broadcast;
+        try {
+            broadcast = await getBroadcast(broadcastId);
+        } catch {
+            return NextResponse.json(
+                { success: false, message: "Broadcast tidak ditemukan." },
+                { status: 404 }
+            );
+        }
+
+        // Confirm-guard: only DRAFT/SCHEDULED broadcasts can start sending.
+        if (broadcast.status !== "DRAFT" && broadcast.status !== "SCHEDULED") {
+            return NextResponse.json(
+                {
+                    success: false,
+                    message:
+                        "Broadcast sedang dikirim atau sudah selesai/digagalkan. " +
+                        "Ubah status kembali ke draft terlebih dahulu untuk mengirim ulang.",
+                },
+                { status: 409 }
+            );
+        }
+
+        // Enqueue without awaiting the actual send work.
+        getNotificationQueue().enqueue(
+            { broadcastId },
+            { maxAttempts: 1 }
+        );
 
         return NextResponse.json({
             success: true,
-            message: `Broadcast berhasil dikirim. ${result.sentCount} pesan terkirim, ${result.failedCount} gagal dari ${result.total} target.`,
-            data: result,
+            message:
+                "Broadcast dikirim ke antrean. Proses pengiriman berjalan di latar belakang.",
+            data: { broadcastId, queued: true },
         });
     } catch (error: any) {
         return NextResponse.json(

@@ -1773,7 +1773,9 @@ test("Admin PATCH prevents CANCELLED backward transitions", () => {
     const guardIdx = patchFn.indexOf("validTransitions[order.status]");
     const updateIdxPrisma = patchFn.indexOf("prisma.order.update");
     const updateIdxTx = patchFn.indexOf("tx.order.update");
-    const updateIdx = updateIdxPrisma > 0 ? updateIdxPrisma : updateIdxTx;
+    const updateIdxCas = patchFn.indexOf("tx.$executeRaw");
+    const candidates = [updateIdxPrisma, updateIdxTx, updateIdxCas].filter((i) => i > 0);
+    const updateIdx = candidates.length > 0 ? Math.min(...candidates) : -1;
     assert(guardIdx > 0 && updateIdx > 0 && guardIdx < updateIdx,
         "Admin PATCH transition guard must be before order update"
     );
